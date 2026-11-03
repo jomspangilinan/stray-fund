@@ -3,6 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Stops `next dev` rewriting AGENTS.md.
   agentRules: false,
+  // Lets a phone load the dev server through a temporary Cloudflare tunnel.
+  allowedDevOrigins: ["*.trycloudflare.com"],
   cacheComponents: true,
   partialPrefetching: true,
   async headers() {
