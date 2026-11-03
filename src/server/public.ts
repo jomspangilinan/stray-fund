@@ -1,0 +1,433 @@
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { db } from "./db/client";
+import { cats, sightings, treatments, users } from "./db/schema";
+import { CAPTURED, toInt } from "./ledger";
+import type { Session } from "./session";
+import { getStorage } from "./storage";
+
+/*
+ * The privacy boundary. Every public page and route goes through the whitelists
+ * in this file. Each function builds a new object field by field and never
+ * spreads a database row, so a column added to a table later stays private until
+ * someone adds it here on purpose.
+ *
+ * Never public: exact or fuzzed coordinates, original photo keys, sighting state,
+ * assessments, emails, receipts, who caught a cat.
+ */
+
+const TZ = "Asia/Manila";
+const MAX_CATS = 200;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const dayFormat = new Intl.DateTimeFormat("en-CA", {
+  timeZone: TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** A calendar date in Asia/Manila as YYYY-MM-DD. Time of day is never exposed. */
+export function manilaDate(d: Date): string {
+  return dayFormat.format(d);
+}
+
+export const isUuid = (s: string) => UUID.test(s);
+
+const SEX_LABEL: Record<string, string> = { female: "Female", male: "Male", unknown: "Sex unknown" };
+
+const STATUS_LABEL: Record<string, string> = {
+  spotted: "Spotted",
+  queued: "Waiting for funding",
+  funded: "Funded",
+  booked: "Vet visit booked",
+  in_care: "In care",
+  neutered: "Neutered",
+  adoptable: "Ready for a home",
+  adopted: "Adopted",
+};
+
+const FLAG_LABEL: Record<string, string> = {
+  pregnant: "Pregnant",
+  injured: "Injured",
+  sick: "Sick",
+  kitten: "Kitten",
+};
+
+const TREATMENT_LABEL: Record<string, string> = {
+  neuter: "Neuter",
+  vaccine: "Vaccine",
+  deworming: "Deworming",
+};
+
+export const STATUS_GROUPS = {
+  waiting: ["spotted", "queued", "funded", "booked"],
+  "in-care": ["in_care"],
+  neutered: ["neutered"],
+  home: ["adoptable"],
+} as const;
+export type StatusGroup = keyof typeof STATUS_GROUPS;
+export const STATUS_GROUP_LABEL: Record<StatusGroup, string> = {
+  waiting: "Waiting",
+  "in-care": "In care",
+  neutered: "Neutered",
+  home: "Ready for a home",
+};
+const isGroup = (g: string): g is StatusGroup => Object.hasOwn(STATUS_GROUPS, g);
+
+// ---------- Types ----------
+
+type CatPublicColumns = Pick<
+  typeof cats.$inferSelect,
+  "id" | "name" | "sex" | "status" | "flags" | "areaName" | "bio" | "earTipped" | "createdAt"
+>;
+type CatFull = CatPublicColumns &
+  Pick<typeof cats.$inferSelect, "exactLat" | "exactLng" | "locationApproximate">;
+
+export type TreatmentInput = {
+  id: string;
+  type: string;
+  product: string | null;
+  date: string;
+  nextDue: string | null;
+  vet: string | null;
+};
+
+export type CatContext = {
+  photoKey: string | null;
+  sightingCount: number;
+  treatments: TreatmentInput[];
+  firstSeenAt?: Date | null;
+};
+
+export type JourneyStep = { step: string; done: boolean; date?: string; note?: string };
+
+export type PublicCat = {
+  id: string;
+  name: string;
+  sex: string;
+  status: string;
+  statusLabel: string;
+  area: string;
+  bio: string | null;
+  earTipped: boolean | null;
+  flags: string[];
+  journey: JourneyStep[];
+  photoUrl: string | null;
+  sightingCount: number;
+};
+
+export type PublicSighting = { id: string; date: string; photoUrl: string | null };
+
+export type PublicTreatment = {
+  id: string;
+  type: string;
+  product: string | null;
+  date: string;
+  nextDue: string | null;
+  overdue: boolean;
+  vet: string | null;
+};
+
+export type PublicLedgerRow = {
+  date: string;
+  type: string;
+  amount: number;
+  fee: number | null;
+  cat: string | null;
+  catId: string | null;
+  reason: string | null;
+  paypalId: string | null;
+  status: string;
+  who: string | null;
+};
+
+export type ExactLocation = { lat: number; lng: number; approximate: boolean };
+export type CatForViewer = PublicCat & { exact?: ExactLocation };
+
+// ---------- Journey ----------
+
+type JourneyCat = { status: string; earTipped: boolean | null; firstSeenAt?: Date | null };
+
+const NEUTERED_STATUSES = ["neutered", "adoptable", "adopted"];
+
+function latest(dates: string[]): string | undefined {
+  return dates.length ? [...dates].sort().at(-1) : undefined;
+}
+
+function step(name: string, done: boolean, date?: string, note?: string): JourneyStep {
+  const s: JourneyStep = { step: name, done };
+  if (done && date) s.date = date;
+  if (note) s.note = note;
+  return s;
+}
+
+export function journey(cat: JourneyCat, rows: Pick<TreatmentInput, "type" | "date">[]): JourneyStep[] {
+  const datesOf = (type: string) => rows.filter((t) => t.type === type).map((t) => t.date);
+  const neuterDate = datesOf("neuter").sort()[0];
+  const alreadyNeutered = !neuterDate && cat.earTipped === true;
+  const neutered = Boolean(neuterDate) || alreadyNeutered || NEUTERED_STATUSES.includes(cat.status);
+  const vaccinated = latest(datesOf("vaccine"));
+  const dewormed = latest(datesOf("deworming"));
+  return [
+    step("Spotted", true, cat.firstSeenAt ? manilaDate(cat.firstSeenAt) : undefined),
+    step("Neutered", neutered, neuterDate, alreadyNeutered ? "Already neutered when found" : undefined),
+    step("Vaccinated", Boolean(vaccinated), vaccinated),
+    step("Dewormed", Boolean(dewormed), dewormed),
+    step("Adoptable", cat.status === "adoptable" || cat.status === "adopted"),
+    step("Adopted", cat.status === "adopted"),
+  ];
+}
+
+// ---------- Whitelist serializers ----------
+
+const photoUrl = (key: string | null) => (key ? getStorage().publicUrl(key) : null);
+
+export function publicCat(row: CatPublicColumns, ctx: CatContext): PublicCat {
+  return {
+    id: row.id,
+    name: row.name,
+    sex: SEX_LABEL[row.sex] ?? SEX_LABEL.unknown,
+    status: row.status,
+    statusLabel: STATUS_LABEL[row.status] ?? row.status,
+    area: row.areaName,
+    bio: row.bio ?? null,
+    earTipped: row.earTipped ?? null,
+    flags: (row.flags ?? []).map((f) => FLAG_LABEL[f]).filter((f): f is string => Boolean(f)),
+    journey: journey(
+      { status: row.status, earTipped: row.earTipped ?? null, firstSeenAt: ctx.firstSeenAt ?? row.createdAt },
+      ctx.treatments,
+    ),
+    photoUrl: photoUrl(ctx.photoKey),
+    sightingCount: ctx.sightingCount,
+  };
+}
+
+type SightingInput = {
+  id: string;
+  takenAt: Date | null;
+  createdAt: Date;
+  publicKey: string | null;
+  publicReady: boolean;
+};
+
+export function publicSighting(row: SightingInput): PublicSighting {
+  return {
+    id: row.id,
+    date: manilaDate(row.takenAt ?? row.createdAt),
+    photoUrl: row.publicReady ? photoUrl(row.publicKey) : null,
+  };
+}
+
+export function publicTreatment(row: TreatmentInput, today: string = manilaDate(new Date())): PublicTreatment {
+  return {
+    id: row.id,
+    type: TREATMENT_LABEL[row.type] ?? row.type,
+    product: row.product ?? null,
+    date: row.date,
+    nextDue: row.nextDue ?? null,
+    overdue: row.nextDue != null && row.nextDue < today,
+    vet: row.vet ?? null,
+  };
+}
+
+type LedgerInput = {
+  date: Date | string;
+  type: string;
+  amount: number;
+  fee: number | null;
+  cat: string | null;
+  catId: string | null;
+  reason: string | null;
+  paypalId: string | null;
+  status: string;
+  who: string | null;
+};
+
+/** Mapper only. The ledger query lives with the impact page. `who` is a username, never an email. */
+export function publicLedgerRow(row: LedgerInput): PublicLedgerRow {
+  return {
+    date: typeof row.date === "string" ? row.date : manilaDate(row.date),
+    type: row.type,
+    amount: row.amount,
+    fee: row.fee ?? null,
+    cat: row.cat ?? null,
+    catId: row.catId ?? null,
+    reason: row.reason ?? null,
+    paypalId: row.paypalId ?? null,
+    status: row.status,
+    who: row.who ?? null,
+  };
+}
+
+/** Exact coordinates only for caretakers and vets. Fuzzed ones are never exposed. */
+export function catForViewer(row: CatFull, session: Session | null, ctx: CatContext): CatForViewer {
+  const out: CatForViewer = publicCat(row, ctx);
+  const trusted = session?.role === "caretaker" || session?.role === "vet";
+  if (trusted && row.exactLat != null && row.exactLng != null) {
+    out.exact = { lat: row.exactLat, lng: row.exactLng, approximate: row.locationApproximate };
+  }
+  return out;
+}
+
+// ---------- Queries ----------
+
+const publicCatColumns = {
+  id: cats.id,
+  name: cats.name,
+  sex: cats.sex,
+  status: cats.status,
+  flags: cats.flags,
+  areaName: cats.areaName,
+  bio: cats.bio,
+  earTipped: cats.earTipped,
+  createdAt: cats.createdAt,
+};
+
+type SightingRow = SightingInput & { catId: string | null };
+
+async function loadSightings(catIds: string[]): Promise<SightingRow[]> {
+  if (catIds.length === 0) return [];
+  return db
+    .select({
+      id: sightings.id,
+      catId: sightings.catId,
+      takenAt: sightings.takenAt,
+      createdAt: sightings.createdAt,
+      publicKey: sightings.publicKey,
+      publicReady: sightings.publicReady,
+    })
+    .from(sightings)
+    .where(and(inArray(sightings.catId, catIds), inArray(sightings.state, ["matched", "new_cat"])))
+    .orderBy(asc(sightings.createdAt), asc(sightings.id));
+}
+
+async function loadTreatments(catIds: string[]): Promise<(TreatmentInput & { catId: string })[]> {
+  if (catIds.length === 0) return [];
+  return db
+    .select({
+      id: treatments.id,
+      catId: treatments.catId,
+      type: treatments.type,
+      product: treatments.product,
+      date: treatments.date,
+      nextDue: treatments.nextDue,
+      vet: users.username,
+    })
+    .from(treatments)
+    .leftJoin(users, eq(users.id, treatments.vetId))
+    .where(inArray(treatments.catId, catIds))
+    .orderBy(asc(treatments.date), asc(treatments.id));
+}
+
+function contextFor(
+  catId: string,
+  sights: SightingRow[],
+  treats: (TreatmentInput & { catId: string })[],
+): CatContext {
+  const mine = sights.filter((s) => s.catId === catId);
+  const photo = [...mine].reverse().find((s) => s.publicReady && s.publicKey);
+  const first = mine[0];
+  return {
+    photoKey: photo?.publicKey ?? null,
+    sightingCount: mine.length,
+    firstSeenAt: first ? (first.takenAt ?? first.createdAt) : null,
+    treatments: treats.filter((t) => t.catId === catId),
+  };
+}
+
+async function hydrate(rows: CatPublicColumns[]): Promise<PublicCat[]> {
+  const ids = rows.map((r) => r.id);
+  const [sights, treats] = await Promise.all([loadSightings(ids), loadTreatments(ids)]);
+  return rows.map((r) => publicCat(r, contextFor(r.id, sights, treats)));
+}
+
+/** Newest first, capped. Unknown group names mean all cats. */
+export async function listCats(group: string = "all"): Promise<PublicCat[]> {
+  const where = isGroup(group) ? inArray(cats.status, [...STATUS_GROUPS[group]]) : undefined;
+  const rows = await db
+    .select(publicCatColumns)
+    .from(cats)
+    .where(where)
+    .orderBy(desc(cats.createdAt), asc(cats.id))
+    .limit(MAX_CATS);
+  return hydrate(rows);
+}
+
+export type CatCardData = { cat: PublicCat; sightings: PublicSighting[]; health: PublicTreatment[] };
+
+export async function getCatCard(id: string): Promise<CatCardData | null> {
+  if (!isUuid(id)) return null;
+  const [row] = await db.select(publicCatColumns).from(cats).where(eq(cats.id, id));
+  if (!row) return null;
+  const [sights, treats] = await Promise.all([loadSightings([id]), loadTreatments([id])]);
+  const today = manilaDate(new Date());
+  return {
+    cat: publicCat(row, contextFor(id, sights, treats)),
+    sightings: [...sights].reverse().map(publicSighting),
+    health: treats.map((t) => publicTreatment(t, today)),
+  };
+}
+
+/** The API shape: the public card plus exact location for caretakers and vets only. */
+export async function getCatForViewer(id: string, session: Session | null): Promise<CatForViewer | null> {
+  if (!isUuid(id)) return null;
+  const [row] = await db
+    .select({
+      ...publicCatColumns,
+      exactLat: cats.exactLat,
+      exactLng: cats.exactLng,
+      locationApproximate: cats.locationApproximate,
+    })
+    .from(cats)
+    .where(eq(cats.id, id));
+  if (!row) return null;
+  const [sights, treats] = await Promise.all([loadSightings([id]), loadTreatments([id])]);
+  return catForViewer(row, session, contextFor(id, sights, treats));
+}
+
+export type CollectionEntry = { cat: PublicCat; amount: number };
+
+/** Net positive allocations from this user's captured donations, per cat, summed in SQL. */
+export async function getCollectionEntries(userId: string): Promise<CollectionEntry[]> {
+  const res = await db.execute(sql`
+    select a.cat_id, sum(a.amount)::bigint as amount
+    from allocations a
+    join donations d on d.id = a.donation_id
+    where d.user_id = ${userId} and d.status = ${CAPTURED} and a.cat_id is not null
+    group by a.cat_id
+    having sum(a.amount) > 0
+    order by sum(a.amount) desc, a.cat_id
+  `);
+  const found = (res.rows as { cat_id: string; amount: unknown }[]).map((r) => ({
+    catId: r.cat_id,
+    amount: toInt(r.amount),
+  }));
+  if (found.length === 0) return [];
+  const rows = await db
+    .select(publicCatColumns)
+    .from(cats)
+    .where(inArray(cats.id, found.map((f) => f.catId)));
+  const byId = new Map((await hydrate(rows)).map((c) => [c.id, c]));
+  return found.flatMap((f) => {
+    const cat = byId.get(f.catId);
+    return cat ? [{ cat, amount: f.amount }] : [];
+  });
+}
+
+export async function getCollection(userId: string): Promise<PublicCat[]> {
+  return (await getCollectionEntries(userId)).map((e) => e.cat);
+}
+
+/** Captured net from this user's donations that no cat holds yet. */
+export async function getUnallocated(userId: string): Promise<number> {
+  const res = await db.execute(sql`
+    select coalesce(sum(d.net - coalesce(x.allocated, 0)), 0)::bigint as unallocated
+    from donations d
+    left join (
+      select donation_id, sum(amount) as allocated from allocations group by donation_id
+    ) x on x.donation_id = d.id
+    where d.user_id = ${userId} and d.status = ${CAPTURED}
+  `);
+  const n = toInt((res.rows[0] as { unallocated: unknown }).unallocated);
+  return Math.max(0, n);
+}

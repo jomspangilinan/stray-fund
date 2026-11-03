@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { Bricolage_Grotesque, Figtree } from "next/font/google";
 import "./globals.css";
 import { APP_NAME } from "@/lib/config";
-import { Brand, DemoBar, HeaderSession } from "@/components/SiteChrome";
+import { Brand, DemoBar, HeaderSession, SiteNav } from "@/components/SiteChrome";
 
 const bricolage = Bricolage_Grotesque({
   variable: "--font-bricolage",
@@ -38,6 +38,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <HeaderSession />
           </Suspense>
         </header>
+        <SiteNav />
         <div className="mx-auto w-full max-w-xl flex-1 px-4 pb-16">{children}</div>
       </body>
     </html>

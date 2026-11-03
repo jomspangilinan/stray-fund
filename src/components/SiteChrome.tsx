@@ -28,3 +28,26 @@ export async function HeaderSession() {
   const session = await getSession();
   return <SignIn username={session?.username ?? null} />;
 }
+
+const LINKS = [
+  { href: "/cats", label: "Cats" },
+  { href: "/collection", label: "Collection" },
+  { href: "/catch", label: "Catch" },
+  { href: "/donate", label: "Donate" },
+] as const;
+
+export function SiteNav() {
+  return (
+    <nav aria-label="Main" className="mx-auto w-full max-w-xl px-4 pb-2">
+      <ul className="flex flex-wrap gap-x-5 gap-y-1 text-sm font-bold">
+        {LINKS.map((l) => (
+          <li key={l.href}>
+            <Link href={l.href} className="inline-flex min-h-8 items-center underline-offset-4 hover:underline">
+              {l.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
