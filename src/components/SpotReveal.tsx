@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { AnotherNameButton } from "./AnotherNameButton";
 import { CatAvatar } from "./CatAvatar";
+import { COURT } from "@/lib/courtyard";
 import { EarTipAsk } from "./EarTipAsk";
 import { SaveImage } from "./SaveImage";
 import { SexAsk } from "./SexAsk";
@@ -48,7 +49,7 @@ export function SpotReveal({
         </div>
 
         {reveal.avatar && (
-          <div className="arrive arrive-short">
+          <div className="arrive arrive-short" style={{ "--court-wall": COURT.wall, "--court-floor": COURT.floor } as React.CSSProperties}>
             <div className="arrive-floor" aria-hidden="true" />
             <div className="arrive-cat" aria-hidden="true">
               <CatAvatar avatar={reveal.avatar} id={reveal.catId ?? ""} ribbon={female} ribbonPop={popped} />

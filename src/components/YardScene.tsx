@@ -3,11 +3,13 @@
  * Each stage adds to it and nothing is ever taken away. Purely decorative, so hidden from assistive tech.
  */
 
-const WALL = "#7fb2b4";
-const WALL_DEEP = "#5f969b";
+import { COURT } from "@/lib/courtyard";
+
+const WALL = COURT.wall;
+const WALL_DEEP = COURT.wallDeep;
 const GATE = "#3f7a80";
-const FLOOR = "#e9dec9";
-const STONE = "#d9cbb1";
+const FLOOR = COURT.floor;
+const STONE = COURT.stone;
 const LEAF = "#4f9a6a";
 const LEAF_LIGHT = "#79bd84";
 const POT = "#c9795f";

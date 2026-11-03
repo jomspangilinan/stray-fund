@@ -987,13 +987,13 @@ input[type="checkbox"] {
   height: 10rem;
   overflow: hidden;
   border-radius: var(--r-out);
-  background: #7fb2b4;
+  background: var(--court-wall);
   color: var(--ink);
 }
 .arrive-floor {
   position: absolute;
   inset: 55% 0 0;
-  background: #e9dec9;
+  background: var(--court-floor);
 }
 .arrive-short {
   height: 7rem;

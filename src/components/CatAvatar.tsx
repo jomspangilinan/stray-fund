@@ -1,5 +1,6 @@
 import { useId } from "react";
-import { EYE, FUR, RIBBON, RIBBON_EDGE, catDetails, type Avatar, type CatDetails } from "@/lib/avatar";
+import { EYE, FUR, RIBBON, RIBBON_EDGE, catDetails, type Avatar, type CatDetails, type FurKey } from "@/lib/avatar";
+import { CONTACT, CONTOUR, needsContour } from "@/lib/courtyard";
 import type { CareMark } from "@/lib/yard";
 
 const EAR_LEFT = "M25.5 27 L24 11 L36.5 19.5 Z";
@@ -145,14 +146,17 @@ export function CatAvatar({
 }) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const clip = `av-${uid}`;
-  const ground = avatar.pattern === "calico" ? FUR.white : FUR[avatar.base];
+  const groundKey: FurKey = avatar.pattern === "calico" ? "white" : avatar.base;
+  const ground = FUR[groundKey];
   const tipped = marks.includes("tip");
   const d = catDetails(id, avatar.pattern);
   const tailRings = avatar.pattern === "tabby";
   const pointed = avatar.pattern === "colourpoint";
   const whitePaws = avatar.pattern === "tuxedo" || avatar.pattern === "bicolour";
-  const pawColour = pointed ? FUR[avatar.accent] : whitePaws ? FUR.white : ground;
-  const tailColour = pointed ? FUR[avatar.accent] : ground;
+  const pawKey: FurKey = pointed ? avatar.accent : whitePaws ? "white" : groundKey;
+  const tailKey: FurKey = pointed ? avatar.accent : groundKey;
+  const pawColour = FUR[pawKey];
+  const tailColour = FUR[tailKey];
   // A tail tip reads against the tail: white on a dark cat, the dark colour on a pale one.
   const tipColour = PALE.has(avatar.base) ? FUR[avatar.accent] : FUR.white;
   const tail = pointed && d.tail === "tip" ? "plain" : d.tail;
@@ -169,9 +173,30 @@ export function CatAvatar({
           <path d={EAR_RIGHT} />
         </clipPath>
       </defs>
-      <ellipse cx="40" cy="75.5" rx="25" ry="4" fill={SHAPE} opacity="0.14" />
+      <ellipse cx="40" cy="75.2" rx={CONTACT.rx} ry={CONTACT.ry} fill={CONTACT.colour} opacity={CONTACT.opacity} />
+      {/* A soft edge, only on a coat too close to the paving to read without one. It sits under the fur, so only its outer half shows. */}
+      {(needsContour(groundKey) || needsContour(pawKey)) && (
+        <g opacity={CONTOUR.opacity} fill={CONTOUR.colour} stroke={CONTOUR.colour} strokeWidth={CONTOUR.width * 2} strokeLinejoin="round">
+          {needsContour(groundKey) && (
+            <>
+              <path d={BODY} />
+              <ellipse cx="40" cy="33" rx="17" ry="14" />
+              <path d={ear} />
+              <path d={EAR_RIGHT} />
+            </>
+          )}
+          {needsContour(pawKey) && (
+            <>
+              <ellipse cx="32" cy="74" rx="6.5" ry="3.6" />
+              <ellipse cx="48" cy="74" rx="6.5" ry="3.6" />
+            </>
+          )}
+        </g>
+      )}
       <g className="avatar-tail">
-        {tailColour === FUR.white && <path d={tailPath} fill="none" stroke={FUR.silver} strokeWidth="7.6" strokeLinecap="round" strokeLinejoin="round" />}
+        {needsContour(tailKey) && (
+          <path d={tailPath} fill="none" stroke={CONTOUR.colour} strokeOpacity={CONTOUR.opacity} strokeWidth={6 + CONTOUR.width * 2} strokeLinecap="round" strokeLinejoin="round" />
+        )}
         <path d={tailPath} fill="none" stroke={tailColour} strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
         {tailRings && tail !== "tip" && <path d={tailPath} fill="none" stroke={FUR[avatar.accent]} strokeWidth="6" strokeDasharray="2.6 5" />}
         {tail === "tip" && (

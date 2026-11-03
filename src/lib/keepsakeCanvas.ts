@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { CatAvatar } from "@/components/CatAvatar";
+import { COURT } from "./courtyard";
 import {
   BACK_SLOTS, cropRect, FRAME, fromCatBox, HERO, KEEPSAKE_H, KEEPSAKE_W, NAIL, PHOTO_BOX, standaloneSvg, titleName, type KeepsakeCat, type KeepsakeData,
 } from "./keepsake";
@@ -46,11 +47,11 @@ function ellipsize(ctx: CanvasRenderingContext2D, text: string, width: number): 
 
 function scene(ctx: CanvasRenderingContext2D) {
   const W = KEEPSAKE_W;
-  ctx.fillStyle = "#7fb2b4";
+  ctx.fillStyle = COURT.wall;
   ctx.fillRect(0, 0, W, 1130);
-  ctx.fillStyle = "#5f969b";
+  ctx.fillStyle = COURT.wallDeep;
   ctx.fillRect(0, 930, W, 200);
-  ctx.fillStyle = "#e9dec9";
+  ctx.fillStyle = COURT.floor;
   ctx.fillRect(0, 1130, W, 790);
   // The gate and the window on the wall.
   ctx.fillStyle = "#3f7a80";
@@ -59,14 +60,14 @@ function scene(ctx: CanvasRenderingContext2D) {
   ctx.fillStyle = "#2f666c";
   ctx.beginPath();
   ctx.moveTo(-36, 930); ctx.lineTo(-36, 706); ctx.arc(34, 706, 70, Math.PI, 0); ctx.lineTo(104, 930); ctx.fill();
-  ctx.fillStyle = "#5f969b";
+  ctx.fillStyle = COURT.wallDeep;
   ctx.beginPath(); ctx.roundRect(968, 560, 150, 230, 75); ctx.fill();
   ctx.fillStyle = "#b9dcd8";
   ctx.beginPath(); ctx.roundRect(990, 582, 110, 186, 55); ctx.fill();
-  ctx.strokeStyle = "#5f969b"; ctx.lineWidth = 6;
+  ctx.strokeStyle = COURT.wallDeep; ctx.lineWidth = 6;
   ctx.beginPath(); ctx.moveTo(1045, 582); ctx.lineTo(1045, 768); ctx.moveTo(990, 675); ctx.lineTo(1100, 675); ctx.stroke();
   // Floor boards.
-  ctx.fillStyle = "#d9cbb1";
+  ctx.fillStyle = COURT.stone;
   const boards: [number, number, number, number][] = [
     [30, 1180, 250, 44], [310, 1180, 260, 44], [600, 1180, 220, 44], [850, 1180, 250, 44],
     [-40, 1290, 300, 56], [290, 1290, 300, 56], [620, 1290, 280, 56], [930, 1290, 200, 56],
@@ -121,9 +122,9 @@ export async function composeKeepsake(data: KeepsakeData, photoBlob: Blob): Prom
     others.forEach((img, i) => {
       const s = BACK_SLOTS[i];
       ctx.save();
-      ctx.globalAlpha = 0.62;
+      ctx.globalAlpha = 0.82;
       // Not every browser blurs a canvas draw; where it is ignored they are still faded.
-      ctx.filter = "blur(2.2px) saturate(.8)";
+      ctx.filter = "blur(1.4px) saturate(.85)";
       ctx.drawImage(img, s.x - s.size / 2, s.bottom - s.size, s.size, s.size);
       ctx.restore();
     });
