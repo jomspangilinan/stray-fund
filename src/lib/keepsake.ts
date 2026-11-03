@@ -15,6 +15,11 @@ export const MAX_TITLE_NAME = 30;
 /** The photo opening inside the frame and mat, in picture pixels. */
 export const PHOTO_BOX = { x: 198, y: 418, w: 684, h: 524 } as const;
 export const FRAME = { x: 150, y: 370, w: 780, h: 620, mat: 26 } as const;
+/** The title and the status under it: one ink for both, the largest and smallest title type, and the gap between them. */
+export const TITLE_INK = "#12352A";
+export const TITLE_MAX = 132;
+export const TITLE_MIN = 72;
+export const TITLE_STATUS_GAP = 14;
 export const NAIL = { x: 540, y: 332 } as const;
 
 /** The look-alike in front: bottom centre and side of its square. */

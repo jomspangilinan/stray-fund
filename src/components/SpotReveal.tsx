@@ -81,7 +81,7 @@ export function SpotReveal({
         )}
 
         {catId && reveal.photoUrl && state !== "needs_review" ? (
-          <SaveImage catId={catId} iconClass="left-[3.75rem] top-2" note="below">
+          <SaveImage catId={catId} variant="button">
             {card}
           </SaveImage>
         ) : (

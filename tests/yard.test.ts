@@ -56,15 +56,20 @@ describe("slots", () => {
 });
 
 describe("yard cat size", () => {
-  it("is largest at 1 to 3, today's size at 12, and shrinks smoothly between", () => {
+  it("is largest at 1 to 3, steady from 6 to today's size at 12, and shrinks smoothly between", () => {
     expect(yardScale(1)).toBe(yardScale(3));
     expect(yardScale(12)).toBe(1);
-    expect(yardScale(3)).toBeGreaterThan(1.4);
+    expect(yardScale(3)).toBeGreaterThan(1.9);
     for (let n = 3; n < 12; n++) {
       const step = yardScale(n) - yardScale(n + 1);
       expect(step).toBeGreaterThan(0);
-      expect(step).toBeLessThan(0.1);
+      expect(step).toBeLessThan(0.25);
     }
+  });
+
+  it("makes 1 to 3 cats 30 percent bigger than they were and leaves 6 and 12 as they were", () => {
+    expect(yardScale(1)).toBeCloseTo(1.5 * 1.3, 10);
+    expect(yardScale(6)).toBeCloseTo(1.5 - 0.5 * (3 / 9), 10);
   });
 
   it("keeps every cat inside the stage and clear of the others, with its tag, at every count from 1 to 12", () => {
@@ -78,7 +83,7 @@ describe("yard cat size", () => {
         const p = placeAt(yardSlots(n)[i], scale);
         expect(p.x - p.w * 0.7).toBeGreaterThanOrEqual(-1e-9);
         expect(p.x + p.w * 0.7).toBeLessThanOrEqual(100 + 1e-9);
-        expect(a.cat.t).toBeGreaterThan(90);
+        expect(a.cat.t).toBeGreaterThan(70);
         expect(a.tag.b).toBeLessThanOrEqual(288);
         for (const [j, b] of boxes.entries()) {
           if (j <= i) continue;
@@ -89,20 +94,17 @@ describe("yard cat size", () => {
     }
   });
 
-  it("keeps a name tag off other cats, bar three heads at 11 on a short name", () => {
-    // Tags sit under the feet and a full yard has little room: no tag may cover another cat, except at 11 (three heads).
-    let covered = 0;
+  it("starts the 26 px name tag at the feet line and keeps it off every other cat's body, at every count", () => {
     for (let n = 1; n <= YARD_MAX; n++) {
       const scale = yardScale(n);
       const boxes = yardSlots(n).map((s) => phoneBoxes(s, scale));
-      for (const [i, a] of boxes.entries())
+      for (const [i, a] of boxes.entries()) {
+        expect(a.tag.t).toBe(a.cat.b);
+        expect(a.tag.b - a.tag.t).toBeCloseTo(26, 6);
         for (const [j, b] of boxes.entries())
-          if (i !== j && a.tag.l < b.cat.r && b.cat.l < a.tag.r && a.tag.t < b.cat.b && b.cat.t < a.tag.b) {
-            covered++;
-            expect(n).toBe(11);
-          }
+          if (i !== j) expect(a.tag.l < b.cat.r && b.cat.l < a.tag.r && a.tag.t < b.cat.b && b.cat.t < a.tag.b, `${n} cats: tag ${i} covers cat ${j}`).toBe(false);
+      }
     }
-    expect(covered).toBeLessThanOrEqual(3);
   });
 });
 

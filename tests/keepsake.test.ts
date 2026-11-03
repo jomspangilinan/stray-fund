@@ -6,7 +6,8 @@ import { eq } from "drizzle-orm";
 import { db, closePool } from "../src/server/db/client";
 import { cats, sightings } from "../src/server/db/schema";
 import { RIBBON, type Avatar } from "../src/lib/avatar";
-import { cropRect, fromCatBox, keepsakeDate, keepsakeFileName, otherCats, parseCatBox, PHOTO_BOX, standaloneSvg, titleName, toCatBox } from "../src/lib/keepsake";
+import { cropRect, fromCatBox, HERO, keepsakeDate, keepsakeFileName, otherCats, parseCatBox, PHOTO_BOX, standaloneSvg, TITLE_INK, TITLE_MIN, TITLE_STATUS_GAP, titleName, toCatBox } from "../src/lib/keepsake";
+import { contrast, COURT, edgeFor, KEEPSAKE_EDGE_PX, MIN_CONTRAST } from "../src/lib/courtyard";
 import { getStorage, newPublicKey } from "../src/server/storage";
 import { getKeepsake } from "../src/server/keepsake";
 import { getCatCard } from "../src/server/public";
@@ -90,6 +91,25 @@ describe("title and file name", () => {
     expect(keepsakeFileName("Bituin")).toBe("bituin-stray-fund.png");
     expect(keepsakeFileName("Ningning & Co.")).toBe("ningning-co-stray-fund.png");
     expect(keepsakeFileName("猫")).toBe("cat-stray-fund.png");
+  });
+});
+
+describe("the saved image's type and edge", () => {
+  it("sets the title in the status ink, 3 to 1 or better off the wall, shrinking to 72 and leaving 14 between title and status", () => {
+    expect(TITLE_INK).toBe("#12352A");
+    expect(contrast(TITLE_INK, COURT.wall)).toBeGreaterThanOrEqual(MIN_CONTRAST);
+    expect(TITLE_MIN).toBe(72);
+    expect(TITLE_STATUS_GAP).toBe(14);
+  });
+
+  it("caps the soft edge at 4 px at 1080 wide for a large cat, and leaves the yard's width for a small one", () => {
+    expect(edgeFor(HERO.size) * (HERO.size / 80)).toBeCloseTo(KEEPSAKE_EDGE_PX, 10);
+    expect(KEEPSAKE_EDGE_PX).toBe(4);
+    expect(edgeFor(200)).toBeLessThanOrEqual(0.8);
+    expect(edgeFor(40)).toBe(0.8);
+    const draw = (edge?: number) => renderToStaticMarkup(createElement(CatAvatar, { avatar: { pattern: "solid", base: "cream", accent: "grey" }, id: "c1", edge }));
+    expect(draw()).toContain('stroke-width="1.6"');
+    expect(draw(edgeFor(HERO.size))).not.toContain('stroke-width="1.6"');
   });
 });
 

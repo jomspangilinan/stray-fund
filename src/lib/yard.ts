@@ -25,13 +25,17 @@ export type YardCat = {
 
 /** At 3 cats or fewer a cat is this many times its size at a full yard. */
 export const YARD_FEW = 3;
-export const YARD_BIG = 1.5;
+export const YARD_BIG = 1.95;
+/** Six cats keep the size they always had; the sizes between 3 and 6 slide to it. */
+export const YARD_MID = 6;
+const MID_SCALE = 1.5 - (0.5 * (YARD_MID - YARD_FEW)) / (YARD_MAX - YARD_FEW);
 
-/** Cats scale with how many there are: largest at 1 to 3, today's size at 12, smooth between. */
+/** Cats scale with how many there are: largest at 1 to 3, steady from 6 to today's size at 12, smooth between. */
 export function yardScale(count: number): number {
   if (!(count > YARD_FEW)) return YARD_BIG;
   if (count >= YARD_MAX) return 1;
-  return YARD_BIG - ((YARD_BIG - 1) * (count - YARD_FEW)) / (YARD_MAX - YARD_FEW);
+  if (count <= YARD_MID) return YARD_BIG - ((YARD_BIG - MID_SCALE) * (count - YARD_FEW)) / (YARD_MID - YARD_FEW);
+  return MID_SCALE - ((MID_SCALE - 1) * (count - YARD_MID)) / (YARD_MAX - YARD_MID);
 }
 
 /** Width of a cat as a percent of the yard at a full yard: a little larger toward the front, which reads as nearer. */
@@ -39,10 +43,10 @@ export const widthAt = (y: number): number => 12 + ((y - 50) / 40) * 3;
 
 /** How many cats stand in each row, back to front, for every count from 1 to 12. */
 const ROW_COUNTS: readonly (readonly number[])[] = [
-  [1], [2], [3], [2, 2], [3, 2], [3, 3], [4, 3], [3, 3, 2], [3, 3, 3], [3, 3, 4], [4, 4, 3], [4, 4, 4],
+  [1], [2], [3], [2, 2], [3, 2], [3, 3], [4, 3], [4, 4], [5, 4], [5, 5], [4, 4, 3], [4, 4, 4],
 ];
 /** Where a row's feet rest, as a percent of the yard height: one row, two, or three loose rows, none on the wall. */
-const ROW_Y: readonly (readonly number[])[] = [[83], [56, 90], [53, 65, 92]];
+const ROW_Y: readonly (readonly number[])[] = [[83], [54, 91], [40.5, 65, 92]];
 const ROW_LEFT = 11;
 const ROW_SPAN = 77.5;
 const ROW_STAGGER = 0.475;
@@ -64,7 +68,9 @@ export function yardSlots(count: number): { x: number; y: number }[] {
 }
 
 /** The yard as a phone shows it (390 x 664), and the part of a drawn cat that is cat. Used to keep cats clear. */
-const PHONE = { w: 390, h: 288, tagW: 50, tagH: 18 } as const;
+const PHONE = { w: 390, h: 288, tagW: 64, tagH: 26 } as const;
+/** Where a drawn cat's feet rest inside its square, as a share of its height. The name tag's top edge is this line. */
+export const FEET = 0.9375;
 /** How far a cat strolls sideways, as a share of its own width (the largest --dx the yard sets). */
 const WANDER = 0.2;
 
@@ -82,10 +88,10 @@ export function phoneBoxes(slot: { x: number; y: number }, scale: number): { cat
   const p = placeAt(slot, scale);
   const size = (p.w / 100) * PHONE.w;
   const cx = (p.x / 100) * PHONE.w;
-  const feet = (p.y / 100) * PHONE.h;
+  const feet = (p.y / 100) * PHONE.h - (1 - FEET) * size;
   return {
-    cat: { l: cx - size / 2 + 0.2 * size, r: cx - size / 2 + 0.9 * size, t: feet - 0.88 * size, b: feet },
-    tag: { l: cx - PHONE.tagW / 2, r: cx + PHONE.tagW / 2, t: feet - 4, b: feet - 4 + PHONE.tagH },
+    cat: { l: cx - size / 2 + 0.2 * size, r: cx - size / 2 + 0.9 * size, t: feet - 0.8 * size, b: feet },
+    tag: { l: cx - PHONE.tagW / 2, r: cx + PHONE.tagW / 2, t: feet, b: feet + PHONE.tagH },
   };
 }
 

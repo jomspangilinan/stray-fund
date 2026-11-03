@@ -4,16 +4,16 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { CatAvatar } from "@/components/CatAvatar";
-import { COURT } from "./courtyard";
+import { COURT, edgeFor } from "./courtyard";
 import {
-  BACK_SLOTS, cropRect, FRAME, fromCatBox, HERO, keepsakeDate, KEEPSAKE_H, KEEPSAKE_W, NAIL, PHOTO_BOX, standaloneSvg, titleName, type KeepsakeCat, type KeepsakeData,
+  BACK_SLOTS, cropRect, FRAME, fromCatBox, HERO, keepsakeDate, KEEPSAKE_H, KEEPSAKE_W, NAIL, PHOTO_BOX, standaloneSvg, titleName, TITLE_INK, TITLE_MAX, TITLE_MIN, TITLE_STATUS_GAP, type KeepsakeCat, type KeepsakeData,
 } from "./keepsake";
 
 /** Draws the app's own avatar off screen and reads it back as a standalone picture. */
-function catImage(c: KeepsakeCat): Promise<HTMLImageElement> {
+function catImage(c: KeepsakeCat, size: number): Promise<HTMLImageElement> {
   const host = document.createElement("div");
   const root = createRoot(host);
-  flushSync(() => root.render(createElement(CatAvatar, { avatar: c.avatar, id: c.id, ribbon: c.female })));
+  flushSync(() => root.render(createElement(CatAvatar, { avatar: c.avatar, id: c.id, ribbon: c.female, edge: edgeFor(size) })));
   const svg = standaloneSvg(host.innerHTML);
   root.unmount();
   return loadImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
@@ -104,8 +104,8 @@ export async function composeKeepsake(data: KeepsakeData, photoBlob: Blob): Prom
   try {
     const [photo, hero, others] = await Promise.all([
       loadImage(photoUrl),
-      catImage(data.hero),
-      Promise.all(data.others.map(catImage)),
+      catImage(data.hero, HERO.size),
+      Promise.all(data.others.map((c, i) => catImage(c, BACK_SLOTS[i].size))),
     ]);
     const dims = { w: photo.naturalWidth, h: photo.naturalHeight };
     const crop = cropRect(dims, fromCatBox(data.box, dims));
@@ -130,33 +130,22 @@ export async function composeKeepsake(data: KeepsakeData, photoBlob: Blob): Prom
     });
     ctx.drawImage(hero, HERO.x - HERO.size / 2, HERO.bottom - HERO.size, HERO.size, HERO.size);
 
-    // The title: one line when it fits, otherwise "This is" over the name.
+    // The title: always one line, "This is {name}". The type shrinks to fit down to the smallest size, then the name is cut.
     const name = titleName(data.name);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = TITLE_INK;
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
     ctx.letterSpacing = "-3px";
     const width = 940;
-    const oneLine = `This is ${name}`;
-    const size = fit(ctx, oneLine, family, 800, 132, 88, width);
+    const size = fit(ctx, `This is ${name}`, family, 800, TITLE_MAX, TITLE_MIN, width);
     ctx.font = `800 ${size}px ${family}`;
-    const twoLines = ctx.measureText(oneLine).width > width;
-    if (!twoLines) {
-      ctx.fillText(oneLine, KEEPSAKE_W / 2, 122 + size * 0.86);
-    } else {
-      const nameSize = fit(ctx, name, family, 800, 120, 56, width);
-      ctx.font = `800 ${nameSize}px ${family}`;
-      const shown = ellipsize(ctx, name, width);
-      ctx.fillText(shown, KEEPSAKE_W / 2, 270);
-      ctx.font = "800 84px " + family;
-      ctx.fillText("This is", KEEPSAKE_W / 2, 270 - nameSize * 0.9);
-    }
+    const titleBase = 122 + size * 0.86;
+    ctx.fillText(ellipsize(ctx, `This is ${name}`, width), KEEPSAKE_W / 2, titleBase);
     ctx.letterSpacing = "0px";
-    ctx.fillStyle = "#12352a";
-    // The cat card's own status, quiet under the title. A two-line title sits lower, so it sits a little lower too.
-    const statusSize = fit(ctx, data.statusLabel, family, 700, twoLines ? 32 : 42, 24, width);
+    // The cat card's own status under the title, a fixed gap below its descenders, so a smaller title lifts it and the nail stays clear.
+    const statusSize = fit(ctx, data.statusLabel, family, 700, 42, 24, width);
     ctx.font = `700 ${statusSize}px ${family}`;
-    ctx.fillText(ellipsize(ctx, data.statusLabel, width), KEEPSAKE_W / 2, twoLines ? 304 : 292);
+    ctx.fillText(ellipsize(ctx, data.statusLabel, width), KEEPSAKE_W / 2, titleBase + size * 0.18 + TITLE_STATUS_GAP + statusSize * 0.72);
     // The brand and the day it was saved, side by side at the foot.
     const dateText = keepsakeDate(new Date());
     ctx.textAlign = "left";

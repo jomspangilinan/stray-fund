@@ -137,12 +137,15 @@ export function CatAvatar({
   marks = [],
   ribbon = false,
   ribbonPop = false,
+  edge = CONTOUR.width,
 }: {
   avatar: Avatar;
   id: string;
   marks?: CareMark[];
   ribbon?: boolean;
   ribbonPop?: boolean;
+  /** How far the soft edge shows past the fur, in drawing units (80 across). The saved image passes a thinner one. */
+  edge?: number;
 }) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const clip = `av-${uid}`;
@@ -176,7 +179,7 @@ export function CatAvatar({
       <ellipse cx="40" cy="75.2" rx={CONTACT.rx} ry={CONTACT.ry} fill={CONTACT.colour} opacity={CONTACT.opacity} />
       {/* A soft edge, only on a coat too close to the paving to read without one. It sits under the fur, so only its outer half shows. */}
       {(needsContour(groundKey) || needsContour(pawKey)) && (
-        <g opacity={CONTOUR.opacity} fill={CONTOUR.colour} stroke={CONTOUR.colour} strokeWidth={CONTOUR.width * 2} strokeLinejoin="round">
+        <g opacity={CONTOUR.opacity} fill={CONTOUR.colour} stroke={CONTOUR.colour} strokeWidth={edge * 2} strokeLinejoin="round">
           {needsContour(groundKey) && (
             <>
               <path d={BODY} />
@@ -195,7 +198,7 @@ export function CatAvatar({
       )}
       <g className="avatar-tail">
         {needsContour(tailKey) && (
-          <path d={tailPath} fill="none" stroke={CONTOUR.colour} strokeOpacity={CONTOUR.opacity} strokeWidth={6 + CONTOUR.width * 2} strokeLinecap="round" strokeLinejoin="round" />
+          <path d={tailPath} fill="none" stroke={CONTOUR.colour} strokeOpacity={CONTOUR.opacity} strokeWidth={6 + edge * 2} strokeLinecap="round" strokeLinejoin="round" />
         )}
         <path d={tailPath} fill="none" stroke={tailColour} strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
         {tailRings && tail !== "tip" && <path d={tailPath} fill="none" stroke={FUR[avatar.accent]} strokeWidth="6" strokeDasharray="2.6 5" />}

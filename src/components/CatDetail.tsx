@@ -42,7 +42,7 @@ export function CatDetail({
         </Link>
         {cat.photoUrl ? (
           <div className="mt-1">
-            <SaveImage catId={cat.id} iconClass="right-2 top-2" note="over">
+            <SaveImage catId={cat.id} variant="icon">
               <div className="relative aspect-[4/3] max-h-[32dvh] w-full overflow-hidden rounded-out">
                 <CatPhoto url={cat.photoUrl} name={cat.name} sizes="(min-width: 576px) 36rem, 100vw" caption />
               </div>

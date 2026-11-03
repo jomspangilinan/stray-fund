@@ -25,7 +25,17 @@ describe("the courtyard ground", () => {
   });
 
   it("keeps the paving a mid tone, so a pale coat never matches it again", () => {
-    for (const g of grounds) expect(contrast("#ffffff", g)).toBeGreaterThan(3);
+    for (const g of grounds) expect(contrast("#ffffff", g)).toBeGreaterThanOrEqual(MIN_CONTRAST);
+  });
+
+  it("sets the ground to #A08262 and the stripes from it, about 8 percent darker", () => {
+    expect(COURT.floor).toBe("#A08262");
+    const [f, s] = [COURT.floor, COURT.stone].map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));
+    f.forEach((v, i) => expect(s[i] / v).toBeCloseTo(0.92, 1));
+  });
+
+  it("puts a soft edge on the same coats as before the ground moved, none added to brown or any other", () => {
+    expect(keys.filter(needsContour).sort()).toEqual(["brown", "cream", "ginger", "grey", "silver"]);
   });
 
   it("draws the edge under the fur of a pale cat and none on a white or black one", () => {
