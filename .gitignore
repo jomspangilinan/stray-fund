@@ -13,3 +13,6 @@ next-env.d.ts
 
 # Local photo storage for development (STORAGE_DRIVER=local)
 .data/
+
+# Vision eval inputs (cat photos and synthetic receipts)
+tests/fixtures/vision/
