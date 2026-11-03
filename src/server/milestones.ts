@@ -16,7 +16,8 @@ const ORDER: Milestone[] = ["adopted", "neutered"];
 export function milestonesFor(cat: Pick<PublicCat, "status" | "journey">): Milestone[] {
   const out: Milestone[] = [];
   const step = cat.journey.find((j) => j.step === "Neutered");
-  if (step?.done && !step.note) out.push("neutered");
+  // A dated step comes only from a real neuter treatment, never from status alone.
+  if (step?.done && step.date && !step.note) out.push("neutered");
   if (cat.status === "adopted") out.push("adopted");
   return ORDER.filter((m) => out.includes(m));
 }

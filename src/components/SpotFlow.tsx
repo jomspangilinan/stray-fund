@@ -21,7 +21,7 @@ type Done = {
 };
 type Phase =
   | { kind: "camera" }
-  | { kind: "sending"; startedAt: number; responded: boolean }
+  | { kind: "sending"; startedAt: number; responded: boolean; state?: Done["state"] }
   | { kind: "done"; done: Done }
   | { kind: "error"; message: string };
 
@@ -144,7 +144,7 @@ export function SpotFlow({ username }: { username: string | null }) {
         locationMissing: where.lat === null,
       };
       // Tick every step first, so the list finishes only because the server answered.
-      setPhase({ kind: "sending", startedAt, responded: true });
+      setPhase({ kind: "sending", startedAt, responded: true, state: done.state });
       await new Promise((r) => setTimeout(r, TICKED_MS));
       setPhase({ kind: "done", done });
     } catch {
@@ -244,7 +244,7 @@ export function SpotFlow({ username }: { username: string | null }) {
             sending ? (
               <div role="status" aria-live="polite">
                 <p className="mb-3 font-bold">Checking your photo</p>
-                <ScanChecklist elapsedMs={elapsed} responded={phase.responded} />
+                <ScanChecklist elapsedMs={elapsed} responded={phase.responded} state={phase.state} />
               </div>
             ) : undefined
           }

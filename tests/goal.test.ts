@@ -117,6 +117,15 @@ describe("milestones", () => {
     expect(await findCelebration(u.id, await entriesOf(u.id))).toBeNull();
   });
 
+  it("needs a real neuter treatment, not a neutered status alone", async () => {
+    const u = await mkUser();
+    const c = await mkCat({ status: "neutered" });
+    await donate(u.id, c.id, 5000);
+    const [e] = await entriesOf(u.id);
+    expect(milestonesFor(e.cat)).toEqual([]);
+    expect(await findCelebration(u.id, [e])).toBeNull();
+  });
+
   it("gives a waiting cat no milestone", async () => {
     const u = await mkUser();
     const c = await mkCat({ status: "queued" });

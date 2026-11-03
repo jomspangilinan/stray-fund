@@ -17,7 +17,9 @@ export type ScanProgress = { done: number; active: number | null };
  * How many steps are ticked, and which one is working. Before the response the last step never ticks and
  * stays active however long the wait runs. After the response every step is ticked.
  */
-export function scanProgress(elapsedMs: number, responded: boolean): ScanProgress {
+export function scanProgress(elapsedMs: number, responded: boolean, state?: string): ScanProgress {
+  // A rejected or queued reply never ran the checks, so no step is ticked.
+  if (responded && (state === "rejected" || state === "queued_for_ai")) return { done: 0, active: null };
   if (responded) return { done: SCAN_STEPS.length, active: null };
   const last = SCAN_STEPS.length - 1;
   const ms = Number.isFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs : 0;

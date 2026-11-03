@@ -153,7 +153,7 @@ export function DonateForm({ clientId, username }: { clientId: string; username:
       </fieldset>
 
       <p className="note">
-        Test money only. PayPal takes a fee, shown after you pay.
+        Test money only. PayPal takes a fee (about ₱18 on ₱100 in the sandbox), shown after you pay.
       </p>
 
       <div aria-live="polite" className="grid gap-3">

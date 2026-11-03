@@ -33,6 +33,26 @@ describe("scanProgress", () => {
   });
 });
 
+describe("a reply that never ran the checks", () => {
+  it("ticks nothing for rejected or queued_for_ai", () => {
+    for (const state of ["rejected", "queued_for_ai"] as const) {
+      expect(scanProgress(STEP_MS * 9, true, state)).toEqual({ done: 0, active: null });
+    }
+  });
+
+  it("still finishes every step for a checked result", () => {
+    for (const state of ["new_cat", "matched", "needs_review"] as const) {
+      expect(scanProgress(0, true, state)).toEqual({ done: SCAN_STEPS.length, active: null });
+    }
+  });
+
+  it("renders no ticks and no working step", () => {
+    const out = renderToStaticMarkup(createElement(ScanChecklist, { elapsedMs: 0, responded: true, state: "rejected" }));
+    expect(out).not.toContain('data-done="true"');
+    expect(out).not.toContain('data-active="true"');
+  });
+});
+
 describe("the checklist", () => {
   const html = (elapsedMs: number, responded: boolean) =>
     renderToStaticMarkup(createElement(ScanChecklist, { elapsedMs, responded }));

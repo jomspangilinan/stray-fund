@@ -7,6 +7,15 @@ export type Prediction = { class: string; score: number; bbox: [number, number, 
 export type Box = { x: number; y: number; w: number; h: number };
 export type CatBox = Box & { score: number };
 
+/**
+ * True when the 18 MB model should not be fetched: data saver is on, or the connection is slow.
+ * Missing connection info means load as before.
+ */
+export function skipDetector(c: { saveData?: boolean; effectiveType?: string } | undefined | null): boolean {
+  if (!c) return false;
+  return c.saveData === true || c.effectiveType === "slow-2g" || c.effectiveType === "2g" || c.effectiveType === "3g";
+}
+
 export const MIN_SCORE = 0.5;
 /** Below this many frames a second the hint switches itself off. */
 export const MIN_FPS = 5;

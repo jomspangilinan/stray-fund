@@ -194,6 +194,13 @@ describe("badges", () => {
     expect(await getBadgesFor(u.id)).toEqual([]);
   });
 
+  it("count distinct cats per day, so photos of one cat cannot farm a badge", async () => {
+    const u = await mkUser();
+    const c = await mkCat();
+    for (let i = 0; i < 25; i++) await spot(u.id, c.id, "matched", 10);
+    expect(await getBadgesFor(u.id)).toEqual([BADGE_LABEL.first_spot]);
+  });
+
   it("show beside the name in thanks", async () => {
     const u = await mkUser();
     const c = await mkCat();

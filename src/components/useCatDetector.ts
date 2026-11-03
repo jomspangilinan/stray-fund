@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createLock, LOAD_LIMIT_MS, pickCat, tooSlow, type CatBox, type LockState } from "@/lib/catDetect";
+import { createLock, LOAD_LIMIT_MS, pickCat, skipDetector, tooSlow, type CatBox, type LockState } from "@/lib/catDetect";
 
 export type DetectorView = { state: "off" | "looking" | "found"; box: CatBox | null; video: { w: number; h: number } | null };
 const OFF: DetectorView = { state: "off", box: null, video: null };
@@ -19,6 +19,8 @@ export function useCatDetector(video: HTMLVideoElement | null, enabled: boolean)
 
   useEffect(() => {
     if (!video || !enabled) return;
+    const conn = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+    if (skipDetector(conn)) return;
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let dispose: (() => void) | undefined;

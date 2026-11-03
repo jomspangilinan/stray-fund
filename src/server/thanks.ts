@@ -106,7 +106,12 @@ async function badgesFor(userIds: string[]): Promise<Map<string, string[]>> {
   const ids = sql.join(userIds.map((u) => sql`${u}::uuid`), sql`, `);
   const { rows } = await db.execute(sql`
     select u.id,
-      (select count(*) from sightings s where s.caught_by_user_id = u.id and s.state in ('matched', 'new_cat'))::int as spots,
+      -- Distinct cats per Manila day, so many photos of one cat in a day count once.
+      (select count(*) from (
+        select distinct s.cat_id, (s.created_at at time zone 'Asia/Manila')::date
+        from sightings s
+        where s.caught_by_user_id = u.id and s.state in ('matched', 'new_cat') and s.cat_id is not null
+      ) d)::int as spots,
       exists (
         select 1 from (
           select a.cat_id from allocations a join donations d on d.id = a.donation_id
