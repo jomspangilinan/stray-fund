@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { HIDDEN_IN_DEMO_SVG, hidePrivateInDemo } from "@/server/demoPrivacy";
+import { hiddenInDemoResponse, hidePrivateInDemo, isSampleReceipt } from "@/server/demoPrivacy";
 import { db } from "@/server/db/client";
 import { bookings, receipts, sightings } from "@/server/db/schema";
 import { isUuid } from "@/server/public";
@@ -22,12 +22,14 @@ export async function GET(_req: Request, ctx: { params: Promise<{ kind: string; 
   let key: string | null = null;
   if (kind === "receipt" || kind === "eartip") {
     const [row] = await db
-      .select({ fileKey: receipts.fileKey, earKey: receipts.earTipPhotoKey, vetId: bookings.vetId })
+      .select({ fileKey: receipts.fileKey, earKey: receipts.earTipPhotoKey, vetId: bookings.vetId, sha: receipts.sha256 })
       .from(receipts)
       .innerJoin(bookings, eq(bookings.id, receipts.bookingId))
       .where(eq(receipts.id, id));
     if (!row) return NOT_FOUND();
     if (session.role === "vet" && row.vetId !== session.userId) return NOT_FOUND();
+    // A visitor's receipt or ear-tip photo can show a clinic address or a person: only seeded samples are served in the demo.
+    if (hidePrivateInDemo() && !isSampleReceipt(row.sha)) return hiddenInDemoResponse();
     key = kind === "receipt" ? row.fileKey : row.earKey;
   } else if (kind === "sighting" && session.role === "caretaker") {
     const [row] = await db
@@ -39,14 +41,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ kind: string; 
       if (row.publicReady && row.publicKey) {
         return new Response(null, { status: 302, headers: { Location: getStorage().publicUrl(row.publicKey), "Cache-Control": "private, no-store" } });
       }
-      return new Response(HIDDEN_IN_DEMO_SVG, {
-        headers: {
-          "Content-Type": "image/svg+xml",
-          "Cache-Control": "private, no-store",
-          "X-Content-Type-Options": "nosniff",
-          "Content-Security-Policy": "default-src 'none'; sandbox",
-        },
-      });
+      return hiddenInDemoResponse();
     }
     key = row?.key ?? null;
   }

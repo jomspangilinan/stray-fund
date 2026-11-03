@@ -16,7 +16,7 @@ function Assessment({ a }: { a: NonNullable<SightingItem["assessment"]> }) {
       <p className="font-bold">As read by the AI (may be wrong)</p>
       <p>Cat visible: {a.is_cat ? "yes" : "no"}, photo quality {a.cat_visible_quality}.</p>
       <p>
-        Coat: {a.coat_pattern}, {a.colors.join(", ") || "no colours"}. {a.markings}
+        Coat: {a.coat_pattern}, {a.colors.join(", ") || "no colours"}.{a.markings ? ` ${a.markings}` : ""}
       </p>
       <p>Suggested name: {a.suggested_name}.</p>
       <p>Flags: {Object.entries(a.flags).filter(([, v]) => v).map(([k]) => k).join(", ") || "none"}.</p>

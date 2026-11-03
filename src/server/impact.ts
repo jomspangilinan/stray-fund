@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db, type Tx } from "./db/client";
 import { CAPTURED, getPoolStatus, toInt, type PoolStatus } from "./ledger";
+import { PERSONAS } from "./session";
 import { NEUTERED_CATS_SQL, publicLedgerRow, STATUS_GROUPS, type PublicLedgerRow } from "./public";
 
 /*
@@ -61,6 +62,9 @@ export async function getImpact(): Promise<Impact> {
   );
 }
 
+/** The seeded demo accounts are roles, not people: the ledger never prints their usernames (thanks.ts does the same). */
+const DEMO_NAMES = sql.join(Object.values(PERSONAS).map((n) => sql`${n}`), sql`, `);
+
 const PAYOUT_TYPE = { deposit: "vet_deposit", balance: "vet_balance" } as const;
 
 /**
@@ -74,21 +78,21 @@ async function ledgerRows(tx: Tx): Promise<PublicLedgerRow[]> {
       select d.created_at, to_char(d.created_at at time zone 'Asia/Manila', 'YYYY-MM-DD') as day, 'donation' as type, d.gross as amount, d.paypal_fee as fee,
              null::text as cat, null::uuid as cat_id, null::text as reason,
              coalesce(d.paypal_capture_id, d.paypal_order_id) as paypal_id,
-             d.status, case when u.id is null then 'Anonymous' when u.show_name_in_thanks then u.username else 'A neighbour' end as who
+             d.status, case when u.id is null then 'Anonymous' when u.show_name_in_thanks and u.username not in (${DEMO_NAMES}) then u.username else 'A neighbour' end as who
       from donations d left join users u on u.id = d.user_id
       where d.status = ${CAPTURED}
       union all
       select r.created_at, to_char(r.created_at at time zone 'Asia/Manila', 'YYYY-MM-DD'), 'refund', r.gross_delta, r.fee_delta,
              null::text, null::uuid, null::text, r.paypal_ref,
              case r.kind when 'refund' then 'refunded' when 'reversal' then 'reversed' else 'denied' end,
-             case when u.id is null then 'Anonymous' when u.show_name_in_thanks then u.username else 'A neighbour' end
+             case when u.id is null then 'Anonymous' when u.show_name_in_thanks and u.username not in (${DEMO_NAMES}) then u.username else 'A neighbour' end
       from donation_reversals r
       join donations d on d.id = r.donation_id and d.status = ${CAPTURED}
       left join users u on u.id = d.user_id
       union all
       select p.created_at, to_char(p.created_at at time zone 'Asia/Manila', 'YYYY-MM-DD'), case p.kind when 'deposit' then ${PAYOUT_TYPE.deposit} else ${PAYOUT_TYPE.balance} end,
              p.amount, p.fee, c.name, p.cat_id, a.reason,
-             coalesce(p.paypal_payout_batch_id, p.paypal_item_id), p.status, v.username
+             coalesce(p.paypal_payout_batch_id, p.paypal_item_id), p.status, case when v.username in (${DEMO_NAMES}) then 'A partner vet' else v.username end
       from payouts p
       join cats c on c.id = p.cat_id
       join agent_actions a on a.id = p.action_id

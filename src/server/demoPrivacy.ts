@@ -28,3 +28,18 @@ export const HIDDEN_IN_DEMO_SVG =
 export function placeForStaff<T extends { lat: number; lng: number; approximate: boolean }>(exact: T | null): { exact: T | null; exactHidden: boolean } {
   return hidePrivateInDemo() ? { exact: null, exactHidden: true } : { exact, exactHidden: false };
 }
+
+/** Seeded sample receipts carry an all-zero hash prefix that no real file can have. Only these may be served in the demo. */
+export const isSampleReceipt = (sha256: string): boolean => /^0{63}[0-9a-f]$/.test(sha256);
+
+/** The plain "Hidden in the demo" picture as a response. */
+export function hiddenInDemoResponse(): Response {
+  return new Response(HIDDEN_IN_DEMO_SVG, {
+    headers: {
+      "Content-Type": "image/svg+xml",
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+    },
+  });
+}

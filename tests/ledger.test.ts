@@ -16,6 +16,7 @@ import {
   getPoolStatus,
   returnSurplus,
 } from "../src/server/ledger";
+import { getLedger } from "../src/server/impact";
 import { truncateAll } from "./helpers/db";
 
 let seq = 0;
@@ -279,3 +280,27 @@ describe("ledger", () => {
 function returnSurplus_(catId: string, amount: number) {
   return withColonyLock((tx) => returnSurplus(tx, catId, amount));
 }
+
+describe("ledger names", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+  it("a demo account prints as A neighbour (and a demo vet as A partner vet), a real name is kept", async () => {
+    const [demo] = await db.insert(users).values({ username: "demo_neighbour", role: "donor" }).returning();
+    const [real] = await db.insert(users).values({ username: "real_donor", role: "donor" }).returning();
+    await db.insert(donations).values([
+      { userId: demo.id, gross: 10000, paypalFee: 0, net: 10000, paypalOrderId: "O-D", status: "captured" },
+      { userId: real.id, gross: 10000, paypalFee: 0, net: 10000, paypalOrderId: "O-R", status: "captured" },
+    ]);
+    const cat = await makeCat();
+    const [vet] = await db.insert(users).values({ username: "demo_vet", role: "vet" }).returning();
+    const [booking] = await db.insert(bookings).values({ catId: cat.id, vetId: vet.id, packagePrice: 150000, status: "booked" }).returning();
+    const [action] = await db.insert(agentActions).values({ action: "payout", reason: "test", status: "done" }).returning();
+    await db.insert(payouts).values({ catId: cat.id, bookingId: booking.id, payeeUserId: vet.id, amount: 1000, fee: 0, kind: "deposit", actionId: action.id, status: "succeeded" });
+    const who = (await getLedger()).map((r) => r.who);
+    expect(JSON.stringify(who)).not.toContain("demo_");
+    expect(who).toContain("A neighbour");
+    expect(who).toContain("A partner vet");
+    expect(who).toContain("real_donor");
+  });
+});

@@ -8,6 +8,10 @@ describe("safeBio: a public bio describes the cat, never a place", () => {
     "Sleepy tabby with a notched ear, gentle with kittens.",
     "I think she is shy, but she likes a quiet feed.",
   ];
+  const normal = ["Luna naps in the corner and purrs at the block party.", "Luna loves a food drive and a sunny park bench.", "A mercury-grey cat, calm and slow."];
+  for (const bio of normal) {
+    it(`keeps normal words (cat named Luna): ${bio}`, () => expect(safeBio(bio, "Luna")).toBe(bio));
+  }
   for (const bio of keep) {
     it(`keeps: ${bio}`, () => expect(safeBio(bio, "Muning")).toBe(bio));
   }
@@ -34,6 +38,10 @@ describe("safeBio: a public bio describes the cat, never a place", () => {
     "Hangs near Puregold",
     "Lives near the barangay hall.",
     "Calm cat\u0000hidden",
+    "Naps on Luna Street at number nine.",
+    "Waits at Luna Park every night.",
+    "Seen near Mercury Drug.",
+    "Lives on the 4th block of the drive.",
   ];
   for (const bio of hostile) {
     it(`drops to the generic line: ${JSON.stringify(bio)}`, () => expect(safeBio(bio, "Muning")).toBe(GENERIC_BIO));
@@ -49,10 +57,10 @@ describe("safeBio: a public bio describes the cat, never a place", () => {
 
 describe("nameIsSafe: a name from the photo has no place or number in it", () => {
   it("accepts ordinary names", () => {
-    for (const n of ["Mocha", "Muning", "Little stray", "Biscoy", "Tikoy"]) expect(nameIsSafe(n)).toBe(true);
+    for (const n of ["Mocha", "Muning", "Little stray", "Biscoy", "Tikoy", "Luna", "Mercury", "Park", "Corner"]) expect(nameIsSafe(n)).toBe(true);
   });
   it("rejects digits, place words and area names", () => {
-    for (const n of ["Gate 5", "Mercury", "Rizal", "Market Cat", "San Antonio", "Brgy Boy", "Corner", "Jollibee", "Station 9"])
+    for (const n of ["Gate 5", "Mercury Drug", "Luna Street", "Rizal", "Market Cat", "San Antonio", "Brgy Boy", "Jollibee", "Station 9"])
       expect(nameIsSafe(n)).toBe(false);
   });
 });

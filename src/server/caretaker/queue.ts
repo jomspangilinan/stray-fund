@@ -1,10 +1,10 @@
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import { AssessmentSchema, ReceiptSchema, type ReceiptReading } from "../ai/schemas";
+import { AssessmentSchema, ReceiptSchema, type Assessment, type ReceiptReading } from "../ai/schemas";
 import { db } from "../db/client";
 import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reviewRequests, sightings, users, wakeups } from "../db/schema";
 import { COLONY } from "@/lib/config";
 import { hidePrivateInDemo, maskEmail, placeForStaff } from "../demoPrivacy";
-import { safeBio } from "../placeText";
+import { bioIsSafe, nameIsSafe, safeBio } from "../placeText";
 import { needsHumanTick, regionsOf } from "../photoGate";
 import { depositPaidOn, reasonMessages } from "../vetFlow";
 import { manilaDate } from "../public";
@@ -30,6 +30,17 @@ export type PayoutItem = {
   /** For caretakers only. Never leaves this console. */
   lastGatewayError: string | null;
 };
+
+/** The AI's free text reaches the open demo desk only after the public-card filters: a visitor's photo may show a sign or a shop. */
+function demoAssessment(a: Assessment): Assessment {
+  return {
+    ...a,
+    short_bio: safeBio(a.short_bio, a.suggested_name),
+    markings: bioIsSafe(a.markings, a.suggested_name) ? a.markings : "",
+    suggested_name: nameIsSafe(a.suggested_name) ? a.suggested_name : "Little stray",
+    colors: a.colors.filter((c) => nameIsSafe(c)),
+  };
+}
 
 export type SightingItem = {
   id: string;
@@ -157,7 +168,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
       catName,
       ...placeForStaff(exactOf(s.exactLat, s.exactLng)),
       area: COLONY.area_name,
-      assessment: parsed.success ? (hidePrivateInDemo() ? { ...parsed.data, short_bio: safeBio(parsed.data.short_bio, parsed.data.suggested_name) } : parsed.data) : null,
+      assessment: parsed.success ? (hidePrivateInDemo() ? demoAssessment(parsed.data) : parsed.data) : null,
       candidates: ids.flatMap((id) => (nameOf.has(id) ? [{ id, name: nameOf.get(id)! }] : [])),
     };
   });

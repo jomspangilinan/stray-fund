@@ -11,14 +11,14 @@ export const GENERIC_BIO = "A friendly neighbourhood cat.";
 
 /** Words that point at a place. Whole words, any case. */
 const PLACE_WORDS = [
-  "street", "st", "road", "rd", "avenue", "ave", "boulevard", "blvd", "lane", "drive", "highway", "hwy", "alley", "corner",
-  "barangay", "brgy", "purok", "sitio", "subdivision", "village", "district", "city", "town", "province", "compound", "block",
+  "street", "st", "road", "rd", "avenue", "ave", "boulevard", "blvd", "lane", "highway", "hwy", "alley",
+  "barangay", "brgy", "purok", "sitio", "subdivision", "village", "district", "city", "town", "province", "compound",
   "market", "mall", "store", "shop", "sari-sari", "supermarket", "pharmacy", "drugstore", "bakery", "restaurant", "cafe", "bank",
-  "school", "church", "chapel", "hospital", "clinic", "plaza", "park", "terminal", "station", "building", "tower", "condo",
+  "school", "church", "chapel", "hospital", "clinic", "plaza", "terminal", "station", "building", "tower", "condo",
   "apartment", "house", "gate", "sign", "signboard", "billboard", "plate", "address", "number", "hall", "office", "factory",
   "warehouse", "jeepney", "tricycle", "near", "behind", "outside", "beside", "opposite", "across",
-  "rizal", "mabini", "bonifacio", "quezon", "aguinaldo", "burgos", "luna", "magsaysay", "osmena", "roxas", "jollibee",
-  "mcdonalds", "puregold", "robinsons", "ayala", "mercury", "watsons", "seveneleven", "lawson",
+  "rizal", "mabini", "bonifacio", "quezon", "aguinaldo", "burgos", "magsaysay", "osmena", "roxas", "jollibee",
+  "mcdonalds", "puregold", "robinsons", "ayala", "drug", "watsons", "seveneleven", "lawson",
 ];
 
 /** The colony's own area words, from the same config the card uses. */

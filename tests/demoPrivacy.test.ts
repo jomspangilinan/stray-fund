@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { closePool, db } from "../src/server/db/client";
-import { bookings, cats, sightings, users } from "../src/server/db/schema";
+import { bookings, cats, receipts, sightings, users } from "../src/server/db/schema";
 import { truncateAll } from "./helpers/db";
 import { gpsJpeg } from "./helpers/images";
 
@@ -193,5 +193,79 @@ describe("I1: DEMO_MODE off, real staff see what they need", () => {
     expect(dash.fundedCats[0].exact).toMatchObject({ lat: LAT, lng: LNG });
     expect(dash.bookings[0]).toMatchObject({ exactHidden: false });
     expect((await getVetBooking(vet.id, booking.id))!.booking.exact).toMatchObject({ lat: LAT });
+  });
+});
+
+describe("G3 fix: receipt and ear-tip photos in the demo", () => {
+  async function receiptFor(vetId: string, sha: string) {
+    const { cat } = await world();
+    const [booking] = await db.insert(bookings).values({ catId: cat.id, vetId, packagePrice: 150000, status: "confirmed", scheduledFor: new Date() }).returning();
+    const fileKey = (await storeOriginal(await gpsJpeg())).key;
+    const earKey = (await storeOriginal(await gpsJpeg())).key;
+    const [r] = await db.insert(receipts).values({ bookingId: booking.id, fileKey, sha256: sha, earTipPhotoKey: earKey, verification: "needs_review" }).returning();
+    return r;
+  }
+  const getImg = (kind: string, id: string) => imageGet(new Request("http://x"), { params: Promise.resolve({ kind, id }) });
+  const UPLOADED = "ab".repeat(32);
+  const SAMPLE = "0".repeat(63) + "1";
+
+  for (const role of ["caretaker", "vet"] as const) {
+    it(`a visitor's upload shows 'Hidden in the demo' to the demo ${role}`, async () => {
+      const [vet] = await db.select().from(users).where(eq(users.username, "demo_vet"));
+      const s = await asPersona(role);
+      const r = await receiptFor(vet?.id ?? s.userId, UPLOADED);
+      for (const kind of ["receipt", "eartip"]) {
+        const res = await getImg(kind, r.id);
+        expect(res.headers.get("content-type")).toBe("image/svg+xml");
+        expect(await res.text()).toContain("Hidden in the demo");
+      }
+    });
+    it(`a seeded sample receipt is still served to the demo ${role}`, async () => {
+      const [vet] = await db.select().from(users).where(eq(users.username, "demo_vet"));
+      const s = await asPersona(role);
+      const r = await receiptFor(vet?.id ?? s.userId, SAMPLE);
+      expect((await getImg("receipt", r.id)).headers.get("content-type")).toBe("image/jpeg");
+    });
+  }
+
+  it("the demo neighbour gets a 404, and a missing receipt stays 404", async () => {
+    const s = await asPersona("neighbour");
+    const r = await receiptFor(s.userId, UPLOADED);
+    expect((await getImg("receipt", r.id)).status).toBe(404);
+    await asPersona("caretaker");
+    expect((await getImg("receipt", "00000000-0000-4000-8000-0000000000aa")).status).toBe(404);
+  });
+
+  it("with DEMO_MODE off a real caretaker still gets the real photo", async () => {
+    vi.stubEnv("DEMO_MODE", "false");
+    const [u] = await db.insert(users).values({ username: "real_ct", role: "caretaker" }).returning();
+    jar.set(SESSION_COOKIE, await signSession({ userId: u.id, role: "caretaker", username: u.username }));
+    const [v] = await db.insert(users).values({ username: "real_vt", role: "vet" }).returning();
+    const r = await receiptFor(v.id, UPLOADED);
+    expect((await getImg("eartip", r.id)).headers.get("content-type")).toBe("image/jpeg");
+  });
+});
+
+describe("G3 fix: the demo desk's AI text goes through the filters", () => {
+  it("markings, suggested name and colours with a place never reach the demo desk, and a real desk still sees them", async () => {
+    const { waiting } = await world();
+    await db.update(sightings).set({
+      assessment: {
+        is_cat: true, cat_visible_quality: "good", reject_reason: "none", coat_pattern: "tabby", colors: ["orange", "Mercury Drug"],
+        markings: "Sign says Rizal Ave 12", flags: { kitten: false, pregnant: false, injured: false, sick: false }, probably_female_by_coat: false,
+        suggested_name: "Gate 5", short_bio: "Fine cat.", sensitive_regions: [], no_sensitive_content: true, review_reason: "ai_unusable", candidate_cat_ids: [],
+      },
+    }).where(eq(sightings.id, waiting.id));
+    await asPersona("caretaker");
+    const a = (await getCaretakerQueue()).sightings.find((x) => x.id === waiting.id)!.assessment!;
+    expect(a).toMatchObject({ coat_pattern: "tabby", colors: ["orange"], markings: "", suggested_name: "Little stray" });
+    const text = JSON.stringify(a);
+    expect(text).not.toContain("Rizal");
+    expect(text).not.toContain("Gate");
+    vi.stubEnv("DEMO_MODE", "false");
+    const [u] = await db.insert(users).values({ username: "real_ct2", role: "caretaker" }).returning();
+    jar.set(SESSION_COOKIE, await signSession({ userId: u.id, role: "caretaker", username: u.username }));
+    const raw = (await getCaretakerQueue()).sightings.find((x) => x.id === waiting.id)!.assessment!;
+    expect(raw.markings).toBe("Sign says Rizal Ave 12");
   });
 });
