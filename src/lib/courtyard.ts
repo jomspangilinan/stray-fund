@@ -13,7 +13,7 @@ export const COURT = {
 
 /** The soft shadow a cat casts on the ground, and the thin edge that carries a coat the ground cannot. */
 export const CONTACT = { colour: "#12352a", opacity: 0.26, rx: 27, ry: 4.6 } as const;
-export const CONTOUR = { colour: "#12352a", opacity: 0.75, width: 1.6 } as const;
+export const CONTOUR = { colour: "#12352a", opacity: 0.75, width: 1.2 } as const;
 
 const channel = (v: number) => {
   const c = v / 255;

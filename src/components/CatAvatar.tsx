@@ -221,9 +221,12 @@ export function CatAvatar({
       {d.face === "blaze" && blazeOk && <path d="M40 19.5 L37.6 35.5 L42.4 35.5 Z" fill={FUR.cream} />}
       {d.face === "cheek" && <ellipse cx={d.flip ? 49.5 : 30.5} cy="39" rx="4.2" ry="3.2" fill={FUR[avatar.accent]} />}
       {ribbon === true && (
+        // On the crown at the base of the left ear, tilted. It stays clear of the eyes and of the ear's inner colour.
         <g className={ribbonPop === true ? "avatar-ribbon avatar-ribbon-pop" : "avatar-ribbon"}>
-          <path d="M40 24.2 L35.9 21.5 Q34.6 24.2 35.9 26.9 Z M40 24.2 L44.1 21.5 Q45.4 24.2 44.1 26.9 Z" fill={RIBBON} stroke={RIBBON_EDGE} strokeWidth="0.9" strokeLinejoin="round" />
-          <circle cx="40" cy="24.2" r="1.7" fill={RIBBON} stroke={RIBBON_EDGE} strokeWidth="0.9" />
+          <g transform="translate(39.2 21.2) rotate(-18) scale(1.15)">
+            <path d="M0 0 L-4 -2.7 Q-5.3 0 -4 2.7 Z M0 0 L4 -2.7 Q5.3 0 4 2.7 Z" fill={RIBBON} stroke={RIBBON_EDGE} strokeWidth="0.9" strokeLinejoin="round" />
+            <circle r="1.7" fill={RIBBON} stroke={RIBBON_EDGE} strokeWidth="0.9" />
+          </g>
         </g>
       )}
       <g className="avatar-eyes">

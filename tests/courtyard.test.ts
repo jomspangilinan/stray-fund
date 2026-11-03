@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { CatAvatar } from "../src/components/CatAvatar";
-import { FUR, type FurKey } from "../src/lib/avatar";
+import { FUR, RIBBON, RIBBON_EDGE, type FurKey } from "../src/lib/avatar";
 import { blend, CONTOUR, COURT, MIN_CONTRAST, contrast, needsContour } from "../src/lib/courtyard";
 
 const keys = Object.keys(FUR) as FurKey[];
@@ -34,5 +34,19 @@ describe("the courtyard ground", () => {
     expect(draw("silver")).toContain(`stroke="${CONTOUR.colour}"`);
     expect(draw("white")).not.toContain(`stroke="${CONTOUR.colour}"`);
     expect(draw("black")).not.toContain(`stroke="${CONTOUR.colour}"`);
+  });
+
+  it("keeps the blue ribbon readable on every coat, by its fill or by its white edge", () => {
+    for (const k of keys) expect(Math.max(contrast(RIBBON, FUR[k]), contrast(RIBBON_EDGE, FUR[k])), k).toBeGreaterThanOrEqual(MIN_CONTRAST);
+  });
+
+  it("sets the ribbon on the crown, tilted, above the eyes", () => {
+    const html = renderToStaticMarkup(createElement(CatAvatar, { avatar: { pattern: "solid", base: "cream", accent: "grey" }, id: "c1", ribbon: true }));
+    const at = /<g transform="translate\(([\d.]+) ([\d.]+)\) rotate\((-?\d+)\)/.exec(html);
+    expect(at).not.toBeNull();
+    const [, x, y, tilt] = at!;
+    expect(Number(y)).toBeLessThan(24);
+    expect(Math.abs(Number(x) - 40)).toBeLessThan(4);
+    expect(Number(tilt)).not.toBe(0);
   });
 });
