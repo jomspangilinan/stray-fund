@@ -25,7 +25,21 @@ A cat's card also has a Save image button that makes a 9:16 picture of the cat.
 
 ## Why PayPal
 
-The whole idea is that money moves visibly. Checkout takes donations, Payouts pays the vet, and webhooks tell the app what actually settled. Each payout carries a stable `sender_batch_id`, so a retry can't pay twice. The PayPal agent toolkit gives the treasurer read-only access to orders. The ledger's PayPal reference column lets anyone match a row to a PayPal record.
+The whole idea is that money moves visibly. Checkout takes donations, Payouts pays the vet, and webhooks tell the app what actually settled. Each payout carries a stable `sender_batch_id`, so a retry can't pay twice. The PayPal agent toolkit gives the treasurer read-only access to orders and transactions, with personal details removed. The ledger's PayPal reference column lets anyone match a row to a PayPal record.
+
+## How AI and PayPal move money together
+
+The AI decides what should happen next. Code decides whether it may happen and how much. PayPal moves the money.
+
+| Step | What the AI does | What PayPal does |
+|---|---|---|
+| Donate | Nothing | A neighbour approves in PayPal Checkout. The server captures the order, and a webhook confirms it |
+| Choose a cat | Looks at the waiting cats and the fund, calls `fund_next_cat`, writes why | Nothing. The fund sets the money aside in the app's own ledger |
+| Pay the deposit | After a vet books, calls `pay_vet_deposit` | If the money gate passes, Payouts sends the vet the deposit. Code sets the amount and the payee |
+| Check the proof | Reads the receipt. Code compares it with the booking | Nothing |
+| Pay the balance | Calls `release_vet_balance` | After the checks and a caretaker's yes, Payouts sends the balance. A webhook reports the result |
+
+The AI has no tool that takes an amount or a PayPal address, and its PayPal toolkit tools can only read.
 
 ## How the AI treasurer is bounded
 
