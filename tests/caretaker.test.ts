@@ -484,6 +484,7 @@ describe("private evidence images", () => {
   const get = (kind: string, id: string) => imageGet(new Request(`http://x/api/caretaker/images/${kind}/${id}`), { params: Promise.resolve({ kind, id }) });
 
   it("streams the receipt and ear-tip images to a caretaker and to the booking's own vet only", async () => {
+    vi.stubEnv("DEMO_MODE", "false"); // real staff get the real photo; the demo hides uploads (tests/demoPrivacy.test.ts)
     const w = await evidenceWorld();
     for (const kind of ["receipt", "eartip"]) {
       const res = await get(kind, w.receipt.id);
