@@ -1,5 +1,6 @@
 import { config } from "dotenv";
 import { runWorkerLoops } from "../server/agent/worker";
+import { treasurerClient } from "../server/ai/subscription";
 import { closePool } from "../server/db/client";
 
 // Local development only. In production the environment is already set and this file is absent.
@@ -14,7 +15,7 @@ async function main(): Promise<void> {
     });
   }
   console.log("[worker] started");
-  await runWorkerLoops({}, stop.signal);
+  await runWorkerLoops({ client: treasurerClient() }, stop.signal);
   await closePool();
   console.log("[worker] stopped");
 }

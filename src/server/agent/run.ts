@@ -153,8 +153,8 @@ function textOf(message: { content: { type: string; text?: string }[] } | undefi
 }
 
 /**
- * One run of the treasurer. Always Bedrock, since the development CLI route cannot call
- * tools. A stop other than end_turn is returned, not thrown, so the caller can apply the
+ * One run of the treasurer. The client is Bedrock unless the caller passes another, which only
+ * the local claude-cli route does. A stop other than end_turn is returned, not thrown, so the caller can apply the
  * retry rules. Tools run only on a completed tool_use turn, so a refusal or a truncated
  * turn never moves anything.
  */

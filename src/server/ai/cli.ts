@@ -139,6 +139,35 @@ function promptFor(files: string[], text: string): string {
 }
 
 /**
+ * One bare call to the local `claude` CLI with no tools at all, run in a fresh empty directory.
+ * Returns stdout. Throws on a timeout, a non-zero exit or a missing binary, with nothing quoted.
+ */
+export async function runClaudeText(args: string[]): Promise<string> {
+  await acquire();
+  let dir: string | null = null;
+  try {
+    dir = await mkdtemp(path.join(tmpdir(), "stray-ai-"));
+    await chmod(dir, 0o700);
+    try {
+      const { stdout } = await exec("claude", args, {
+        cwd: dir,
+        env: childEnv(),
+        timeout: CLI_TIMEOUT_MS,
+        maxBuffer: CLI_MAX_OUTPUT_BYTES,
+        killSignal: "SIGKILL",
+      });
+      return stdout;
+    } catch (e) {
+      logFailure(e);
+      throw new Error("The claude CLI call failed");
+    }
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+    release();
+  }
+}
+
+/**
  * One call to the local `claude` CLI, on the developer's subscription. The child can only use the
  * Read tool, runs in restricted mode, and sees only a fresh private directory holding the images.
  */
