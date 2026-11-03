@@ -6,6 +6,8 @@ import { GoalCard } from "@/components/GoalCard";
 import { ListSkeleton } from "@/components/Loading";
 import { MissionList } from "@/components/MissionList";
 import { PageHead } from "@/components/PageHead";
+import { PageSwitch } from "@/components/PageSwitch";
+import { HELPED_PAGES } from "@/lib/nav";
 import { COLONY } from "@/lib/config";
 import { getGoalProgress, getMissions } from "@/server/public";
 import { getSession } from "@/server/session";
@@ -44,6 +46,7 @@ async function Missions() {
 export default function MissionsPage() {
   return (
     <main className="play">
+      <PageSwitch label="Helped" pages={HELPED_PAGES} current="/missions" />
       <PageHead title="Missions" />
       <Suspense fallback={<ListSkeleton rows={3} label="Loading missions" />}>
         <Missions />

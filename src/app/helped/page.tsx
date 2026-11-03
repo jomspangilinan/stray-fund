@@ -4,6 +4,8 @@ import { Suspense } from "react";
 import { CatTile } from "@/components/CatTile";
 import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
+import { PageSwitch } from "@/components/PageSwitch";
+import { HELPED_PAGES } from "@/lib/nav";
 import { SignIn } from "@/components/SignIn";
 import { formatPeso } from "@/lib/money";
 import { CelebrationNote } from "@/components/CelebrationNote";
@@ -83,6 +85,7 @@ async function Helped() {
 export default function HelpedPage() {
   return (
     <main className="play">
+      <PageSwitch label="Helped" pages={HELPED_PAGES} current="/helped" />
       <PageHead title="Cats I've helped" />
       <Suspense fallback={<ListSkeleton rows={3} label="Loading your cats" />}>
         <Helped />

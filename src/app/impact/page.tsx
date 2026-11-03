@@ -4,6 +4,8 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { BlockSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
+import { PageSwitch } from "@/components/PageSwitch";
+import { FUND_PAGES } from "@/lib/nav";
 import { conservation } from "@/lib/impact";
 import { formatPeso } from "@/lib/money";
 import { getImpact } from "@/server/impact";
@@ -73,6 +75,7 @@ async function Impact() {
 export default function ImpactPage() {
   return (
     <main>
+      <PageSwitch label="Fund" pages={FUND_PAGES} current="/impact" action={{ href: "/donate", label: "Donate" }} />
       <PageHead title="Impact" />
       <Suspense fallback={<BlockSkeleton label="Loading impact" />}>
         <Impact />
