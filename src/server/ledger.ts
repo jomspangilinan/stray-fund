@@ -30,7 +30,7 @@ export class InsufficientFunds extends Error {
 }
 
 /** Postgres returns bigint sums as strings; convert and refuse unsafe values. */
-function toInt(value: unknown): number {
+export function toInt(value: unknown): number {
   const n = Number(value ?? 0);
   if (!Number.isSafeInteger(n)) {
     throw new Error(`Amount is not a safe integer: ${String(value)}`);

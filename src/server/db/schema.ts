@@ -228,6 +228,9 @@ export const payouts = pgTable(
       .notNull()
       .references(() => agentActions.id),
     status: text("status").notNull(),
+    // Sends begun, committed before each gateway call. Above 1 means a retry.
+    attempts: integer("attempts").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [
