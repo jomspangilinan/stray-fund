@@ -7,6 +7,8 @@ import { PageHead } from "@/components/PageHead";
 import { SignIn } from "@/components/SignIn";
 import { formatPeso } from "@/lib/money";
 import { CelebrationNote } from "@/components/CelebrationNote";
+import { streakLabel } from "@/lib/streak";
+import { getStreak } from "@/server/streak";
 import { celebrationText, findCelebration, milestoneLabel } from "@/server/milestones";
 import { getHelpedEntries, getUnallocated } from "@/server/public";
 import { getSession } from "@/server/session";
@@ -29,8 +31,10 @@ async function Helped() {
   ]);
   // One moment at a time, and only for a cat this donor helped. The browser marks it seen after showing it.
   const celebration = await findCelebration(session.userId, entries);
+  const streak = streakLabel(await getStreak(session.userId));
   return (
     <>
+      {streak && <p className="mt-4 font-bold text-main">{streak}</p>}
       {celebration && (
         <CelebrationNote text={celebrationText(celebration)} catId={celebration.catId} milestone={celebration.milestone} />
       )}
