@@ -25,6 +25,9 @@ const SENTINELS = [
   "leakreceipt-sentinel-sha", "LeakItem-Sentinel", "tamper_signs",
   // Ear-tip answers are private: no table name, no column name, and nobody's answer beyond their own.
   "ear_tip_flags", "earTipFlags", "requested_ear_tip", "requestedEarTip", "earTipYes", "earTipNo", "answeredByMe",
+  // The yard draws a look-alike from fixed palette names. The stored coat text, its column names and a hostile
+  // avatar value must never reach a page.
+  "coatmarkings-sentinel", "coatcolour-sentinel", "coat_pattern", "coatPattern", "hostile-avatar-sentinel",
 ];
 
 async function main() {
@@ -50,6 +53,10 @@ async function main() {
      values ($1,'female','neutered','Brgy. San Antonio, near the market',10.987654321,120.123456789,10.55555555,120.66666666,true,'{pregnant}') returning id`,
     [`LeakCat ${tag}`],
   );
+  await pool.query(
+    "update cats set coat=$2, coat_pattern='tabby', avatar=$3 where id=$1",
+    [cat.id, JSON.stringify({ colors: ["coatcolour-sentinel"], markings: "coatmarkings-sentinel" }), JSON.stringify({ pattern: "tabby", base: "ginger", accent: "brown" })],
+  );
   // A spotted cat that two people have answered about, one of them the signed-in donor. Nobody is credited, so
   // the other person's name has no reason to appear anywhere a viewer can see.
   const { rows: [askCat] } = await pool.query(
@@ -58,6 +65,8 @@ async function main() {
     [`LeakAsk ${tag}`],
   );
   await pool.query("insert into ear_tip_flags (cat_id, user_id, value) values ($1,$2,'no'), ($1,$3,'yes')", [askCat.id, flagger.id, donor.id]);
+  // A tampered avatar: it must fall back to the neutral cat, and none of its text may reach the page.
+  await pool.query("update cats set avatar=$2 where id=$1", [askCat.id, JSON.stringify({ pattern: "tabby", base: "hostile-avatar-sentinel", accent: "brown" })]);
   await pool.query(
     "insert into sightings (cat_id, original_key, caught_by_user_id, state) values ($1,'originals/00000000-0000-4000-8000-000000000009.jpg',$2,'matched')",
     [cat.id, hidden.id],
@@ -173,6 +182,12 @@ async function main() {
     }
     const homeHtml = await (await fetch(`${BASE}/`)).text();
     if (homeHtml.includes(`leakhidden_${tag}`)) { bad++; console.log("FAIL: an opted-out name showed on home"); }
+    // The yard draws every cat as a link with a name and a status, and only fixed palette colours.
+    for (const [who, text] of [["anon", homeHtml], ["donor", await (await fetch(`${BASE}/`, { headers: { cookie: `sf_session=${token}` } })).text()]] as const) {
+      if (!text.includes(`href="/cats/${cat.id}"`) || !text.includes(`LeakCat ${tag}, Neutered`)) { bad++; console.log(`FAIL: ${who} home yard did not link the seeded cat with a name and status`); }
+      if (!text.includes("#e8a15a")) { bad++; console.log(`FAIL: ${who} home yard did not draw the seeded cat's palette colour`); }
+      if (!text.includes(`href="/cats/${askCat.id}"`)) { bad++; console.log(`FAIL: ${who} home yard dropped the cat with a tampered avatar instead of showing the neutral cat`); }
+    }
     const feed = await (await fetch(`${BASE}/agent`)).text();
     if (!feed.includes("Leak check reason")) { bad++; console.log("FAIL: agent feed did not render the seeded action"); }
     const ledger = await (await fetch(`${BASE}/api/ledger`)).text();

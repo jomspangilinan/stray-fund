@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CatAvatar } from "./CatAvatar";
 import { revealCopy, type RevealState } from "@/lib/spotCopy";
 import type { SpotReveal as Reveal } from "@/server/spotReveal";
 
@@ -33,6 +34,16 @@ export function SpotReveal({
           <h1 className="reveal-title">{heading}</h1>
           <p className="mt-2 text-base font-semibold">{sub}</p>
         </div>
+
+        {reveal.avatar && (
+          <div className="arrive">
+            <div className="arrive-floor" aria-hidden="true" />
+            <div className="arrive-cat" aria-hidden="true">
+              <CatAvatar avatar={reveal.avatar} />
+            </div>
+            <p className="arrive-note small">A look-alike. The photo is the real one.</p>
+          </div>
+        )}
 
         <div className="reveal-card">
           <div className="relative aspect-[4/3] w-full bg-pale">

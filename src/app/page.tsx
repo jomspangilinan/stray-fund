@@ -1,38 +1,53 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
-import { BlockSkeleton } from "@/components/Loading";
 import { formatPesoShort } from "@/lib/money";
 import { HomeYou } from "@/components/HomeYou";
-import { CatTile } from "@/components/CatTile";
-import { HeroGoal } from "@/components/HeroGoal";
-import { getGoalProgress, getHomeData } from "@/server/public";
+import { CatPhoto } from "@/components/CatPhoto";
+import { Yard, YardSkeleton } from "@/components/Yard";
+import { getHomeData, getMissions, getYard } from "@/server/public";
+import { getSession } from "@/server/session";
 
 async function Home() {
   await connection();
-  const [{ poolAvailable, latestAction, cats, catCount }, goal] = await Promise.all([getHomeData(), getGoalProgress()]);
+  const session = await getSession();
+  const viewerId = session?.userId ?? null;
+  const [{ poolAvailable, latestAction }, yard, missions] = await Promise.all([
+    getHomeData(),
+    getYard(viewerId),
+    getMissions(new Date(), viewerId),
+  ]);
+  const mission = missions[0];
   return (
     <>
-      <HeroGoal goal={goal} cats={cats} />
-      <section aria-labelledby="pool-title" className="on-main mt-3 rounded-out bg-main p-5 text-white">
-        <h2 id="pool-title" className="sr-only">
-          The fund
-        </h2>
-        <p className="balance">
-          {formatPesoShort(poolAvailable)}
-        </p>
-        <p className="mt-1.5 text-base font-semibold">
-          {poolAvailable > 0 ? "ready for the next cat" : "in the fund"}
-        </p>
-        <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-1">
-          <Link href="/donate" className="btn-pop w-full sm:w-auto">
-            Donate
-          </Link>
-          <Link href="/impact" className="link !text-white underline">
-            How the money adds up
-          </Link>
+      <Yard yard={yard} />
+
+      <section aria-label="The fund" className="yard-row">
+        <div>
+          <p className="yard-fund">{formatPesoShort(poolAvailable)}</p>
+          <p className="small soft">{poolAvailable > 0 ? "ready for the next cat" : "in the fund"}</p>
         </div>
+        <Link href="/donate" className="btn-pop flex-none">
+          Donate
+        </Link>
       </section>
+
+      {mission && (
+        <section aria-label="A mission" className="yard-row !pl-3">
+          <Link href={`/cats/${mission.catId}`} className="relative h-14 w-14 flex-none overflow-hidden rounded-in" aria-hidden="true" tabIndex={-1}>
+            <CatPhoto url={mission.photoUrl} name={mission.title} sizes="56px" />
+          </Link>
+          <div className="min-w-0 flex-1">
+            <p className="font-bold leading-tight">{mission.title}</p>
+            <Link href="/missions" className="small link !min-h-0">
+              All missions
+            </Link>
+          </div>
+          <Link href={mission.action === "spot" ? "/spot" : `/cats/${mission.catId}`} className="btn flex-none !min-h-11">
+            {mission.action === "spot" ? "Spot" : "Open"}
+          </Link>
+        </section>
+      )}
 
       <Suspense fallback={null}>
         <HomeYou />
@@ -65,32 +80,11 @@ async function Home() {
       </section>
       )}
 
-      <section className="mt-8" aria-labelledby="cats-title">
-        <div className="flex items-baseline justify-between gap-4">
-          <h2 id="cats-title" className="h2">
-            Our cats
-          </h2>
-          {catCount > 0 && (
-            <Link href="/cats" className="link">
-              See all {catCount}
-            </Link>
-          )}
-        </div>
-        {cats.length === 0 ? (
-          <div className="card mt-3">
-            <p className="font-bold">No cats yet.</p>
-            <Link href="/spot" className="btn mt-4">
-              Spot a cat
-            </Link>
-          </div>
-        ) : (
-          <ul className="tiles mt-3">
-            {cats.slice(0, 4).map((c) => (
-              <CatTile key={c.id} cat={c} />
-            ))}
-          </ul>
-        )}
-      </section>
+      <p className="mt-6">
+        <Link href="/impact" className="link">
+          How the money adds up
+        </Link>
+      </p>
     </>
   );
 }
@@ -98,7 +92,7 @@ async function Home() {
 export default function HomePage() {
   return (
     <main className="play">
-      <Suspense fallback={<BlockSkeleton label="Loading the fund" />}>
+      <Suspense fallback={<YardSkeleton />}>
         <Home />
       </Suspense>
     </main>

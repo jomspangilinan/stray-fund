@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { NEUTRAL_AVATAR, parseAvatar, type Avatar } from "@/lib/avatar";
 import { db } from "./db/client";
 import { cats, sightings } from "./db/schema";
 import { ownFlags, type EarTipValue } from "./earTipFlags";
@@ -14,6 +15,8 @@ import type { SpotState } from "./spot";
 
 export type SpotReveal = {
   name: string | null;
+  /** The look-alike that arrives in the yard. Fixed palette only; the neutral cat until the real one is ready. */
+  avatar: Avatar | null;
   coat: string | null;
   /** What this person said about the ear tip, if they said. Their own answer, never a finding. */
   yourEarTip: EarTipValue | null;
@@ -35,6 +38,8 @@ export type RevealInput = {
     status: string;
     sex: string;
     coatPattern: string | null;
+    /** As stored, untrusted: read through parseAvatar. */
+    avatar: unknown;
     flags: string[];
   } | null;
   sighting: {
@@ -64,6 +69,7 @@ export function buildReveal(i: RevealInput): SpotReveal | null {
     // A person decides, so nothing about the cat is stated.
     return {
       name: null,
+      avatar: null,
       coat: null,
       yourEarTip: null,
       flags: [],
@@ -78,6 +84,7 @@ export function buildReveal(i: RevealInput): SpotReveal | null {
   const finderChose = sighting.requestedSex !== null && SEXES.has(sighting.requestedSex);
   return {
     name: cat.name,
+    avatar: parseAvatar(cat.avatar) ?? NEUTRAL_AVATAR,
     coat: cat.coatPattern ? (COAT_LABEL[cat.coatPattern] ?? null) : null,
     yourEarTip: i.yourEarTip ?? null,
     flags: cat.flags.map((f) => FLAG_LABEL[f]).filter((f): f is string => Boolean(f)),
@@ -110,6 +117,7 @@ export async function loadReveal(sightingId: string, state: SpotState): Promise<
           status: cats.status,
           sex: cats.sex,
           coatPattern: cats.coatPattern,
+          avatar: cats.avatar,
           flags: cats.flags,
         })
         .from(cats)

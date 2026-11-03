@@ -1,6 +1,8 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { COLONY } from "@/lib/config";
+import { NEUTRAL_AVATAR, parseAvatar } from "@/lib/avatar";
 import { goalPercent } from "@/lib/goal";
+import { careMarks, pickYard, yardStage, type YardCat, type YardGroup } from "@/lib/yard";
 import { pickMissions, type Mission, type MissionCat } from "@/lib/missions";
 import { db } from "./db/client";
 import { cats, earTipFlags, sightings, treatments, users } from "./db/schema";
@@ -630,4 +632,57 @@ export async function getMissions(now: Date = new Date(), viewerId: string | nul
     };
   });
   return pickMissions(input, now);
+}
+
+// ---------- The yard ----------
+
+const YARD_GROUP_OF = (status: string): YardGroup => {
+  if (status === "adopted") return "adopted";
+  for (const g of Object.keys(STATUS_GROUPS) as StatusGroup[]) {
+    if ((STATUS_GROUPS[g] as readonly string[]).includes(status)) return g;
+  }
+  return "waiting";
+};
+
+export type PublicYard = {
+  /** The cats to draw, in priority order. */
+  cats: YardCat[];
+  /** All cats, which may exceed the cats drawn. */
+  total: number;
+  stage: 0 | 1 | 2 | 3;
+  goal: GoalProgress;
+};
+
+/**
+ * What the yard may know: name, status group, look-alike and care marks. Built field by field. The look-alike
+ * is read through parseAvatar, so only fixed palette names can reach the drawing. Nothing about where a cat is.
+ */
+export async function getYard(viewerId: string | null): Promise<PublicYard> {
+  const [rows, goal, helped] = await Promise.all([
+    db
+      .select({ ...publicCatColumns, avatar: cats.avatar })
+      .from(cats)
+      .orderBy(desc(cats.createdAt), asc(cats.id))
+      .limit(MAX_CATS),
+    getGoalProgress(),
+    viewerId ? getHelpedEntries(viewerId) : Promise.resolve([] as HelpedEntry[]),
+  ]);
+  const treats = await loadTreatments(rows.map((r) => r.id));
+  const all: YardCat[] = rows.map((r) => {
+    const pub = publicCat(r, contextFor(r.id, [], treats));
+    return {
+      id: r.id,
+      name: r.name,
+      group: YARD_GROUP_OF(r.status),
+      statusLabel: pub.statusLabel,
+      avatar: parseAvatar(r.avatar) ?? NEUTRAL_AVATAR,
+      marks: careMarks(pub.journey),
+    };
+  });
+  return {
+    cats: pickYard(all, new Set(helped.map((h) => h.cat.id))),
+    total: all.length,
+    stage: yardStage(goal.neutered, goal.goal),
+    goal,
+  };
 }

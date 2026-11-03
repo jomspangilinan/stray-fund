@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, like, lt, or, sql } from "drizzle-orm";
+import { catAvatar } from "@/lib/avatar";
 import { COLONY } from "@/lib/config";
 import { assessPhoto, type Assessment } from "./ai/assess";
 import { AssessmentSchema } from "./ai/schemas";
@@ -322,6 +323,7 @@ export async function insertNewCat(tx: Tx, s: SightingRow, a: Assessment | null)
       flags: a ? flagsOf(a) : [],
       coat: a ? { colors: a.colors, markings: a.markings } : null,
       coatPattern: a?.coat_pattern ?? null,
+      avatar: a ? catAvatar({ colors: a.colors, markings: a.markings }, a.coat_pattern) : null,
       areaName: COLONY.area_name,
       exactLat: exact.lat,
       exactLng: exact.lng,

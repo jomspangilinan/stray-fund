@@ -78,6 +78,13 @@
       "when": 1793702059408,
       "tag": "0010_ear_tip_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793703349045,
+      "tag": "0011_cat_avatar",
+      "breakpoints": true
     }
   ]
 }

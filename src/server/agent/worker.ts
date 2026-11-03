@@ -1,5 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { syncCatForPayout } from "../catTransitions";
+import { backfillAvatars } from "../avatars";
 import { retryPendingSightings } from "../spot";
 import { db, type Tx } from "../db/client";
 import { wakeups } from "../db/schema";
@@ -34,6 +35,7 @@ export type WorkerDeps = AgentDeps & {
   retryUnknown?: () => Promise<unknown>;
   retrySightings?: () => Promise<unknown>;
   retryEvidence?: () => Promise<unknown>;
+  backfillAvatars?: () => Promise<unknown>;
   /** Replaces the poll in a test. */
   tick?: () => Promise<unknown>;
 };
@@ -268,6 +270,7 @@ export async function runMaintenance(deps: WorkerDeps = {}): Promise<void> {
   await isolated("payout retry", deps.retryUnknown ?? (() => retryUnknownPayouts(gateway)));
   await isolated("sighting retry", deps.retrySightings ?? retryPendingSightings);
   await isolated("evidence retry", deps.retryEvidence ?? retryPendingEvidence);
+  await isolated("avatar backfill", deps.backfillAvatars ?? backfillAvatars);
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

@@ -21,6 +21,7 @@ const cat = (patch: Partial<NonNullable<RevealInput["cat"]>> = {}): NonNullable<
   status: "queued",
   sex: "unknown",
   coatPattern: "tortoiseshell",
+  avatar: { pattern: "tortoiseshell", base: "black", accent: "ginger" },
   flags: ["pregnant"],
   ...patch,
 });
@@ -37,6 +38,7 @@ describe("buildReveal", () => {
     const r = buildReveal({ state: "new_cat", cat: cat(), sighting: sighting() });
     expect(r).toEqual({
       name: "Pepita",
+      avatar: { pattern: "tortoiseshell", base: "black", accent: "ginger" },
       coat: "Tortoiseshell",
       yourEarTip: null,
       flags: ["Pregnant"],
@@ -76,6 +78,7 @@ describe("buildReveal", () => {
     const r = buildReveal({ state: "needs_review", cat: cat(), sighting: sighting({ publicKey: "photos/x.jpg", publicReady: true }) });
     expect(r).toEqual({
       name: null,
+      avatar: null,
       coat: null,
       yourEarTip: null,
       flags: [],
@@ -84,6 +87,12 @@ describe("buildReveal", () => {
       needsFunding: false,
       photoUrl: null,
     });
+  });
+
+  it("only ever passes on a fixed-palette look-alike, and a neutral one while it is not ready", () => {
+    const hostile = buildReveal({ state: "new_cat", cat: cat({ avatar: { pattern: "tabby", base: "<script>", accent: "ginger", extra: "x" } }), sighting: sighting() });
+    expect(hostile?.avatar).toEqual({ pattern: "unknown", base: "grey", accent: "cream" });
+    expect(buildReveal({ state: "matched", cat: cat({ avatar: null }), sighting: sighting() })?.avatar).toEqual({ pattern: "unknown", base: "grey", accent: "cream" });
   });
 
   it("has no reveal for a rejected or saved-for-later photo", () => {
@@ -155,6 +164,7 @@ describe("POST /api/spot reveal", () => {
     expect(json.state).toBe("new_cat");
     const reveal = json.reveal as Record<string, unknown>;
     expect(Object.keys(reveal).sort()).toEqual([
+      "avatar",
       "coat",
       "flags",
       "name",
@@ -166,6 +176,7 @@ describe("POST /api/spot reveal", () => {
     ]);
     expect(reveal).toMatchObject({
       name: "Pepita",
+      avatar: { pattern: "calico" },
       coat: "Calico",
       yourEarTip: null,
       probablyFemale: true,

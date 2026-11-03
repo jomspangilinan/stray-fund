@@ -58,6 +58,8 @@ export const cats = pgTable(
     flags: text("flags").array().notNull().default(sql`'{}'::text[]`),
     coat: jsonb("coat"),
     coatPattern: text("coat_pattern"),
+    // The look-alike drawn in the yard: { pattern, base, accent }, fixed palette names only. Null until computed.
+    avatar: jsonb("avatar"),
     areaName: text("area_name").notNull(),
     exactLat: doublePrecision("exact_lat"),
     exactLng: doublePrecision("exact_lng"),
