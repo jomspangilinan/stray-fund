@@ -109,6 +109,8 @@ export type KeepsakeCat = { id: string; avatar: Avatar; female: boolean };
 
 export type KeepsakeData = {
   name: string;
+  /** The cat card's own public status label, so the saved picture never says anything the card does not. */
+  statusLabel: string;
   /** Same-origin address of the public photo, served by the app so no canvas ever reads another origin. */
   photo: string;
   /** Where the cat is in that photo, when the camera saw it. Nothing for an older cat. */
@@ -120,4 +122,9 @@ export type KeepsakeData = {
 /** The drawing as a file of its own: the app's styles do not reach it, so it carries its size and namespace. */
 export function standaloneSvg(markup: string): string {
   return markup.replace(/<svg /, '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" ');
+}
+
+/** The day a picture was saved, as "3 Nov 2026", because a saved picture keeps showing a status that may change. */
+export function keepsakeDate(d: Date): string {
+  return `${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" })} ${d.getFullYear()}`;
 }

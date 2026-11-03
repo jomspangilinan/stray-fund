@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { CatAvatar } from "@/components/CatAvatar";
 import { COURT } from "./courtyard";
 import {
-  BACK_SLOTS, cropRect, FRAME, fromCatBox, HERO, KEEPSAKE_H, KEEPSAKE_W, NAIL, PHOTO_BOX, standaloneSvg, titleName, type KeepsakeCat, type KeepsakeData,
+  BACK_SLOTS, cropRect, FRAME, fromCatBox, HERO, keepsakeDate, KEEPSAKE_H, KEEPSAKE_W, NAIL, PHOTO_BOX, standaloneSvg, titleName, type KeepsakeCat, type KeepsakeData,
 } from "./keepsake";
 
 /** Draws the app's own avatar off screen and reads it back as a standalone picture. */
@@ -140,7 +140,8 @@ export async function composeKeepsake(data: KeepsakeData, photoBlob: Blob): Prom
     const oneLine = `This is ${name}`;
     const size = fit(ctx, oneLine, family, 800, 132, 88, width);
     ctx.font = `800 ${size}px ${family}`;
-    if (ctx.measureText(oneLine).width <= width) {
+    const twoLines = ctx.measureText(oneLine).width > width;
+    if (!twoLines) {
       ctx.fillText(oneLine, KEEPSAKE_W / 2, 122 + size * 0.86);
     } else {
       const nameSize = fit(ctx, name, family, 800, 120, 56, width);
@@ -152,8 +153,25 @@ export async function composeKeepsake(data: KeepsakeData, photoBlob: Blob): Prom
     }
     ctx.letterSpacing = "0px";
     ctx.fillStyle = "#12352a";
+    // The cat card's own status, quiet under the title. A two-line title sits lower, so it sits a little lower too.
+    const statusSize = fit(ctx, data.statusLabel, family, 700, twoLines ? 32 : 42, 24, width);
+    ctx.font = `700 ${statusSize}px ${family}`;
+    ctx.fillText(ellipsize(ctx, data.statusLabel, width), KEEPSAKE_W / 2, twoLines ? 304 : 292);
+    // The brand and the day it was saved, side by side at the foot.
+    const dateText = keepsakeDate(new Date());
+    ctx.textAlign = "left";
     ctx.font = `700 40px ${family}`;
-    ctx.fillText("Stray Fund", KEEPSAKE_W / 2, 1860);
+    const brandW = ctx.measureText("Stray Fund").width;
+    ctx.font = `600 30px ${family}`;
+    const dateW = ctx.measureText(dateText).width;
+    const gap = 28;
+    const left = (KEEPSAKE_W - (brandW + gap + dateW)) / 2;
+    ctx.font = `700 40px ${family}`;
+    ctx.fillText("Stray Fund", left, 1860);
+    ctx.font = `600 30px ${family}`;
+    ctx.globalAlpha = 0.8;
+    ctx.fillText(dateText, left + brandW + gap, 1860);
+    ctx.globalAlpha = 1;
 
     return await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("png"))), "image/png"),

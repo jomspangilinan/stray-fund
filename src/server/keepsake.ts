@@ -27,6 +27,7 @@ export async function getKeepsake(catId: string): Promise<KeepsakeData | null> {
   const yard = await getYard(null);
   return {
     name: card.cat.name,
+    statusLabel: card.cat.statusLabel,
     photo: `/api/cats/${catId}/keepsake/photo`,
     box: parseCatBox(shown?.box),
     hero: { id: catId, avatar: parseAvatar(row.avatar) ?? NEUTRAL_AVATAR, female: row.sex === "female" },

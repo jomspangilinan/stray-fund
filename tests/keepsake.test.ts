@@ -2,18 +2,27 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CatAvatar } from "../src/components/CatAvatar";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { db, closePool } from "../src/server/db/client";
 import { cats, sightings } from "../src/server/db/schema";
 import { RIBBON, type Avatar } from "../src/lib/avatar";
-import { cropRect, fromCatBox, keepsakeFileName, otherCats, parseCatBox, PHOTO_BOX, standaloneSvg, titleName, toCatBox } from "../src/lib/keepsake";
+import { cropRect, fromCatBox, keepsakeDate, keepsakeFileName, otherCats, parseCatBox, PHOTO_BOX, standaloneSvg, titleName, toCatBox } from "../src/lib/keepsake";
 import { getStorage, newPublicKey } from "../src/server/storage";
 import { getKeepsake } from "../src/server/keepsake";
+import { getCatCard } from "../src/server/public";
 import { GET as dataGet } from "../src/app/api/cats/[id]/keepsake/route";
 import { GET as photoGet } from "../src/app/api/cats/[id]/keepsake/photo/route";
 import { truncateAll } from "./helpers/db";
 
 const A = PHOTO_BOX.w / PHOTO_BOX.h;
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
+
+describe("keepsakeDate", () => {
+  it("writes the day, short month and year, as people say it", () => {
+    expect(keepsakeDate(new Date(2026, 10, 3, 14, 5))).toBe("3 Nov 2026");
+    expect(keepsakeDate(new Date(2027, 0, 21))).toBe("21 Jan 2027");
+  });
+});
 
 describe("cropRect", () => {
   it("centres a frame-shaped crop when there is no cat box", () => {
@@ -128,9 +137,25 @@ describe("keepsake data and photo", () => {
     expect(data.others).toHaveLength(1);
     expect(data.others[0].female).toBe(false);
     expect(Object.keys(data.others[0]).sort()).toEqual(["avatar", "female", "id"]);
+    // The route hands over these keys and no others: the status label is the only addition for the status line.
+    expect(Object.keys(data).sort()).toEqual(["box", "hero", "name", "others", "photo", "statusLabel"]);
     const text = JSON.stringify(data);
     expect(text).not.toContain("Secret Lane");
     expect(text).not.toMatch(/memory-photos|originals\//);
+  });
+
+  it("carries the same status label the cat card shows, for every status", async () => {
+    const c = await cat("Labelled");
+    for (const status of ["spotted", "queued", "funded", "booked", "in_care", "neutered", "adoptable", "adopted"]) {
+      await db.update(cats).set({ status, neuteredUnconfirmed: false }).where(eq(cats.id, c.id));
+      expect((await getKeepsake(c.id))!.statusLabel).toBe((await getCatCard(c.id))!.cat.statusLabel);
+    }
+    await db.update(cats).set({ status: "queued" }).where(eq(cats.id, c.id));
+    expect((await getKeepsake(c.id))!.statusLabel).toBe("Waiting for funding");
+    // Two neighbours saying so is not a neuter: the saved image says what the card says.
+    await db.update(cats).set({ status: "neutered", neuteredUnconfirmed: true }).where(eq(cats.id, c.id));
+    expect((await getKeepsake(c.id))!.statusLabel).toBe("Neighbours say already neutered");
+    expect(JSON.stringify(await getKeepsake(c.id))).not.toMatch(/Brgy|Secret Lane/);
   });
 
   it("carries the stored box of the photo shown, and none for an older cat", async () => {
