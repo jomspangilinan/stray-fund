@@ -33,10 +33,12 @@ const CONTROL_CHAR = new RegExp("[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\
 const MARKUP = /[<>]/;
 const LINK = /https?:\/\/|www\./i;
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+/** A bare domain such as evil.example. A decimal or "e.g." does not match. */
+const DOMAIN = /[a-z0-9-]+\.[a-z]{2,}/i;
 
 /** Reasons appear on a public page, so a manipulated model must not be able to post links or addresses. */
 function isPlainText(s: string): boolean {
-  return !CONTROL_CHAR.test(s) && !MARKUP.test(s) && !LINK.test(s) && !EMAIL.test(s);
+  return !CONTROL_CHAR.test(s) && !MARKUP.test(s) && !LINK.test(s) && !EMAIL.test(s) && !DOMAIN.test(s);
 }
 
 const plainText = (max: number) =>
@@ -196,6 +198,11 @@ async function payoutHistory(bookingId: string, kind: "deposit" | "balance") {
     .orderBy(desc(payouts.createdAt));
 }
 
+/** Whether the agent is barred from asking for this payout again, so it needs a person. */
+export async function payoutRetryBlocked(bookingId: string, kind: "deposit" | "balance"): Promise<boolean> {
+  return retryBlock(await payoutHistory(bookingId, kind)) !== undefined;
+}
+
 const depositAmount = (packagePrice: number, depositPct: number) =>
   Math.floor((packagePrice * depositPct) / 100);
 
@@ -349,6 +356,7 @@ export function createAgentTools(deps: AgentToolDeps = {}) {
           if (balances.some((p) => p.status === "succeeded")) continue;
           const receipt = await latestVerifiedReceipt(b.id);
           const total = receipt ? readTotal(receipt.parsed) : null;
+          const depositPaid = sumSucceeded(deposits);
           open.push({
             bookingId: b.id,
             catId: b.catId,
@@ -359,10 +367,13 @@ export function createAgentTools(deps: AgentToolDeps = {}) {
             depositDue: depositAmount(b.packagePrice, limits.depositPct),
             depositStatus: deposits[0]?.status ?? "none",
             depositRetryAllowed: retryBlock(deposits) === undefined,
-            depositPaid: sumSucceeded(deposits),
+            depositPaid,
             receiptVerified: receipt !== undefined,
+            // Nothing is due until the deposit has succeeded, since the gate would refuse it.
             balanceDue:
-              total === null ? null : Math.min(total, b.packagePrice) - sumSucceeded(deposits),
+              total === null || depositPaid === 0
+                ? null
+                : Math.max(0, Math.min(total, b.packagePrice) - depositPaid),
             balanceStatus: balances[0]?.status ?? "none",
             balanceRetryAllowed: retryBlock(balances) === undefined,
           });

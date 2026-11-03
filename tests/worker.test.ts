@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { closePool, db } from "../src/server/db/client";
-import { aiUsage, agentActions, cats, donations, reviewRequests, wakeups } from "../src/server/db/schema";
+import { aiUsage, agentActions, allocations, cats, donations, reviewRequests, wakeups } from "../src/server/db/schema";
 import {
   MAX_WAKEUP_ATTEMPTS,
   claimNextWakeup,
@@ -293,7 +293,9 @@ describe("payout wakeups", () => {
     const text = JSON.stringify(script.requests[0].messages);
     expect(text).toContain("request_caretaker_review");
     expect(text).toMatch(/do not (start|request|send) (a |any )?(new )?payout/i);
-    expect(await db.select().from(reviewRequests)).toHaveLength(1);
+    // The model's own request, plus the one code files for the payout whatever the model did.
+    const subjects = (await db.select().from(reviewRequests)).map((r) => r.subject).sort();
+    expect(subjects).toEqual(["Late batch", "Payout 00000000-0000-4000-8000-000000000000 needs a person"]);
   });
 
   it("if the model ignores an alert, code still files the review", async () => {
@@ -309,6 +311,91 @@ describe("payout wakeups", () => {
     expect(await db.select().from(agentActions)).toHaveLength(1);
     expect(gw.calls).toHaveLength(0);
     expect((await row(wake.id)).status).toBe("done");
+  });
+
+  it("an alert reaches a person even when the run throws, once across retries", async () => {
+    const wake = await enqueue("payout_status_changed", {
+      payoutId: "00000000-0000-4000-8000-000000000000",
+      status: "failed",
+      alert: "batch_exists_after_failed",
+    });
+    const { deps: d } = deps([new Error("down"), new Error("down")]);
+    await processNextWakeup(d);
+    expect((await row(wake.id)).status).toBe("pending");
+    expect(await db.select().from(reviewRequests)).toHaveLength(1);
+    await makeDue();
+    await processNextWakeup(d);
+    const subjects = (await db.select().from(reviewRequests)).map((r) => r.subject);
+    expect(subjects).toEqual(["Payout 00000000-0000-4000-8000-000000000000 needs a person"]);
+  });
+
+  describe("a plain failed payout", () => {
+    const failedEvent = (w: Awaited<ReturnType<typeof bookedCat>>, payoutId: string) => ({
+      payoutId,
+      bookingId: w.booking.id,
+      catId: w.cat.id,
+      kind: "deposit",
+      status: "failed",
+    });
+    const fund = async (catId: string) => {
+      const [d] = await db
+        .insert(donations)
+        .values({ gross: 150000, net: 150000, paypalOrderId: `o-${catId}`, status: "captured" })
+        .returning();
+      await db.insert(allocations).values({ donationId: d.id, catId, purpose: "vet", amount: 150000 });
+    };
+
+    it("files a review when the model ends its turn after the second failure", async () => {
+      const w = await bookedCat();
+      await fund(w.cat.id);
+      const first = await addPayout(w, { amount: 45000, status: "failed" });
+      await enqueue("payout_status_changed", failedEvent(w, first.id));
+      const gw = new FakeGateway([{ kind: "rejected", error: "HTTP 422" }]);
+      const { deps: d } = deps(
+        [
+          { calls: [{ name: "pay_vet_deposit", input: { booking_id: w.booking.id, reason: "Trying once more." } }] },
+          { text: "It failed again. Nothing more to do." },
+        ],
+        gw,
+      );
+
+      await processNextWakeup(d);
+
+      expect(gw.calls).toHaveLength(1);
+      expect(await db.select().from(reviewRequests)).toHaveLength(1);
+    });
+
+    it("files a review when two failures already stand and the model does nothing", async () => {
+      const w = await bookedCat();
+      await addPayout(w, { amount: 45000, status: "failed" });
+      const second = await addPayout(w, { amount: 45000, status: "failed" });
+      await enqueue("payout_status_changed", failedEvent(w, second.id));
+      const { deps: d } = deps([{ text: "Nothing to do." }]);
+      await processNextWakeup(d);
+      const reviews = await db.select().from(reviewRequests);
+      expect(reviews).toHaveLength(1);
+      expect(reviews[0].subject).toBe(`Payout ${second.id} needs a person`);
+    });
+
+    it("files nothing on a first failure, which the agent may still retry", async () => {
+      const w = await bookedCat();
+      const first = await addPayout(w, { amount: 45000, status: "failed" });
+      await enqueue("payout_status_changed", failedEvent(w, first.id));
+      const { deps: d } = deps([{ text: "Will look later." }]);
+      await processNextWakeup(d);
+      expect(await db.select().from(reviewRequests)).toHaveLength(0);
+    });
+
+    it("counts by kind, so a failed deposit does not count against the balance", async () => {
+      const w = await bookedCat();
+      await addPayout(w, { amount: 45000, status: "failed" });
+      await addPayout(w, { amount: 45000, status: "failed" });
+      const balance = await addPayout(w, { amount: 105000, status: "failed", kind: "balance" });
+      await enqueue("payout_status_changed", { ...failedEvent(w, balance.id), kind: "balance" });
+      const { deps: d } = deps([{ text: "ok" }]);
+      await processNextWakeup(d);
+      expect(await db.select().from(reviewRequests)).toHaveLength(0);
+    });
   });
 
   it("a payout already in needs_review is treated like an alert", async () => {

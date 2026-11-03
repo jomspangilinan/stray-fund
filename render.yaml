@@ -5,7 +5,9 @@ services:
     runtime: node
     region: singapore
     plan: starter
-    buildCommand: npm ci && npm run build
+    # NODE_ENV=production would make npm ci skip the devDependencies the build needs.
+    buildCommand: npm ci --include=dev && npm run build
+    preDeployCommand: npm run db:migrate
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
@@ -13,10 +15,14 @@ services:
         fromDatabase:
           name: stray-fund-db
           property: connectionString
+      - key: NODE_ENV
+        value: production
       - key: DEMO_MODE
         value: "true"
       - key: NODE_VERSION
         value: "22"
+      - key: AI_DAILY_CALL_CAP
+        sync: false
 
   # The treasurer: claims wakeups, calls Bedrock, and keeps payouts in step with PayPal.
   - type: worker
@@ -39,8 +45,16 @@ services:
       - key: NODE_VERSION
         value: "22"
       - key: AWS_REGION
-        value: ap-southeast-1
+        sync: false
       - key: AI_MODEL
+        sync: false
+      - key: AI_DAILY_CALL_CAP
+        sync: false
+      - key: S3_PRIVATE_BUCKET
+        sync: false
+      - key: S3_PUBLIC_BUCKET
+        sync: false
+      - key: S3_PUBLIC_BASE_URL
         sync: false
       - key: AWS_ACCESS_KEY_ID
         sync: false

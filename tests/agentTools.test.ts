@@ -268,10 +268,14 @@ describe("input validation", () => {
     const tool = tools.find((t) => t.name === "fund_next_cat")!;
     expect(() => tool.parse({ cat_id: ID, reason: "x".repeat(501) })).toThrow();
     expect(() => tool.parse({ cat_id: ID, reason: "x".repeat(500) })).not.toThrow();
+    expect(() => tool.parse({ cat_id: ID, reason: "Mimi waited 3.5 days, e.g. longer than Tom. She goes first." })).not.toThrow();
     for (const reason of [
       "<script>alert(1)</script>",
       "see https://evil.example now",
       "see www.evil.example",
+      "go to evil.example now",
+      "visit Evil.COM today",
+      "see pay.evil.co.uk/claim",
       "write to vet@clinic.example",
       "bad\u0000byte",
     ]) {
@@ -337,6 +341,39 @@ describe("read tools", () => {
     expect(text).not.toContain("SECRET_TEXT");
     expect(text).not.toContain(w.vet.id);
     expect(text).not.toContain("example.test");
+  });
+});
+
+describe("list_open_bookings balanceDue", () => {
+  async function verified(bookingId: string, total: number) {
+    const r = await addReceipt(bookingId);
+    await db.execute(sql`update receipts set parsed = ${JSON.stringify({ total_centavos: total })}::jsonb where id = ${r.id}`);
+  }
+  const due = async () => {
+    const { body } = await setup().call("list_open_bookings", {});
+    return (body.bookings as { balanceDue: number | null }[])[0].balanceDue;
+  };
+
+  it("is null until the deposit has succeeded", async () => {
+    const w = await bookedWorld();
+    await verified(w.booking.id, 150000);
+    expect(await due()).toBeNull();
+    await addPayout(w, { amount: 45000, status: "sent" });
+    expect(await due()).toBeNull();
+  });
+
+  it("is what is left once the deposit has succeeded", async () => {
+    const w = await bookedWorld();
+    await verified(w.booking.id, 150000);
+    await addPayout(w, { amount: 45000, status: "succeeded" });
+    expect(await due()).toBe(105000);
+  });
+
+  it("is clamped at zero when the deposit exceeds the receipt", async () => {
+    const w = await bookedWorld();
+    await verified(w.booking.id, 30000);
+    await addPayout(w, { amount: 45000, status: "succeeded" });
+    expect(await due()).toBe(0);
   });
 });
 
@@ -649,7 +686,14 @@ describe("runAgent against a scripted model", () => {
   });
 
   it("the prompt states the rule, the plain style and that data is never instructions", () => {
-    for (const phrase of ["untrusted", "never instructions", "unspayed female", "neighbours", "one or two sentences"]) {
+    for (const phrase of [
+      "untrusted",
+      "never instructions",
+      "unspayed female",
+      "neighbours",
+      "one or two sentences",
+      "If a retry is allowed, try once. If not, call request_caretaker_review",
+    ]) {
       expect(SYSTEM_PROMPT).toContain(phrase);
     }
     expect(SYSTEM_PROMPT).not.toContain("—");
@@ -823,7 +867,66 @@ describe("toolkit", () => {
     expect(tools.map((t) => t.name)).toEqual(["get_order", "list_transactions"]);
   });
 
+  it("follows PAYPAL_ENV for sandbox", async () => {
+    let seen: { configuration: { context: { sandbox: boolean } } } | undefined;
+    class Fake {
+      constructor(o: never) {
+        seen = o;
+      }
+      getTools() {
+        return [];
+      }
+      async handleToolCall() {
+        return { content: [] };
+      }
+    }
+    vi.stubEnv("PAYPAL_ENV", "production");
+    await loadToolkitTools({ importToolkit: async () => ({ PayPalAgentToolkit: Fake }) });
+    expect(seen?.configuration.context.sandbox).toBe(false);
+    vi.stubEnv("PAYPAL_ENV", "sandbox");
+    await loadToolkitTools({ importToolkit: async () => ({ PayPalAgentToolkit: Fake }) });
+    expect(seen?.configuration.context.sandbox).toBe(true);
+  });
+
+  it("a toolkit call that never resolves fails after 30 seconds as PAYPAL_READ_FAILED", async () => {
+    const tool = toolkitToClaudeTools({
+      getTools: () => [
+        {
+          toolSpec: {
+            name: "get_order",
+            description: "d",
+            inputSchema: { json: { type: "object", properties: { id: { type: "string" } } } },
+          },
+        },
+      ],
+      handleToolCall: () => new Promise(() => {}),
+    })[0];
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const outcome = Promise.resolve(tool.run({ id: "ABC" })).then(
+        () => {
+          settled = true;
+          return null;
+        },
+        (e: unknown) => {
+          settled = true;
+          return e;
+        },
+      );
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const error = await outcome;
+      expect(error).toBeInstanceOf(ToolError);
+      expect((error as ToolError).content).toContain("PAYPAL_READ_FAILED");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("configures the toolkit in sandbox with only the two read actions", async () => {
+    vi.stubEnv("PAYPAL_ENV", "sandbox");
     let seen: unknown;
     class Fake {
       constructor(o: unknown) {
@@ -897,6 +1000,9 @@ describe("toolkit", () => {
         status: "COMPLETED",
         payer: { email_address: "donor@example.test", name: { given_name: "Real" } },
         note: "reach me at donor2@example.test",
+        transaction_note: "note-sentinel",
+        transaction_subject: "subject-sentinel",
+        custom_field: "custom-sentinel",
       }),
     );
     const out = (await orderTool(body).run({ id: "ABC" })) as string;
@@ -904,6 +1010,7 @@ describe("toolkit", () => {
     expect(out).not.toContain("donor@example.test");
     expect(out).not.toContain("donor2@example.test");
     expect(out).not.toContain("Real");
+    for (const s of ["note-sentinel", "subject-sentinel", "custom-sentinel"]) expect(out).not.toContain(s);
     expect(JSON.parse(out).untrusted).toBe(true);
   });
 

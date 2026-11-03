@@ -5,6 +5,8 @@ import { describeError } from "../errors";
 /** The only PayPal toolkit tools the agent may see. Every money action stays behind the gate. */
 const READ_ONLY_TOOLS = ["get_order", "list_transactions"];
 const MAX_RESULT_CHARS = 8000;
+/** The toolkit's HTTP client has no timeout and takes no signal, so a stalled call would hold the worker. */
+const CALL_TIMEOUT_MS = 30_000;
 
 /** Personal data the agent has no use for, and could otherwise repeat on a public page. */
 const DROPPED_KEYS = new Set([
@@ -21,6 +23,9 @@ const DROPPED_KEYS = new Set([
   "address",
   "name",
   "links",
+  "transaction_note",
+  "transaction_subject",
+  "custom_field",
 ]);
 const EMAIL = /[^\s@"]+@[^\s@"]+\.[^\s@"]+/g;
 
@@ -140,6 +145,14 @@ function decode(text: string): unknown {
   return current;
 }
 
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("TimedOut")), ms);
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
+
 /** Adapts the toolkit's Bedrock tool shape to runnable Claude tools, keeping only the read-only pair. */
 export function toolkitToClaudeTools(toolkit: ToolkitLike): BetaRunnableTool[] {
   return toolkit
@@ -156,7 +169,10 @@ export function toolkitToClaudeTools(toolkit: ToolkitLike): BetaRunnableTool[] {
         run: async (input: unknown) => {
           let text: string;
           try {
-            const out = await toolkit.handleToolCall({ toolUseId: "agent", name: toolSpec.name, input });
+            const out = await withTimeout(
+              toolkit.handleToolCall({ toolUseId: "agent", name: toolSpec.name, input }),
+              CALL_TIMEOUT_MS,
+            );
             text = out.content[0]?.text ?? "null";
           } catch (e) {
             console.error(`[agent] toolkit ${toolSpec.name} failed: ${describeError(e)}`);
@@ -193,7 +209,7 @@ export async function loadToolkitTools(
         clientSecret,
         configuration: {
           actions: { orders: { get: true }, transactions: { list: true } },
-          context: { sandbox: true },
+          context: { sandbox: process.env.PAYPAL_ENV !== "production" },
         },
       }),
     );

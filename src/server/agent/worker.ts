@@ -8,6 +8,7 @@ import { reconcilePayouts, retryUnknownPayouts } from "../moneyGate";
 import { restPayoutGateway } from "../paypal/payouts";
 import { isUuid } from "../public";
 import { fileReview } from "./review";
+import { payoutRetryBlocked } from "./tools";
 import {
   eventNeedsPerson,
   runAgent,
@@ -15,6 +16,7 @@ import {
   type AgentDeps,
   type AgentResult,
   type AgentStop,
+  type WakeupEvent,
 } from "./run";
 
 export const MAX_WAKEUP_ATTEMPTS = 3;
@@ -160,19 +162,37 @@ async function syncPayouts(w: Wakeup, deps: WorkerDeps): Promise<boolean> {
   return ok;
 }
 
-/** If the model ignored an alert, a person still hears about it. */
-async function ensureReviewFiled(w: Wakeup, result: AgentResult): Promise<void> {
-  if (result.actions.includes("request_caretaker_review")) return;
-  const flagged = wakeupEvents(w).filter(eventNeedsPerson);
-  if (flagged.length === 0) return;
-  await db.transaction(async (tx) => {
-    for (const event of flagged) {
-      await fileReview(
-        tx,
-        `Payout ${event.payoutId ?? "unknown"} needs a person`,
-        "A vet payment could not be settled automatically, so money may have left. Please check it in PayPal.",
-      );
+/** A failed payout the agent may not try again, read after the run since the run may have used the retry. */
+async function failureOutOfRetries(event: WakeupEvent): Promise<boolean> {
+  const { status, bookingId, kind } = event;
+  if (status !== "failed" || typeof bookingId !== "string" || !isUuid(bookingId)) return false;
+  if (kind !== "deposit" && kind !== "balance") return false;
+  return payoutRetryBlocked(bookingId, kind);
+}
+
+/**
+ * A person hears about these whatever the model did, even if the run threw. Repeats
+ * on a retry or from a later run merge into the open request with the same subject.
+ */
+async function ensureReviewFiled(w: Wakeup): Promise<void> {
+  const reviews: { subject: string; reason: string }[] = [];
+  for (const event of wakeupEvents(w)) {
+    const subject = `Payout ${event.payoutId ?? "unknown"} needs a person`;
+    if (eventNeedsPerson(event)) {
+      reviews.push({
+        subject,
+        reason: "A vet payment could not be settled automatically, so money may have left. Please check it in PayPal.",
+      });
+    } else if (await failureOutOfRetries(event)) {
+      reviews.push({
+        subject,
+        reason: "A vet payment failed and the treasurer may not try it again, so the vet is still unpaid. Please check it.",
+      });
     }
+  }
+  if (reviews.length === 0) return;
+  await db.transaction(async (tx) => {
+    for (const { subject, reason } of reviews) await fileReview(tx, subject, reason);
   });
 }
 
@@ -186,11 +206,22 @@ const RETRYABLE_STOPS: readonly AgentStop[] = ["max_tokens", "max_iterations", "
 export async function processWakeup(w: Wakeup, deps: WorkerDeps = {}): Promise<void> {
   const synced = await syncPayouts(w, deps);
 
-  let result: AgentResult;
+  let result: AgentResult | undefined;
   try {
     result = await runAgent(w, deps);
   } catch (e) {
     console.error(`[worker] run failed for ${w.kind} ${w.id}: ${describeError(e)}`);
+  }
+
+  let reviewFiled = true;
+  try {
+    await ensureReviewFiled(w);
+  } catch (e) {
+    reviewFiled = false;
+    console.error(`[worker] could not file a review for ${w.id}: ${describeError(e)}`);
+  }
+
+  if (!result) {
     await retryOrFail(w, "the model could not be reached");
     return;
   }
@@ -198,15 +229,9 @@ export async function processWakeup(w: Wakeup, deps: WorkerDeps = {}): Promise<v
     `[worker] ${w.kind} ${w.id} attempt ${w.attempts}: stop=${result.stop} actions=${result.actions.join(",") || "none"} tokens=${result.usage.input}/${result.usage.output}`,
   );
 
-  try {
-    await ensureReviewFiled(w, result);
-  } catch (e) {
-    console.error(`[worker] could not file a review for ${w.id}: ${describeError(e)}`);
+  if (!reviewFiled) {
     await retryOrFail(w, "a review could not be filed");
-    return;
-  }
-
-  if (result.stop === "refusal") {
+  } else if (result.stop === "refusal") {
     await retryOrFail(w, "the model declined", { final: true });
   } else if (RETRYABLE_STOPS.includes(result.stop)) {
     await retryOrFail(w, result.stop.replaceAll("_", " "));
