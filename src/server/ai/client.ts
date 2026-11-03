@@ -18,7 +18,7 @@ export type AiResponse = {
 };
 
 /** The seam to Bedrock. Tests replace it with a fake, which also selects the bedrock provider. */
-export type AiTransport = (params: BedrockParams) => Promise<AiResponse>;
+export type AiTransport = (params: BedrockParams, signal?: AbortSignal) => Promise<AiResponse>;
 
 let override: AiTransport | null = null;
 let usageListener: ((u: { input_tokens: number; output_tokens: number }) => void) | null = null;

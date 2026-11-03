@@ -128,7 +128,7 @@ In the PayPal developer dashboard, open your sandbox app, add a webhook with the
 | `PAYPAL_VET_EMAIL` | web | Sandbox vet account email |
 | `PAYPAL_WEBHOOK_ID` | web | PayPal webhook, step 6 |
 
-Subscription mode (`AI_PROVIDER=claude-cli`, the treasurer and the photo checks through `claude -p`) is for local tests only. Production and any claim about the deployed app use Bedrock, which must get one real check, asked for first, before filming. Results on the subscription route do not prove Bedrock's model behaves the same. The CLI runs with no tools and `--safe-mode` (no CLAUDE.md, hooks, plugins or user settings), but it still uses the developer's own login and HOME, and admin-managed policy settings on that machine still apply.
+Subscription mode (`AI_PROVIDER=claude-cli`, the treasurer and the photo checks through `claude -p`) is for local tests only. Production and any claim about the deployed app use Bedrock, which must get one real check, asked for first, before filming. Results on the subscription route do not prove Bedrock's model behaves the same. The CLI runs with no tools and `--safe-mode` (no CLAUDE.md, hooks, plugins or user settings), but it still uses the developer's own login and HOME (`CLAUDE_CONFIG_DIR` also stays allowlisted in `src/server/ai/cli.ts`), and admin-managed policy settings on that machine still apply.
 
 Not set in production on purpose: `STORAGE_DRIVER` (defaults to `s3` and refuses anything else), `AI_PROVIDER` (production always uses Bedrock), `AI_CLI_MODEL` and `AWS_PROFILE` (local only), `TEST_DATABASE_URL` (tests only).
 

@@ -104,6 +104,7 @@ describe("claude-cli request", () => {
       "--strict-mcp-config",
       "--restricted",
       "--disable-slash-commands",
+      "--safe-mode",
       "--system-prompt",
       sys,
     ]);

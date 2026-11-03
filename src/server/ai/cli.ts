@@ -200,6 +200,7 @@ export async function runCli(req: AiRequest, model: string): Promise<CliOutcome>
       "--strict-mcp-config",
       "--restricted",
       "--disable-slash-commands",
+      "--safe-mode",
       "--system-prompt",
       req.system,
     ];
