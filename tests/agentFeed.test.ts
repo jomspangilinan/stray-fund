@@ -8,7 +8,7 @@ import { GET } from "../src/app/api/agent/feed/route";
 import { AgentFeed } from "../src/components/AgentFeed";
 import { truncateAll } from "./helpers/db";
 import { addPayout, makeBooking, makeCaretaker, makeVet } from "./helpers/payoutFixtures";
-import { feedStory } from "../src/lib/feedCopy";
+import { feedHeadline, feedStory } from "../src/lib/feedCopy";
 import { eq } from "drizzle-orm";
 
 const SENTINELS = ["inputs-sentinel", "gateway-sentinel", "HTTP 400", "passedOver", "topPick", "approved", "bookingId"];
@@ -135,6 +135,23 @@ describe("the public agent feed", () => {
     expect(pay("Refused by the rules", false)?.person).toBe("The spending rules stopped it.");
     expect(pay("Rejected", false)?.person).toBe("It was stopped and nothing was paid.");
     expect(pay("Rejected", false)?.person).not.toMatch(/rules|signed/);
+  });
+  it("a payment being checked says so, and never claims it was sent or needed no sign-off", () => {
+    const checking = { action: "Vet first payment", status: "Being checked", signedOffByPerson: false };
+    expect(feedHeadline({ ...checking, cat: "Mimi" })).toBe("Checking the first payment for Mimi");
+    expect(feedStory(checking)).toEqual({ ai: "The AI treasurer proposed it.", person: "A caretaker needs to check this." });
+    expect(JSON.stringify(feedStory(checking))).not.toMatch(/No sign-off|within the spending rules/);
+  });
+
+  it("a payment sent to PayPal says it is waiting on PayPal", () => {
+    expect(feedHeadline({ action: "Vet final payment", status: "Sent", cat: "Tom" })).toBe("Sent the final payment for Tom, waiting for PayPal");
+  });
+
+  it("a late SUCCESS a caretaker ruled Paid never says no sign-off was needed", () => {
+    const paid = feedStory({ action: "Vet final payment", status: "Paid", signedOffByPerson: false });
+    expect(paid?.person).toBe("No caretaker signed it off.");
+    expect(paid?.person).not.toMatch(/needed|within the spending rules/);
+    expect(feedHeadline({ action: "Vet final payment", status: "Paid", cat: "Tom" })).toBe("Paid the final payment for Tom");
   });
 
   it("an empty feed says so", () => {

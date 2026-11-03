@@ -47,7 +47,7 @@ export function DonateForm({ clientId, username, demo = false, testMoney = true 
         <div className="card">
           <h2 className="title">Thank you, {username}.</h2>
           <p className="mt-2 text-lg font-bold leading-snug">Your gift is in the shared fund.</p>
-          <p className="mt-1">Next, the AI treasurer picks a cat that needs a vet. You can watch it happen.</p>
+          <p className="mt-1">The AI treasurer funds the next cat once there&apos;s enough. You can watch it happen.</p>
           <div className="mt-4 grid gap-3">
             <Link href="/ledger" className="btn w-full">
               See your gift in the Ledger

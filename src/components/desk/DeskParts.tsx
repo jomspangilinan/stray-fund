@@ -7,7 +7,7 @@ export function Where({ exact, area, exactHidden }: { exact: ExactSpot; area: st
   return (
     <p className="small">
       <span className="font-bold">Exact location:</span> {exact.lat.toFixed(5)}, {exact.lng.toFixed(5)}
-      {exact.approximate && <span className="block soft">Approximate: the middle of the colony.</span>}
+      {exact.approximate && <span className="block soft">Approximate: the middle of the area.</span>}
     </p>
   );
 }

@@ -12,6 +12,8 @@ export function feedHeadline(a: Pick<PublicAgentAction, "action" | "cat" | "stat
   if (a.action === "Funded a cat") return `Set money aside for ${who}`;
   if (!isPayment(a)) return a.cat ? `${a.action}: ${a.cat}` : a.action;
   const what = a.action === FIRST ? "first payment" : "final payment";
+  if (a.status === "Sent") return `Sent the ${what} for ${who}, waiting for PayPal`;
+  if (a.status === "Being checked") return `Checking the ${what} for ${who}`;
   const verb =
     a.status === "Paid" ? "Paid" :
     a.status === "Failed" ? "Could not send" :
@@ -28,7 +30,10 @@ export function feedStory(a: Pick<PublicAgentAction, "action" | "status" | "sign
   const ai = "The AI treasurer proposed it.";
   if (a.status === "Refused by the rules") return { ai, person: "The spending rules stopped it." };
   if (a.status === "Rejected") return { ai, person: "It was stopped and nothing was paid." };
+  if (a.status === "Being checked") return { ai, person: "A caretaker needs to check this." };
   if (a.signedOffByPerson) return { ai, person: "A caretaker signed it off." };
   if (a.status === "Waiting for approval") return { ai, person: "Waiting for a caretaker to sign it off." };
+  // A Paid row with no sign-off may be a late SUCCESS a caretaker ruled Paid, which needed no sign-off, so this does not claim none was needed.
+  if (a.status === "Paid") return { ai, person: "No caretaker signed it off." };
   return { ai, person: "No sign-off was needed. It was within the spending rules." };
 }
