@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closePool, db } from "../src/server/db/client";
 import { agentActions, cats, donations } from "../src/server/db/schema";
-import { consoleFor, TABS } from "../src/lib/nav";
+import { consoleFor, isActiveTab, TABS } from "../src/lib/nav";
 import { getHomeData } from "../src/server/public";
 import { truncateAll } from "./helpers/db";
 
@@ -51,8 +51,17 @@ describe("home data", () => {
 
 describe("tabs and consoles", () => {
   it("offers the same five tabs to everyone", () => {
-    expect(TABS.map((t) => t.label)).toEqual(["Cats", "Ledger", "Spot", "Helped", "Treasurer"]);
-    expect(TABS.map((t) => t.href)).toEqual(["/cats", "/ledger", "/spot", "/helped", "/agent"]);
+    expect(TABS.map((t) => t.label)).toEqual(["Home", "Cats", "Spot", "Helped", "Ledger"]);
+    expect(TABS.map((t) => t.href)).toEqual(["/", "/cats", "/spot", "/helped", "/ledger"]);
+    expect(TABS[2].key).toBe("spot");
+  });
+
+  it("marks Home only on the home page", () => {
+    const home = TABS[0];
+    expect(isActiveTab(home, "/")).toBe(true);
+    expect(isActiveTab(home, "/cats")).toBe(false);
+    expect(isActiveTab(TABS[1], "/cats/12")).toBe(true);
+    expect(isActiveTab(TABS[1], "/")).toBe(false);
   });
 
   it("hands a console link only to caretakers and vets, each their own", () => {

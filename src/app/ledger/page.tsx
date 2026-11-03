@@ -18,9 +18,14 @@ export default function LedgerPage() {
   return (
     <main>
       <PageHead title="Ledger">Every donation and vet payout. Test money.</PageHead>
-      <Link href="/impact" className="link">
-        Proof it adds up
-      </Link>
+      <p className="flex flex-wrap gap-x-5 gap-y-1">
+        <Link href="/impact" className="link">
+          Proof it adds up
+        </Link>
+        <Link href="/agent" className="link">
+          Treasurer decisions
+        </Link>
+      </p>
       <Suspense fallback={<ListSkeleton rows={4} label="Loading the ledger" />}>
         <Ledger />
       </Suspense>

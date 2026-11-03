@@ -1,14 +1,14 @@
 import type { Role } from "@/server/session";
 
-export type Tab = { key: "cats" | "ledger" | "spot" | "helped" | "agent"; href: string; label: string };
+export type Tab = { key: "home" | "cats" | "ledger" | "spot" | "helped"; href: string; label: string };
 
-/** The same five tabs for everyone. Roles change what the account menu offers, not the tab bar. */
+/** The same five tabs for everyone (the Treasurer feed at /agent is public and linked from Ledger and Home). Roles change what the account menu offers, not the tab bar. */
 export const TABS: readonly Tab[] = [
+  { key: "home", href: "/", label: "Home" },
   { key: "cats", href: "/cats", label: "Cats" },
-  { key: "ledger", href: "/ledger", label: "Ledger" },
   { key: "spot", href: "/spot", label: "Spot" },
   { key: "helped", href: "/helped", label: "Helped" },
-  { key: "agent", href: "/agent", label: "Treasurer" },
+  { key: "ledger", href: "/ledger", label: "Ledger" },
 ];
 
 export type ConsoleLink = { href: string; label: string };
@@ -20,7 +20,8 @@ export function consoleFor(role: Role | null | undefined): ConsoleLink | null {
   return null;
 }
 
-/** Whether a tab is the current page. The home page marks none. */
+/** Whether a tab is the current page. Home matches only the home page itself. */
 export function isActiveTab(tab: Tab, pathname: string): boolean {
+  if (tab.href === "/") return pathname === "/";
   return pathname === tab.href || pathname.startsWith(`${tab.href}/`);
 }
