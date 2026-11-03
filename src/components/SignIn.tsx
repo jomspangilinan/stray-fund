@@ -106,7 +106,7 @@ export function SignIn({
             onClick={toggleName}
             className="press flex min-h-12 w-full items-center justify-between gap-3 rounded-in px-3 text-left font-semibold"
           >
-            <span>Show my name in thanks</span>
+            <span>Show my name in thanks and the ledger</span>
             <span aria-hidden="true" className="tag flex-none">
               {shown ? "On" : "Off"}
             </span>

@@ -70,14 +70,14 @@ async function ledgerRows(tx: Tx): Promise<PublicLedgerRow[]> {
       select d.created_at, to_char(d.created_at at time zone 'Asia/Manila', 'YYYY-MM-DD') as day, 'donation' as type, d.gross as amount, d.paypal_fee as fee,
              null::text as cat, null::uuid as cat_id, null::text as reason,
              coalesce(d.paypal_capture_id, d.paypal_order_id) as paypal_id,
-             d.status, coalesce(u.username, 'Anonymous') as who
+             d.status, case when u.id is null then 'Anonymous' when u.show_name_in_thanks then u.username else 'A neighbour' end as who
       from donations d left join users u on u.id = d.user_id
       where d.status = ${CAPTURED}
       union all
       select r.created_at, to_char(r.created_at at time zone 'Asia/Manila', 'YYYY-MM-DD'), 'refund', r.gross_delta, r.fee_delta,
              null::text, null::uuid, null::text, r.paypal_ref,
              case r.kind when 'refund' then 'refunded' when 'reversal' then 'reversed' else 'denied' end,
-             coalesce(u.username, 'Anonymous')
+             case when u.id is null then 'Anonymous' when u.show_name_in_thanks then u.username else 'A neighbour' end
       from donation_reversals r
       join donations d on d.id = r.donation_id and d.status = ${CAPTURED}
       left join users u on u.id = d.user_id

@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db, closePool } from "../src/server/db/client";
 import {
@@ -8,6 +9,7 @@ import {
   donations,
   meals,
   payouts,
+  donationReversals,
   treatments,
   users,
 } from "../src/server/db/schema";
@@ -174,6 +176,36 @@ describe("conservation identity", () => {
       grossIn: 1000, paypalFees: 0, vetPaid: 0, payoutFees: 0, heldForCats: 0, reservedPayouts: 0, available: 900, reversedGross: 0,
     });
     expect(c.balanced).toBe(false);
+  });
+});
+
+describe("public ledger: the thanks switch (I5)", () => {
+  it("shows A neighbour for a donor who turned the name off, on donations and on a refund of one, with every amount intact", async () => {
+    const hidden = await user("quiet_donor_sentinel", "donor", { showNameInThanks: false });
+    const shown = await user("open_donor", "donor", { showNameInThanks: true });
+    const a = await donate(30_000, 1_500, hidden.id);
+    await donate(20_000, 1_000, shown.id);
+    await db.insert(donationReversals).values({
+      donationId: a.id, kind: "refund", paypalRef: "RF-I5", grossDelta: -10_000, feeDelta: -500, netDelta: -9_500, basis: "breakdown",
+    });
+    const rows = await getLedger();
+    const text = JSON.stringify(rows);
+    expect(text).not.toContain("quiet_donor_sentinel");
+    const mine = rows.filter((r) => r.type === "donation" || r.type === "refund");
+    expect(mine.map((r) => [r.type, r.amount, r.who]).sort()).toEqual(
+      [["donation", 20_000, "open_donor"], ["donation", 30_000, "A neighbour"], ["refund", -10_000, "A neighbour"]].sort(),
+    );
+    const t = ledgerTotals(rows);
+    const pool = await db.transaction((tx) => getPoolStatus(tx));
+    expect(t.donated).toBe(pool.grossIn);
+  });
+
+  it("names the donor again when they switch it back on", async () => {
+    const u = await user("back_on", "donor", { showNameInThanks: false });
+    await donate(10_000, 500, u.id);
+    expect((await getLedger())[0].who).toBe("A neighbour");
+    await db.update(users).set({ showNameInThanks: true }).where(eq(users.id, u.id));
+    expect((await getLedger())[0].who).toBe("back_on");
   });
 });
 

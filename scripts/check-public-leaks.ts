@@ -82,6 +82,13 @@ async function main() {
   );
   await pool.query("insert into allocations (donation_id, cat_id, purpose, amount) values ($1,$2,'vet',4000)", [don.id, cat.id]);
 
+  // The opted-out donor also gave: the ledger rows must read "A neighbour", on every page and in the API.
+  await pool.query(
+    "insert into donations (user_id, gross, paypal_fee, net, paypal_order_id, paypal_capture_id, status) values ($1,5000,0,5000,$2,$3,'captured')",
+    [hidden.id, `leakhid-order-${tag}`, `leakhid-cap-${tag}`],
+  );
+  SENTINELS.push(`leakhidden_${tag}`);
+
   const { rows: [booking] } = await pool.query(
     "insert into bookings (cat_id, vet_id, package_price, status, scheduled_for) values ($1,$2,150000,'completed',now()) returning id",
     [cat.id, vet.id],
@@ -213,6 +220,7 @@ async function main() {
     await pool.query("delete from cats where id=$1", [askCat.id]);
     await pool.query("delete from users where id=$1", [flagger.id]);
     await pool.query("delete from sightings where cat_id=$1", [cat.id]);
+    await pool.query("delete from donations where user_id=$1", [hidden.id]);
     await pool.query("delete from users where id=$1", [hidden.id]);
     await pool.query("delete from cats where id=$1", [cat.id]);
     await pool.query("delete from users where id=$1", [vet.id]);
