@@ -159,37 +159,42 @@ export function LiveCamera({
 
   const live = status === "ready" || status === "capturing";
 
-  const buttons = (
+  const canRetry = !live && (status === "idle" || status === "denied" || status === "error" || status === "nocamera");
+
+  // Shown in the middle of the empty viewfinder, next to its hint, so it is the one obvious action.
+  const openButton = canRetry ? (
+    <button
+      type="button"
+      className="btn min-h-14 min-w-56 px-8 text-lg"
+      onClick={() => start(facing)}
+      disabled={disabled}
+    >
+      {status === "idle" ? "Open camera" : "Try again"}
+    </button>
+  ) : null;
+
+  const buttons = live ? (
     <div className="flex flex-wrap gap-3">
-      {!live && (status === "idle" || status === "denied" || status === "error" || status === "nocamera") && (
-        <button type="button" className="btn" onClick={() => start(facing)} disabled={disabled}>
-          {status === "idle" ? "Open camera" : "Try again"}
+      {!hideShutter && (
+        <button
+          type="button"
+          className={`btn ${fullscreen ? "flex-1" : ""}`}
+          onClick={shoot}
+          disabled={disabled || status === "capturing"}
+        >
+          {status === "capturing" ? "Taking photo" : "Take photo"}
         </button>
       )}
-      {live && (
-        <>
-          {!hideShutter && (
-            <button
-              type="button"
-              className={`btn ${fullscreen ? "flex-1" : ""}`}
-              onClick={shoot}
-              disabled={disabled || status === "capturing"}
-            >
-              {status === "capturing" ? "Taking photo" : "Take photo"}
-            </button>
-          )}
-          <button
-            type="button"
-            className="btn-quiet"
-            onClick={() => start(facing === "environment" ? "user" : "environment")}
-            disabled={disabled || status === "capturing"}
-          >
-            {facing === "environment" ? "Use front camera" : "Use back camera"}
-          </button>
-        </>
-      )}
+      <button
+        type="button"
+        className="btn-quiet"
+        onClick={() => start(facing === "environment" ? "user" : "environment")}
+        disabled={disabled || status === "capturing"}
+      >
+        {facing === "environment" ? "Use front camera" : "Use back camera"}
+      </button>
     </div>
-  );
+  ) : null;
 
   if (fullscreen) {
     return (
@@ -203,8 +208,9 @@ export function LiveCamera({
           className={`absolute inset-0 h-full w-full object-cover ${live ? "" : "invisible"}`}
         />
         {!live && (
-          <div className="absolute inset-0 grid place-items-center p-8 text-center text-white">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 p-8 pb-40 text-center text-white">
             <CameraMessage status={status} />
+            {openButton}
           </div>
         )}
         {overlay}
@@ -249,8 +255,9 @@ export function LiveCamera({
           className={`h-full w-full object-cover ${live ? "" : "invisible"}`}
         />
         {!live && (
-          <div className="absolute inset-0 grid place-items-center p-6 text-center text-white">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 p-6 text-center text-white">
             <CameraMessage status={status} />
+            {openButton}
           </div>
         )}
       </div>
