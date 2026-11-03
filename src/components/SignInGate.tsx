@@ -45,7 +45,7 @@ export function SignInGate({ demo, children }: { demo: boolean; children: React.
             <button type="button" className="btn-pop w-full" onClick={tryDemo} disabled={busy}>
               {busy ? "Starting" : "Try it now"}
             </button>
-            <p className="small soft">Uses a demo neighbour account. Simulated, not a real sign-in.</p>
+            <p className="small soft">Uses a shared demo neighbour, so you may see what others tried. Simulated, not a real sign-in.</p>
             {error && (
               <p role="alert" className="font-bold text-danger">
                 {error}

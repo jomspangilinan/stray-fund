@@ -25,7 +25,7 @@ async function Helped() {
     return (
       <SignInGate demo={isDemoMode()}>
         <p className="font-bold">The cats you have helped show up here.</p>
-        <p className="soft">Each one comes with what you gave, plus your streak and badges.</p>
+        <p className="soft">Each one comes with what was given, plus the streak and badges.</p>
       </SignInGate>
     );
   }
