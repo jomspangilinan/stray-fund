@@ -5,15 +5,20 @@ import { useState } from "react";
 import { parseCatName } from "@/lib/catNames";
 
 /**
- * "Know their name?" for a signed-in person. The name waits for a caretaker and changes nothing public. The
- * person sees their own pending idea here and nobody else's. A decided one just disappears, with no message.
+ * The name field inside the pencil panel, for a signed-in person. The name waits for a caretaker and changes
+ * nothing public. The pencil's owner shows the person's own pending idea, and nobody else's.
  */
-export function NameSuggest({ catId, pending }: { catId: string; pending: string | null }) {
+export function NameSuggest({
+  catId,
+  onSent,
+}: {
+  catId: string;
+  onSent: (name: string) => void;
+}) {
   const router = useRouter();
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const [sent, setSent] = useState(false);
 
   // Checked while typing, so a wrong letter is named before Send.
   const check = value.trim() === "" ? null : parseCatName(value);
@@ -40,8 +45,8 @@ export function NameSuggest({ catId, pending }: { catId: string; pending: string
         setProblem(json.error ?? "Could not save that. Try again.");
         return;
       }
-      setSent(true);
       setValue("");
+      onSent(parsed.name);
       router.refresh();
     } catch {
       setProblem("Could not save that. Try again.");
@@ -51,35 +56,34 @@ export function NameSuggest({ catId, pending }: { catId: string; pending: string
   }
 
   return (
-    <section aria-labelledby="know-name" className="card">
-      <h2 id="know-name" className="h2 mb-2">
-        Know their name?
-      </h2>
-      <form onSubmit={submit} className="grid gap-3" noValidate>
-        <label className="grid gap-1">
-          <span className="sr-only">Their name</span>
-          <input
-            className="field"
-            name="name"
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              setSent(false);
-              setProblem(null);
-            }}
-            maxLength={60}
-            autoComplete="off"
-            aria-invalid={invalid ? true : undefined}
-            aria-describedby="know-name-note"
-          />
-        </label>
-        <button type="submit" className="btn" disabled={busy || value.trim() === "" || Boolean(invalid)}>
-          {busy ? "Working" : "Send"}
-        </button>
-        <p id="know-name-note" className="small" role="status">
-          {problem ?? invalid ?? (sent ? "Thanks. A caretaker will check it." : pending ? `Your suggestion: ${pending}. A caretaker will check it.` : "")}
-        </p>
-      </form>
-    </section>
+    <form onSubmit={submit} className="grid gap-3" noValidate>
+      <label className="grid gap-1">
+        <span className="sr-only">Their name</span>
+        <input
+          className="field"
+          name="name"
+          autoFocus
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setProblem(null);
+          }}
+          maxLength={60}
+          autoComplete="off"
+          aria-invalid={invalid ? true : undefined}
+          aria-describedby="know-name-note"
+        />
+      </label>
+      <button
+        type="submit"
+        className="btn"
+        disabled={busy || value.trim() === "" || Boolean(invalid)}
+      >
+        {busy ? "Working" : "Send"}
+      </button>
+      <p id="know-name-note" className="small" role="status">
+        {problem ?? invalid ?? ""}
+      </p>
+    </form>
   );
 }

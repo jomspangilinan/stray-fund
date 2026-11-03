@@ -8,8 +8,7 @@ import { EarTipAsk } from "./EarTipAsk";
 import type { EarTipAnswer } from "./EarTipChoice";
 import { Progress } from "./CatRow";
 import { JourneyTimeline, niceDate } from "./JourneyTimeline";
-import { NameSuggest } from "./NameSuggest";
-import { RenameAgain } from "./RenameAgain";
+import { CatNameEditor } from "./CatNameEditor";
 import { SexAsk } from "./SexAsk";
 
 export function CatDetail({
@@ -38,12 +37,7 @@ export function CatDetail({
         <div className="relative mt-1 aspect-[4/5] overflow-hidden rounded-out">
           <CatPhoto url={cat.photoUrl} name={cat.name} sizes="(min-width: 576px) 36rem, 100vw" caption />
         </div>
-        <h1 className="title mt-4">{cat.name}</h1>
-        {names?.canRename && (
-          <div className="mt-3">
-            <RenameAgain catId={cat.id} />
-          </div>
-        )}
+        <CatNameEditor catId={cat.id} name={cat.name} names={names} />
         <p className="mt-1 soft">
           {cat.sex}, {cat.statusLabel.toLowerCase()}
         </p>
@@ -59,8 +53,6 @@ export function CatDetail({
         )}
         {cat.bio && <p className="mt-4 max-w-[52ch]">{cat.bio}</p>}
       </header>
-
-      {names && <NameSuggest catId={cat.id} pending={names.pending} />}
 
       {askSex && (
         <section className="card">

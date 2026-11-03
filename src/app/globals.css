@@ -150,6 +150,7 @@ body {
   min-height: 4rem;
 }
 .press,
+.icon-btn,
 .btn,
 .btn-quiet,
 .btn-pop,
@@ -160,6 +161,7 @@ body {
     color 120ms var(--ease-out);
 }
 .press:active,
+.icon-btn:active,
 .btn:active:not(:disabled),
 .btn-quiet:active:not(:disabled),
 .btn-pop:active:not(:disabled),
@@ -207,6 +209,30 @@ a.row:active,
   color: var(--soft);
   cursor: not-allowed;
   transform: none;
+}
+
+/* A small flat icon button beside text. The tap target is 44px; the icon stays small. */
+.icon-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: var(--r-in);
+  color: var(--main);
+  cursor: pointer;
+}
+.icon-btn:active {
+  background: var(--pale);
+}
+
+/* The name panel opens with one short fade. */
+.name-panel {
+  transition: opacity 160ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+  }
 }
 
 /* A preset or filter. Selected is carried by fill and a check mark, not colour alone. */
@@ -335,6 +361,9 @@ a.row:active,
   .btn-quiet:hover:not(:disabled) {
     background: #c9e0d1;
   }
+  .icon-btn:hover {
+    background: var(--pale);
+  }
   .chip:hover:not([aria-checked="true"]):not([aria-current="page"]) {
     background: var(--pale);
   }
@@ -374,6 +403,7 @@ a.row:active,
 
 @media (prefers-reduced-motion: reduce) {
   .press,
+  .icon-btn,
   .btn,
   .btn-quiet,
   .btn-pop,
@@ -383,6 +413,7 @@ a.row:active,
       color 120ms linear;
   }
   .press:active,
+  .icon-btn:active,
   .btn:active:not(:disabled),
   .btn-quiet:active:not(:disabled),
   .btn-pop:active:not(:disabled),

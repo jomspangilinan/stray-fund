@@ -16,6 +16,7 @@ const NEIGHBOUR = [
   "app/spot",
   "components/AnotherNameButton.tsx",
   "components/CatDetail.tsx",
+  "components/CatNameEditor.tsx",
   "components/NameSuggest.tsx",
   "components/RenameAgain.tsx",
   "components/CatRow.tsx",
