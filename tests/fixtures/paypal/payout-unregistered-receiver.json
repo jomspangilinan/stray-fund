@@ -5,7 +5,7 @@
       "payout_batch_id": "BATCH_FAKE001",
       "batch_status": "PENDING",
       "sender_batch_header": {
-        "sender_batch_id": "spike-nouser-1793684902628"
+        "sender_batch_id": "SENDER_FAKE002"
       }
     },
     "links": [

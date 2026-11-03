@@ -54,6 +54,8 @@ function scrub(v: unknown, key = ""): unknown {
   if (/^(payer_id|merchant_id|account_id|payee_id)$/.test(key)) return fake("ACCT", v);
   if (/^(given_name|surname|full_name|name|recipient_name)$/.test(key) && key !== "name") return "Sandbox Person";
   if (/^(payout_batch_id)$/.test(key)) return fake("BATCH", v);
+  if (key === "sender_batch_id") return fake("SENDER", v);
+  if (key === "activity_id") return fake("ACTIVITY", v);
   if (/^(payout_item_id)$/.test(key)) return fake("ITEM", v);
   if (/^(transaction_id)$/.test(key)) return fake("TXN", v);
   if (/^(id|order_id)$/.test(key)) return fake("ID", v);
@@ -197,10 +199,9 @@ async function main(): Promise<void> {
         const names = tools.map((t) => t.toolSpec.name);
         const name = names.find((n: string) => /get_order/.test(n)) ?? "get_order";
         const out = await tk.handleToolCall({ toolUseId: "spike", name, input: { id: arg } });
-        const text = JSON.stringify(out);
-        console.log("handleToolCall(", name, ") ->", text.replace(/[\w.+-]+@[\w.-]+/g, "<email>").slice(0, 1500));
         let inner: unknown = out;
         try { inner = JSON.parse(JSON.parse(out.content[0]?.text ?? "null")); } catch { /* keep raw */ }
+        console.log("handleToolCall(", name, ") ->", JSON.stringify(scrub(inner)).slice(0, 1500));
         save("toolkit-get-order", 200, inner);
       }
       return;

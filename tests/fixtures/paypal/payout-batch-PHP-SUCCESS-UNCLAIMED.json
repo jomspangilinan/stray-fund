@@ -7,7 +7,7 @@
       "time_created": "2026-11-03T05:48:24Z",
       "time_completed": "2026-11-03T05:48:47Z",
       "sender_batch_header": {
-        "sender_batch_id": "spike-nouser-1793684902628"
+        "sender_batch_id": "SENDER_FAKE002"
       },
       "funding_source": "BALANCE",
       "amount": {
@@ -23,7 +23,7 @@
       {
         "payout_item_id": "ITEM_FAKE002",
         "transaction_id": "TXN_FAKE003",
-        "activity_id": "0CP95595T93046224",
+        "activity_id": "ACTIVITY_FAKE002",
         "transaction_status": "UNCLAIMED",
         "payout_item_fee": {
           "currency": "PHP",

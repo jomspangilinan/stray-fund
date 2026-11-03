@@ -8,7 +8,7 @@
       "time_completed": "2026-11-03T05:48:26Z",
       "time_closed": "2026-11-03T05:48:26Z",
       "sender_batch_header": {
-        "sender_batch_id": "spike-SENDER-BATCH-1"
+        "sender_batch_id": "SENDER_FAKE001"
       },
       "funding_source": "BALANCE",
       "amount": {
@@ -24,7 +24,7 @@
       {
         "payout_item_id": "ITEM_FAKE002",
         "transaction_id": "TXN_FAKE003",
-        "activity_id": "46Y794314M079274G",
+        "activity_id": "ACTIVITY_FAKE001",
         "transaction_status": "SUCCESS",
         "payout_item_fee": {
           "currency": "PHP",

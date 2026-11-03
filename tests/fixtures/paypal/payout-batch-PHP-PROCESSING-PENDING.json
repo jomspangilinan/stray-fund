@@ -6,7 +6,7 @@
       "batch_status": "PROCESSING",
       "time_created": "2026-11-03T05:48:02Z",
       "sender_batch_header": {
-        "sender_batch_id": "spike-SENDER-BATCH-1"
+        "sender_batch_id": "SENDER_FAKE001"
       },
       "funding_source": "BALANCE",
       "amount": {
