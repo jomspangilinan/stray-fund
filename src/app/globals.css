@@ -1060,6 +1060,9 @@ input[type="checkbox"] {
   .arrive-cat .avatar {
     animation: none;
   }
+  .save-spin {
+    animation: save-pulse 1.2s ease-in-out infinite;
+  }
 }
 
 /* The control at the top of a grouped tab (Fund, Helped). Selected is a raised fill and heavier text. */
@@ -1167,9 +1170,6 @@ input[type="checkbox"] {
 @keyframes save-spin {
   to { transform: rotate(360deg); }
 }
-@media (prefers-reduced-motion: reduce) {
-  .save-spin { animation: save-pulse 1.2s ease-in-out infinite; }
-  @keyframes save-pulse {
-    50% { opacity: 0.35; }
-  }
+@keyframes save-pulse {
+  50% { opacity: 0.35; }
 }
