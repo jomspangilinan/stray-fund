@@ -329,7 +329,7 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     await page.goto("/impact");
     await expect(page.getByText("This adds up to the centavo, across every donation and payout.")).toBeVisible();
     await expect(page.getByText(`Donated ${peso(grossIn)} = PayPal fees ${peso(fees)} + paid to vets ${peso(vetPaid)} + payout fees ${peso(payoutFees)} + held for cats ${peso(held)} + left in the pool ${peso(left)}`)).toBeVisible();
-    await expect(page.getByRole("term").filter({ hasText: "Neutered by the fund" }).locator("xpath=following-sibling::dd[1]")).toHaveText("1");
+    await expect(page.getByRole("term").filter({ hasText: "Cats neutered" }).locator("xpath=following-sibling::dd[1]")).toHaveText("1");
     await page.goto("/ledger");
     await expect(page.getByRole("heading", { name: "Ledger" })).toBeVisible();
   });

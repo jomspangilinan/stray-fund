@@ -56,3 +56,18 @@ describe("nameIsSafe: a name from the photo has no place or number in it", () =>
       expect(nameIsSafe(n)).toBe(false);
   });
 });
+
+import { renameReply } from "../src/lib/catNames";
+
+describe("renameReply: the desk's rename note keeps the server's message when the name changed", () => {
+  it("closes on a plain save", () => {
+    expect(renameReply("Saved. The cat is now called Boss.")).toEqual({ close: true, note: "" });
+  });
+  it("stays open and shows the sentence when the typed name was taken", () => {
+    const m = "Boss was already taken, so the cat is now called Tikoy.";
+    expect(renameReply(m)).toEqual({ close: false, note: m });
+  });
+  it("closes when the server sent no message", () => {
+    expect(renameReply(undefined)).toEqual({ close: true, note: "" });
+  });
+});

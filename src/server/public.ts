@@ -535,10 +535,11 @@ export async function getHelpedEntries(userId: string): Promise<HelpedEntry[]> {
     select a.cat_id, sum(a.amount)::bigint as amount
     from allocations a
     join donations d on d.id = a.donation_id
+    join cats c on c.id = a.cat_id
     where d.user_id = ${userId} and d.status = ${CAPTURED} and a.cat_id is not null
-    group by a.cat_id
+    group by a.cat_id, c.created_at
     having sum(a.amount) > 0
-    order by sum(a.amount) desc, a.cat_id
+    order by sum(a.amount) desc, c.created_at desc, a.cat_id
   `);
   const found = (res.rows as { cat_id: string; amount: unknown }[]).map((r) => ({
     catId: r.cat_id,
@@ -580,14 +581,19 @@ export async function getHelpedCats(userId: string): Promise<MyCat[]> {
   const byId = new Map<string, MyCat>(gave.map((e) => [e.cat.id, { cat: e.cat, spotted: false, named: false, amount: e.amount }]));
   const otherIds = [...new Set([...spotted, ...named])].filter((id) => !byId.has(id));
   if (otherIds.length > 0) {
-    const rows = await db.select(publicCatColumns).from(cats).where(inArray(cats.id, otherIds));
+    const rows = await db
+      .select(publicCatColumns)
+      .from(cats)
+      .where(inArray(cats.id, otherIds))
+      .orderBy(desc(cats.createdAt), asc(cats.id));
     for (const cat of await hydrate(rows)) byId.set(cat.id, { cat, spotted: false, named: false, amount: 0 });
   }
   for (const [id, e] of byId) {
     e.spotted = spotted.has(id);
     e.named = named.has(id);
   }
-  // Gifts first, biggest first; then the cats they spotted or named, newest cat first (the order they came in).
+  // Gifts first, biggest first, equal gifts newest cat first; then the cats they spotted or named, newest cat first.
+  // The sort is stable, so the order above decides every tie.
   return [...byId.values()].sort((x, y) => y.amount - x.amount);
 }
 
@@ -627,6 +633,8 @@ export type HomeData = {
 };
 
 const HOME_CATS = 5;
+/** The same number as the guardrails column default, for a home page whose rules row is missing. */
+const DEFAULT_PACKAGE_PRICE = 150_000;
 
 export async function getHomeData(): Promise<HomeData> {
   const [pool, rules, actions, all] = await Promise.all([
@@ -637,7 +645,8 @@ export async function getHomeData(): Promise<HomeData> {
   ]);
   return {
     poolAvailable: Math.max(0, pool.available),
-    packagePrice: rules[0].packagePrice,
+    // The migration inserts this row. If it is ever missing, the home page still opens with the schema default.
+    packagePrice: rules[0]?.packagePrice ?? DEFAULT_PACKAGE_PRICE,
     latestAction: actions[0] ?? null,
     cats: all.slice(0, HOME_CATS),
     catCount: all.length,
@@ -647,11 +656,18 @@ export async function getHomeData(): Promise<HomeData> {
 export type GoalProgress = { neutered: number; goal: number; area: string; percent: number };
 
 /**
- * Cats the fund neutered, counted from neuter treatments, one per cat. A cat found already ear-tipped has no
- * treatment from the fund, so it is not counted. The goal is a placeholder in config.
+ * The one neutered count for the Home goal, the yard and the Impact page: a cat with a neuter treatment, or a cat found
+ * ear-tipped that a caretaker has confirmed (neighbours' word alone is not enough). One per cat, whatever its status.
  */
+export const NEUTERED_CATS_SQL = sql`(
+  select count(*) from cats c
+  where exists (select 1 from treatments t where t.cat_id = c.id and t.type = 'neuter')
+     or (c.ear_tipped = true and not c.neutered_unconfirmed)
+)`;
+
+/** The goal is a placeholder in config. Counts as NEUTERED_CATS_SQL does. */
 export async function getGoalProgress(): Promise<GoalProgress> {
-  const { rows } = await db.execute(sql`select count(distinct cat_id)::int as n from treatments where type = 'neuter'`);
+  const { rows } = await db.execute(sql`select ${NEUTERED_CATS_SQL}::int as n`);
   const neutered = toInt((rows[0] as { n: unknown }).n);
   return {
     neutered,

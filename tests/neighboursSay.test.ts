@@ -68,8 +68,9 @@ describe("two neighbours saying already neutered", () => {
     expect(await names("neutered")).toContain(cat.id);
     expect(await names("waiting")).not.toContain(cat.id);
     expect((await getImpact()).alreadyNeutered).toBe(1);
-    // The goal counts the fund's own neuter treatments only, so a confirmed already-neutered cat is still not in it.
-    expect((await getGoalProgress()).neutered).toBe(0);
+    // R43: one neutered count. A caretaker-confirmed already-neutered cat is in the goal and in Impact's total.
+    expect((await getGoalProgress()).neutered).toBe(1);
+    expect((await getImpact()).catsNeutered).toBe(1);
   });
 
   it("goes back to Waiting words when a caretaker puts it back in the queue", async () => {

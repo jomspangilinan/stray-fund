@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db, type Tx } from "./db/client";
 import { CAPTURED, getPoolStatus, toInt, type PoolStatus } from "./ledger";
-import { publicLedgerRow, STATUS_GROUPS, type PublicLedgerRow } from "./public";
+import { NEUTERED_CATS_SQL, publicLedgerRow, STATUS_GROUPS, type PublicLedgerRow } from "./public";
 
 /*
  * The impact page and the public ledger. Both are aggregates or whitelisted rows: the ledger query selects
@@ -10,7 +10,9 @@ import { publicLedgerRow, STATUS_GROUPS, type PublicLedgerRow } from "./public";
 
 export type Impact = {
   /** Cats the fund neutered: a neuter treatment is on record. */
+  /** The one neutered count: cats the fund neutered plus cats a caretaker confirmed were found neutered. */
   catsNeutered: number;
+  catsNeuteredByFund: number;
   catsVaccinated: number;
   catsDewormed: number;
   catsAdopted: number;
@@ -32,7 +34,8 @@ export async function getImpact(): Promise<Impact> {
       const pool = await getPoolStatus(tx);
       const { rows } = await tx.execute(sql`
         select
-          (select count(distinct cat_id) from treatments where type = 'neuter') as neutered,
+          ${NEUTERED_CATS_SQL} as neutered,
+          (select count(distinct cat_id) from treatments where type = 'neuter') as by_fund,
           (select count(distinct cat_id) from treatments where type = 'vaccine') as vaccinated,
           (select count(distinct cat_id) from treatments where type = 'deworming') as dewormed,
           (select count(*) from cats where status = 'adopted') as adopted,
@@ -44,6 +47,7 @@ export async function getImpact(): Promise<Impact> {
       const r = rows[0] as Record<string, unknown>;
       return {
         catsNeutered: toInt(r.neutered),
+        catsNeuteredByFund: toInt(r.by_fund),
         catsVaccinated: toInt(r.vaccinated),
         catsDewormed: toInt(r.dewormed),
         catsAdopted: toInt(r.adopted),

@@ -18,7 +18,7 @@ async function Impact() {
   const impact = await getImpact();
   const c = conservation(impact.pool);
   const counts: [string, number][] = [
-    ["Neutered by the fund", impact.catsNeutered],
+    ["Cats neutered", impact.catsNeutered],
     ["Vaccinated", impact.catsVaccinated],
     ["Dewormed", impact.catsDewormed],
     ["Adopted", impact.catsAdopted],
@@ -61,8 +61,8 @@ async function Impact() {
           ))}
         </dl>
         <p className="mt-3 soft">
-          {impact.alreadyNeutered.toLocaleString("en-US")} more {impact.alreadyNeutered === 1 ? "cat was" : "cats were"}{" "}
-          already neutered when found. Not counted as the fund&apos;s work.
+          {impact.catsNeuteredByFund.toLocaleString("en-US")} by the fund.{" "}
+          {impact.alreadyNeutered.toLocaleString("en-US")} {impact.alreadyNeutered === 1 ? "was" : "were"} already neutered when found, as a caretaker confirmed.
         </p>
       </section>
 

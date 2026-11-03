@@ -1,11 +1,13 @@
+import { sql } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closePool, db } from "../src/server/db/client";
-import { allocations, cats, donations, milestoneSeen, treatments, users } from "../src/server/db/schema";
+import { allocations, cats, donations, milestoneSeen, sightings, treatments, users } from "../src/server/db/schema";
 import { COLONY } from "../src/lib/config";
 import { goalPercent } from "../src/lib/goal";
 import { getGoalProgress } from "../src/server/public";
+import { getImpact } from "../src/server/impact";
 import { celebrationText, confirmCelebrationSeen, findCelebration, markCelebrationSeen, milestonesFor } from "../src/server/milestones";
-import { getHelpedEntries } from "../src/server/public";
+import { getHelpedCats, getHelpedEntries } from "../src/server/public";
 import { truncateAll } from "./helpers/db";
 
 beforeEach(truncateAll);
@@ -40,12 +42,29 @@ describe("goal", () => {
     expect(await getGoalProgress()).toEqual({ neutered: 2, goal: COLONY.goalCats, area: COLONY.area_name, percent: 7 });
   });
 
-  it("does not count cats found already ear-tipped, or neutered by status alone", async () => {
+  it("counts a cat a caretaker confirmed as already neutered, but not one neighbours only said so about, nor a status alone (R43)", async () => {
     await mkCat({ status: "neutered", earTipped: true });
+    await mkCat({ status: "neutered", earTipped: true, neuteredUnconfirmed: true });
     await mkCat({ status: "neutered" });
     const p = await getGoalProgress();
-    expect(p.neutered).toBe(0);
-    expect(p.percent).toBe(0);
+    expect(p.neutered).toBe(1);
+    expect(p.percent).toBe(3);
+  });
+
+  it("is one number: Home goal, the Impact page and the sum of its parts agree, with one cat counted once", async () => {
+    const a = await mkCat({ status: "neutered", earTipped: true });
+    const b = await mkCat({ status: "adopted", earTipped: true });
+    const c = await mkCat({ status: "neutered", earTipped: true });
+    await mkCat({ status: "spotted", earTipped: false });
+    await neuter(a.id); // both a fund treatment and a tipped ear: still one cat
+    await neuter(b.id);
+    void c;
+    const goal = await getGoalProgress();
+    const impact = await getImpact();
+    expect(goal.neutered).toBe(3);
+    expect(impact.catsNeutered).toBe(goal.neutered);
+    expect(impact.alreadyNeutered).toBe(1);
+    expect(impact.catsNeuteredByFund).toBe(2);
   });
 
   it("clamps the bar to the goal", () => {
@@ -201,5 +220,36 @@ describe("getMissions", () => {
       state: "matched",
     });
     expect((await getMissions())[0].photoUrl).toContain("photos/b.jpg");
+  });
+});
+
+describe("Home with the spending rules row missing", () => {
+  it("still loads, with the default package price", async () => {
+    const { getHomeData } = await import("../src/server/public");
+    await db.execute(sql`delete from guardrails`);
+    const home = await getHomeData();
+    expect(home.packagePrice).toBe(150_000);
+  });
+});
+
+describe("Helped order is the same every time", () => {
+  const at = (day: number) => new Date(Date.UTC(2026, 9, day));
+
+  it("gifts first, biggest first, equal gifts newest cat first, then spotted cats newest first", async () => {
+    const u = await mkUser();
+    const old = await mkCat({ name: "OldGift", createdAt: at(1) });
+    const fresh = await mkCat({ name: "NewGift", createdAt: at(9) });
+    const big = await mkCat({ name: "BigGift", createdAt: at(3) });
+    await donate(u.id, old.id, 5_000);
+    await donate(u.id, fresh.id, 5_000);
+    await donate(u.id, big.id, 9_000);
+    const spottedOld = await mkCat({ name: "SpotOld", createdAt: at(2) });
+    const spottedNew = await mkCat({ name: "SpotNew", createdAt: at(8) });
+    const spottedMid = await mkCat({ name: "SpotMid", createdAt: at(5) });
+    for (const c of [spottedMid, spottedOld, spottedNew]) {
+      await db.insert(sightings).values({ catId: c.id, caughtByUserId: u.id, originalKey: `originals/00000000-0000-4000-8000-00000000000${++n % 10}.jpg`, state: "new_cat" });
+    }
+    const want = ["BigGift", "NewGift", "OldGift", "SpotNew", "SpotMid", "SpotOld"];
+    for (let i = 0; i < 5; i++) expect((await getHelpedCats(u.id)).map((h) => h.cat.name)).toEqual(want);
   });
 });

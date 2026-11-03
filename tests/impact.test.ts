@@ -140,7 +140,7 @@ describe("impact counts", () => {
     });
   });
 
-  it("does not count already ear-tipped cats as neutered by the fund, and shows them apart", async () => {
+  it("counts already ear-tipped cats in the one neutered number, and keeps the fund's own work apart", async () => {
     const vet = await user("vet_two", "vet");
     const fund = await cat("ByFund", "neutered", true);
     await cat("FoundTipped", "neutered", true);
@@ -148,7 +148,9 @@ describe("impact counts", () => {
     await cat("Open", "spotted", false);
     await db.insert(treatments).values({ catId: fund.id, type: "neuter", date: "2026-02-01", vetId: vet.id });
     const impact = await getImpact();
-    expect(impact.catsNeutered).toBe(1);
+    // One number (R43): the cat the fund did plus the two caretaker-confirmed ones found tipped.
+    expect(impact.catsNeutered).toBe(3);
+    expect(impact.catsNeuteredByFund).toBe(1);
     expect(impact.alreadyNeutered).toBe(2);
   });
 });

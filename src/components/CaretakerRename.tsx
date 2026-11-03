@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { parseCatName } from "@/lib/catNames";
+import { parseCatName, renameReply } from "@/lib/catNames";
 
 /** The pencil panel for a caretaker: type the name and it is set at once. It closes any waiting ideas for this cat. */
 export function CaretakerRename({ catId, name, onSaved }: { catId: string; name: string; onSaved: () => void }) {
@@ -35,8 +35,10 @@ export function CaretakerRename({ catId, name, onSaved }: { catId: string; name:
         setProblem(json.message ?? "Could not save that. Try again.");
         return;
       }
-      onSaved();
+      const reply = renameReply(json.message);
       router.refresh();
+      if (reply.close) onSaved();
+      else setProblem(reply.note);
     } catch {
       setProblem("Could not save that. Try again.");
     } finally {

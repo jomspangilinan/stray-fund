@@ -107,3 +107,15 @@ export function pickFreeName(taken: ReadonlySet<string>, random: () => number = 
     if (!taken.has(candidate.toLowerCase())) return candidate;
   }
 }
+
+/** The server's sentence when the wanted name was taken and another was set (see namedMessage in the caretaker handlers). */
+const TAKEN_SENTENCE = /was already taken, so the cat is now called/;
+
+/**
+ * What the pencil panel does with the reply to a save. A plain save closes the panel. When the name came out
+ * different from the one typed, the panel stays open and says so, because the cat is not called what was typed.
+ */
+export function renameReply(message: string | undefined): { close: boolean; note: string } {
+  const text = message ?? "";
+  return TAKEN_SENTENCE.test(text) ? { close: false, note: text } : { close: true, note: "" };
+}

@@ -228,7 +228,7 @@ describe("the seeded story", () => {
     expect(conservation(pool).balanced).toBe(true);
     expect(pool).toMatchObject({ grossIn: 850_000, paypalFees: 32_150, vetPaid: 165_000, payoutFees: 3_300, reservedPayouts: 0, heldForCats: 405_000, available: 244_550 });
     const impact = await getImpact();
-    expect(impact).toMatchObject({ catsNeutered: 1, catsVaccinated: 1, catsDewormed: 1, catsAdopted: 1, alreadyNeutered: 1 });
+    expect(impact).toMatchObject({ catsNeutered: 2, catsNeuteredByFund: 1, catsVaccinated: 1, catsDewormed: 1, catsAdopted: 1, alreadyNeutered: 1 });
     const { rows } = await db.execute(sql`select count(*)::int as n from allocations where cat_id is not null`);
     expect((rows[0] as { n: number }).n).toBeGreaterThan(0);
   });
