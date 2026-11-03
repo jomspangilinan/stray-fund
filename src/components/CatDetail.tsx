@@ -10,12 +10,14 @@ import { Progress } from "./CatRow";
 import { JourneyTimeline, niceDate } from "./JourneyTimeline";
 import { NameSuggest } from "./NameSuggest";
 import { RenameAgain } from "./RenameAgain";
+import { SexAsk } from "./SexAsk";
 
 export function CatDetail({
   card,
   thanks = [],
   earTip,
   names,
+  askSex = false,
 }: {
   card: CatCardData;
   thanks?: Thanks[];
@@ -23,6 +25,8 @@ export function CatDetail({
   earTip?: EarTipAnswer;
   /** Set only for a signed-in person: whether they may ask for another name, and their own pending suggestion. */
   names?: NameControls;
+  /** Set only for a signed-in person, and only while the card does not say girl or boy. */
+  askSex?: boolean;
 }) {
   const { cat, sightings, health } = card;
   return (
@@ -57,6 +61,12 @@ export function CatDetail({
       </header>
 
       {names && <NameSuggest catId={cat.id} pending={names.pending} />}
+
+      {askSex && (
+        <section className="card">
+          <SexAsk catId={cat.id} refresh />
+        </section>
+      )}
 
       {earTip !== undefined && earTipAskable(cat.status) && (
         <EarTipAsk catId={cat.id} initial={earTip} />

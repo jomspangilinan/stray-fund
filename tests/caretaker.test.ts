@@ -617,10 +617,10 @@ describe("sighting review", () => {
   });
 
   it("confirms a sighting the AI could not read, with plain defaults", async () => {
-    const s = await reviewSighting({ assessment: null, exactLat: null, exactLng: null, requestedSex: "male" });
+    const s = await reviewSighting({ assessment: null, exactLat: null, exactLng: null });
     expect((await act("sighting_confirm_new", { sightingId: s.id })).status).toBe(200);
     const [cat] = await db.select().from(cats);
-    expect(cat).toMatchObject({ name: "Little stray", sex: "male", locationApproximate: true });
+    expect(cat).toMatchObject({ name: "Little stray", sex: "unknown", locationApproximate: true });
     expect((await sightingRow(s.id)).publicReady).toBe(false);
   });
 

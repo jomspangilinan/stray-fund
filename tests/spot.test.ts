@@ -27,6 +27,7 @@ import {
   retryPendingSightings,
 } from "../src/server/spot";
 import { POST as spotPost } from "../src/app/api/spot/route";
+import { POST as earTipPost } from "../src/app/api/cats/[id]/ear-tip/route";
 
 const ASSESS = {
   is_cat: true,
@@ -70,6 +71,16 @@ async function jpeg(shade = 120): Promise<Buffer> {
     .jpeg()
     .toBuffer();
 }
+
+async function answerEarTip(userId: string, catId: string, answer: string) {
+  const [u] = await db.select().from(users).where(eq(users.id, userId));
+  jar.set(SESSION_COOKIE, await signSession({ userId, role: "donor", username: u.username }));
+  return earTipPost(
+    new Request("http://x/api", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ answer }) }),
+    { params: Promise.resolve({ id: catId }) },
+  );
+}
+
 
 let seq = 0;
 async function makeUser() {
@@ -188,48 +199,54 @@ describe("processSpot: new cats", () => {
     expect(JSON.stringify((await sightingRows())[0].assessment)).not.toMatch(/ear_tip/);
   });
 
-  it("records the finder's Yes or No as a flag on the card, and Not sure as nothing", async () => {
+  it("a spot carries no ear-tip answer: the cat starts with none, and the finder answers afterwards", async () => {
     const u = await makeUser();
-    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id, earTip: "no" });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     const [cat] = await catRows();
-    expect((await db.select().from(earTipFlags)).map((f) => [f.catId, f.userId, f.value])).toEqual([[cat.id, u.id, "no"]]);
+    expect(await db.select().from(earTipFlags)).toEqual([]);
     expect(cat.status).toBe("spotted");
-    const v = await makeUser();
-    script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
-    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: v.id });
-    expect(await db.select().from(earTipFlags)).toHaveLength(1);
+    expect((await answerEarTip(u.id, cat.id, "no")).status).toBe(200);
+    expect((await db.select().from(earTipFlags)).map((f) => [f.catId, f.userId, f.value])).toEqual([[cat.id, u.id, "no"]]);
+    expect((await catRows())[0].status).toBe("spotted");
   });
 
-  it("two different finders saying No queue the cat, two saying Yes make it already neutered", async () => {
+  it("the finder's answers meet the two-neighbour rule: two different people saying No queue, two saying Yes make it neutered", async () => {
     const [a, b, c, d] = [await makeUser(), await makeUser(), await makeUser(), await makeUser()];
-    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: a.id, earTip: "no" });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: a.id });
     const [cat] = await catRows();
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
-    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: b.id, earTip: "no" });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: b.id });
+    await answerEarTip(a.id, cat.id, "no");
+    expect((await catRows())[0]).toMatchObject({ status: "spotted" });
+    // The same person again changes nothing.
+    await answerEarTip(a.id, cat.id, "no");
+    expect((await catRows())[0]).toMatchObject({ status: "spotted" });
+    await answerEarTip(b.id, cat.id, "no");
     expect((await catRows())[0]).toMatchObject({ status: "queued", earTipped: false });
     expect(await wakeupKinds()).toEqual(["cat_queued"]);
 
     script.match = () => noMatch();
-    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: c.id, earTip: "yes" });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: c.id });
     const other = (await catRows()).find((x) => x.id !== cat.id)!;
     script.match = () => ({ match_cat_id: other.id, confidence: 0.9, reason: "same" });
-    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: d.id, earTip: "yes" });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: d.id });
+    await answerEarTip(c.id, other.id, "yes");
+    await answerEarTip(d.id, other.id, "yes");
     expect((await catRows()).find((x) => x.id === other.id)).toMatchObject({ status: "neutered", earTipped: true });
   });
 
-  it("a review that a caretaker confirms as a new cat still carries the finder's answer", async () => {
+  it("a review that a caretaker confirms as a new cat starts with no ear-tip answer", async () => {
     script.assess = () => assessWith();
     const u = await makeUser();
     const { key } = await storeOriginal(await jpeg());
     const [s] = await db
       .insert(sightings)
-      .values({ originalKey: key, caughtByUserId: u.id, state: "needs_review", requestedEarTip: "no", assessment: { ...ASSESS, review_reason: "ai_unusable" } })
+      .values({ originalKey: key, caughtByUserId: u.id, state: "needs_review", assessment: { ...ASSESS, review_reason: "ai_unusable" } })
       .returning();
     const { runAction } = await import("../src/server/caretaker");
     const care = await db.insert(users).values({ username: `care_${Date.now()}`, role: "caretaker" }).returning();
     expect((await runAction("sighting_confirm_new", care[0].id, { sightingId: s.id })).ok).toBe(true);
-    const [flag] = await db.select().from(earTipFlags);
-    expect(flag).toMatchObject({ userId: u.id, value: "no" });
+    expect(await db.select().from(earTipFlags)).toEqual([]);
   });
 
   it("gives a taken name a free built-in name and falls back for a blank name", async () => {
@@ -246,17 +263,15 @@ describe("processSpot: new cats", () => {
     expect(CAT_NAMES).toContain(third);
   });
 
-  it("takes sex from the form, else female only for a calico or tortoiseshell coat, else unknown", async () => {
+  it("starts unknown, female only for a calico or tortoiseshell coat the server read itself", async () => {
     const u = await makeUser();
     const base = { jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id };
     script.assess = () => assessWith({ suggested_name: "A", probably_female_by_coat: true });
     await processSpot(base);
-    script.assess = () => assessWith({ suggested_name: "B", probably_female_by_coat: true });
-    await processSpot({ ...base, sex: "male" });
     script.assess = () => assessWith({ suggested_name: "C" });
     await processSpot(base);
     const bySex = Object.fromEntries((await catRows()).map((c) => [c.name, c.sex]));
-    expect(bySex).toEqual({ A: "female", B: "male", C: "unknown" });
+    expect(bySex).toEqual({ A: "female", C: "unknown" });
   });
 
   it("copies flags from the assessment", async () => {
@@ -392,8 +407,9 @@ describe("processSpot: matching", () => {
     const { cat } = await seedCat({ status: "queued", earTipped: false });
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
-    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id, earTip: "yes" });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out).toMatchObject({ state: "matched", catId: cat.id });
+    expect((await answerEarTip(u.id, cat.id, "yes")).status).toBe(200);
     expect((await catRows())[0]).toMatchObject({ status: "queued", earTipped: false });
     expect((await db.select().from(reviewRequests)).filter((r) => r.status === "open")).toHaveLength(1);
   });
@@ -540,17 +556,6 @@ describe("processSpot: input and AI outage", () => {
     expect(out.state).toBe("queued_for_ai");
     expect(seen.assess).toBe(0);
   });
-
-  it("remembers the sex asked for through a retry", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    script.assess = () => new Error("down");
-    const u = await makeUser();
-    await processSpot({ jpeg: await jpeg(), lat: null, lng: null, userId: u.id, sex: "male" });
-    script.assess = () => assessWith();
-    await db.execute((await import("drizzle-orm")).sql`update sightings set created_at = now() - interval '2 minutes'`);
-    await retryPendingSightings();
-    expect((await catRows())[0]).toMatchObject({ sex: "male", locationApproximate: true });
-  });
 });
 
 describe("one-time apply", () => {
@@ -683,14 +688,13 @@ describe("POST /api/spot", () => {
     return u;
   }
 
-  async function body(fields: { photo?: Blob | null; lat?: string; lng?: string; sex?: string } = {}) {
+  async function body(fields: { photo?: Blob | null; lat?: string; lng?: string } = {}) {
     const f = new FormData();
     if (fields.photo !== null) {
       f.set("photo", fields.photo ?? new Blob([new Uint8Array(await jpeg())], { type: "image/jpeg" }), "cat.jpg");
     }
     if (fields.lat !== undefined) f.set("lat", fields.lat);
     if (fields.lng !== undefined) f.set("lng", fields.lng);
-    if (fields.sex !== undefined) f.set("sex", fields.sex);
     return f;
   }
   const post = (f: FormData, headers: Record<string, string> = {}) =>
@@ -704,7 +708,7 @@ describe("POST /api/spot", () => {
 
   it("returns a whitelisted result with no exact coordinates or keys", async () => {
     await signIn();
-    const res = await post(await body({ lat: "10.123456", lng: "120.654321", sex: "female" }));
+    const res = await post(await body({ lat: "10.123456", lng: "120.654321" }));
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
     expect(Object.keys(json).sort()).toEqual(["catId", "message", "reveal", "sightingId", "state"]);
@@ -715,7 +719,21 @@ describe("POST /api/spot", () => {
     // The only storage path allowed is the scrubbed public photo inside the reveal.
     expect(JSON.stringify({ ...json, reveal: null })).not.toMatch(/photos\//);
     const [cat] = await catRows();
-    expect(cat.sex).toBe("female");
+    expect(cat.sex).toBe("unknown");
+  });
+
+  it("no longer reads sex or ear-tip fields: a form that still sends them changes nothing", async () => {
+    await signIn();
+    const f = await body({ lat: "10.1", lng: "120.6" });
+    f.set("sex", "female");
+    f.set("earTip", "no");
+    f.set("sex2", "cat");
+    expect((await post(f)).status).toBe(200);
+    expect((await catRows())[0].sex).toBe("unknown");
+    expect(await db.select().from(earTipFlags)).toEqual([]);
+    const [s] = await sightingRows();
+    expect(s.requestedSex).toBeNull();
+    expect(s.requestedEarTip).toBeNull();
   });
 
   it("answers queued_for_ai when AI is down", async () => {
@@ -749,7 +767,6 @@ describe("POST /api/spot", () => {
     ["latitude out of range", { lat: "91", lng: "120" }],
     ["longitude out of range", { lat: "10", lng: "-181" }],
     ["a non-numeric latitude", { lat: "abc", lng: "120" }],
-    ["an unknown sex", { sex: "cat" }],
     ["a missing photo", { photo: null }],
   ])("returns 400 for %s", async (_n, fields) => {
     await signIn();

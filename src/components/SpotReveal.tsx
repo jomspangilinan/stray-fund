@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { AnotherNameButton } from "./AnotherNameButton";
 import { CatAvatar } from "./CatAvatar";
+import { EarTipAsk } from "./EarTipAsk";
+import { SexAsk } from "./SexAsk";
 import { revealCopy, type RevealState } from "@/lib/spotCopy";
 import type { SpotReveal as Reveal } from "@/server/spotReveal";
 
@@ -70,6 +72,14 @@ export function SpotReveal({
               ))}
               <li className={`tag ${reveal.needsFunding ? "tag-pop" : ""}`}>{reveal.statusLabel}</li>
             </ul>
+            {catId && (reveal.askSex || reveal.askEarTip) && (
+              <div className="grid gap-5 pt-2">
+                {reveal.askSex && (
+                  <SexAsk catId={catId} />
+                )}
+                {reveal.askEarTip && <EarTipAsk catId={catId} initial="unsure" bare />}
+              </div>
+            )}
           </div>
         </div>
 

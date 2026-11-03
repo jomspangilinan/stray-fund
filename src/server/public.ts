@@ -40,7 +40,7 @@ export function manilaDate(d: Date): string {
 
 export const isUuid = (s: string) => UUID.test(s);
 
-const SEX_LABEL: Record<string, string> = { female: "Female", male: "Male", unknown: "Sex unknown" };
+export const SEX_LABEL: Record<string, string> = { female: "Female", male: "Male", unknown: "Sex unknown" };
 
 export const STATUS_LABEL: Record<string, string> = {
   spotted: "Spotted",
@@ -681,6 +681,7 @@ export async function getYard(viewerId: string | null): Promise<PublicYard> {
       statusLabel: pub.statusLabel,
       avatar: parseAvatar(r.avatar) ?? NEUTRAL_AVATAR,
       marks: careMarks(pub.journey),
+      female: r.sex === "female",
     };
   });
   return {

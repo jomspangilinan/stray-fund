@@ -589,6 +589,9 @@ input[type="checkbox"] {
   }
 }
 .reveal .btn-quiet:disabled { background: var(--pale); }
+/* The questions sit on the white card, where the default chip would vanish. */
+.reveal-card .chip { background: var(--pale); }
+.reveal-card .chip[aria-checked="true"] { background: var(--ink); }
 
 @media (prefers-reduced-motion: reduce) {
   .scan-line {
@@ -789,6 +792,22 @@ input[type="checkbox"] {
   transform-origin: 40px 33px;
   animation: yard-blink 8s linear var(--off) infinite;
 }
+/* The one new motion: a ribbon pops on when someone first calls her a girl. Once, 220ms. */
+.avatar-ribbon-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ribbon-pop 220ms var(--ease-out) both;
+}
+@keyframes ribbon-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 .yard-name {
   position: absolute;
   left: 50%;
@@ -953,6 +972,7 @@ input[type="checkbox"] {
   .avatar,
   .avatar-tail,
   .avatar-eyes,
+  .avatar-ribbon-pop,
   .yard-loading .yard-stage {
     animation: none;
   }

@@ -12,7 +12,7 @@ const cat = (id: string, group: YardCat["group"] = "neutered"): YardCat => ({
   group,
   statusLabel: group,
   avatar: NEUTRAL_AVATAR,
-  marks: [],
+  marks: [], female: false,
 });
 
 describe("slots", () => {
@@ -133,12 +133,25 @@ describe("getYard whitelist", () => {
     const yard = await getYard(null);
     expect(Object.keys(yard).sort()).toEqual(["cats", "goal", "stage", "total"]);
     expect(yard.cats).toHaveLength(1);
-    expect(Object.keys(yard.cats[0]).sort()).toEqual(["avatar", "group", "id", "marks", "name", "statusLabel"]);
-    expect(yard.cats[0]).toMatchObject({ name: "Mimi", group: "waiting", avatar: { pattern: "tabby", base: "ginger", accent: "brown" }, marks: ["collar"] });
+    expect(Object.keys(yard.cats[0]).sort()).toEqual(["avatar", "female", "group", "id", "marks", "name", "statusLabel"]);
+    expect(yard.cats[0]).toMatchObject({ name: "Mimi", group: "waiting", avatar: { pattern: "tabby", base: "ginger", accent: "brown" }, marks: ["collar"], female: false });
     const text = JSON.stringify(yard);
     for (const s of ["10.987654321", "120.123456789", "10.55555555", "120.66666666", "exact", "fuzzed", "secret-marking-sentinel", "bio-sentinel", "originals/", "orange"]) {
       expect(text, `leaked ${s}`).not.toContain(s);
     }
+  });
+
+  it("tells the yard only whether a cat is a girl: a yes or no, never the word or who said", async () => {
+    await db.insert(cats).values([
+      { name: "Gal", areaName: "x", sex: "female" },
+      { name: "Guy", areaName: "x", sex: "male" },
+      { name: "Who", areaName: "x" },
+    ]);
+    const yard = await getYard(null);
+    const byName = Object.fromEntries(yard.cats.map((c) => [c.name, c.female]));
+    expect(byName).toEqual({ Gal: true, Guy: false, Who: false });
+    for (const c of yard.cats) expect(typeof c.female).toBe("boolean");
+    expect(JSON.stringify(yard).toLowerCase()).not.toMatch(/"sex"|:"(fe)?male"/);
   });
 
   it("uses the neutral cat until an avatar is ready and refuses a tampered one", async () => {

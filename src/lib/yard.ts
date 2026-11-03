@@ -19,6 +19,8 @@ export type YardCat = {
   statusLabel: string;
   avatar: Avatar;
   marks: CareMark[];
+  /** A girl wears a ribbon. Only this yes or no reaches the drawing. */
+  female: boolean;
 };
 
 /** Where a cat's feet rest, as a percent of the yard. Three loose rows, staggered, none on the wall. */

@@ -29,7 +29,6 @@ const cat = (patch: Partial<NonNullable<RevealInput["cat"]>> = {}): NonNullable<
 const sighting = (patch: Partial<RevealInput["sighting"]> = {}): RevealInput["sighting"] => ({
   publicKey: null,
   publicReady: false,
-  requestedSex: null,
   coatSaysFemale: false,
   ...patch,
 });
@@ -49,6 +48,9 @@ describe("buildReveal", () => {
       needsFunding: true,
       photoUrl: null,
       canRename: false,
+      female: false,
+      askSex: true,
+      askEarTip: true,
     });
   });
 
@@ -59,13 +61,6 @@ describe("buildReveal", () => {
       sighting: sighting({ coatSaysFemale: true }),
     });
     expect(fromCoat?.probablyFemale).toBe(true);
-    // The finder said female, so the server did not infer it.
-    const fromFinder = buildReveal({
-      state: "new_cat",
-      cat: cat({ sex: "female" }),
-      sighting: sighting({ coatSaysFemale: true, requestedSex: "female" }),
-    });
-    expect(fromFinder?.probablyFemale).toBe(false);
     // A cat we already knew keeps whatever sex it had; no claim from this photo.
     const matched = buildReveal({
       state: "matched",
@@ -75,6 +70,20 @@ describe("buildReveal", () => {
     expect(matched?.probablyFemale).toBe(false);
     // The coat rule did not fire.
     expect(buildReveal({ state: "new_cat", cat: cat({ sex: "female" }), sighting: sighting() })?.probablyFemale).toBe(false);
+  });
+
+  it("asks only what is unanswered and allowed for that cat", () => {
+    const ask = (c: Partial<NonNullable<RevealInput["cat"]>>, yourEarTip?: "yes" | "no") =>
+      buildReveal({ state: "matched", cat: cat(c), sighting: sighting(), yourEarTip });
+    expect(ask({ sex: "unknown", status: "spotted" })).toMatchObject({ askSex: true, askEarTip: true, female: false });
+    // A known sex is not asked again, and a girl is shown with her ribbon.
+    expect(ask({ sex: "female" })).toMatchObject({ askSex: false, female: true });
+    expect(ask({ sex: "male" })).toMatchObject({ askSex: false, female: false });
+    // The person already answered about the ear-tip.
+    expect(ask({}, "no")?.askEarTip).toBe(false);
+    // After the cat is neutered or later, neighbours are not asked about the ear.
+    expect(ask({ status: "neutered" })?.askEarTip).toBe(false);
+    expect(ask({ status: "adopted" })?.askEarTip).toBe(false);
   });
 
   it("makes no confident claims when a caretaker must look", () => {
@@ -91,6 +100,9 @@ describe("buildReveal", () => {
       needsFunding: false,
       photoUrl: null,
       canRename: false,
+      female: false,
+      askSex: false,
+      askEarTip: false,
     });
   });
 
@@ -152,13 +164,12 @@ describe("POST /api/spot reveal", () => {
     const [u] = await db.insert(users).values({ username: `rv_${Date.now()}`, role: "donor" }).returning();
     jar.set(SESSION_COOKIE, await signSession({ userId: u.id, role: "donor", username: u.username }));
   }
-  async function post(earTip?: string) {
+  async function post() {
     const f = new FormData();
     const jpeg = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 120, g: 90, b: 50 } } }).jpeg().toBuffer();
     f.set("photo", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }), "cat.jpg");
     f.set("lat", "10.123456");
     f.set("lng", "120.654321");
-    if (earTip) f.set("earTip", earTip);
     return spotPost(new Request("http://localhost/api/spot", { method: "POST", body: f }));
   }
 
@@ -170,10 +181,13 @@ describe("POST /api/spot reveal", () => {
     expect(json.state).toBe("new_cat");
     const reveal = json.reveal as Record<string, unknown>;
     expect(Object.keys(reveal).sort()).toEqual([
+      "askEarTip",
+      "askSex",
       "avatar",
       "canRename",
       "catId",
       "coat",
+      "female",
       "flags",
       "name",
       "needsFunding",
@@ -188,30 +202,34 @@ describe("POST /api/spot reveal", () => {
       coat: "Calico",
       yourEarTip: null,
       probablyFemale: true,
+      // The coat rule set female, so she is not asked again and wears her ribbon.
+      female: true,
+      askSex: false,
       // The AI no longer queues a cat. People's ear-tip answers do.
       needsFunding: false,
     });
     expect(String(reveal.photoUrl)).toMatch(/photos\//);
     const text = JSON.stringify(json);
     expect(text).not.toMatch(/SECRET|10\.1234|120\.6543|originals\/|confidence|exact|fuzzed|assessment/i);
-    const [row] = await db.select().from(sightings);
-    expect(row.requestedSex).toBeNull();
     expect((await db.select().from(cats))[0].sex).toBe("female");
   });
 
-  it("shows the finder their own ear-tip answer, labelled as theirs, and queues nothing on one answer", async () => {
+  it("asks the finder both questions for a cat of unknown sex, and sends no answers with the photo", async () => {
     await signIn();
-    const json = (await (await post("no")).json()) as { reveal: { yourEarTip: string; statusLabel: string; needsFunding: boolean } };
-    expect(json.reveal.yourEarTip).toBe("no");
-    expect(json.reveal.needsFunding).toBe(false);
-    expect((await db.select().from(cats))[0].status).toBe("spotted");
+    const f = new FormData();
+    const jpeg = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 120, g: 90, b: 50 } } }).jpeg().toBuffer();
+    f.set("photo", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }), "cat.jpg");
+    setAiForTests(async () => ({
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: JSON.stringify({ ...ASSESS, probably_female_by_coat: false }) }],
+    }));
+    const json = (await (await spotPost(new Request("http://localhost/api/spot", { method: "POST", body: f }))).json()) as {
+      reveal: { askSex: boolean; askEarTip: boolean; female: boolean; yourEarTip: unknown; needsFunding: boolean };
+    };
+    expect(json.reveal).toMatchObject({ askSex: true, askEarTip: true, female: false, yourEarTip: null, needsFunding: false });
     const [row] = await db.select().from(sightings);
-    expect(row.requestedEarTip).toBe("no");
-  });
-
-  it("refuses an ear-tip answer that is not yes, no or unsure", async () => {
-    await signIn();
-    expect((await post("maybe")).status).toBe(400);
+    expect(row.requestedSex).toBeNull();
+    expect(row.requestedEarTip).toBeNull();
   });
 
   it("gives a null reveal when the photo is saved for later", async () => {

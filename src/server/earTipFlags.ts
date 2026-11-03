@@ -144,17 +144,3 @@ export async function ownFlags(tx: Pick<Tx, "select">, userId: string, catIds: s
   for (const r of rows) out.set(r.catId, r.value as EarTipValue);
   return out;
 }
-
-/**
- * A finder's answer given with the photo becomes a flag once the sighting has a cat. Not sure is stored as
- * nothing and leaves any earlier answer alone. Caller holds the colony lock.
- */
-export async function applyRequestedEarTip(
-  tx: Tx,
-  sighting: { requestedEarTip: string | null; caughtByUserId: string | null },
-  catId: string,
-): Promise<void> {
-  const v = sighting.requestedEarTip;
-  if (!sighting.caughtByUserId || (v !== "yes" && v !== "no")) return;
-  await setEarTipFlagIn(tx, catId, sighting.caughtByUserId, v);
-}

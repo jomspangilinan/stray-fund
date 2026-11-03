@@ -634,15 +634,15 @@ describe("privacy of names", () => {
     expect(JSON.stringify(feed)).not.toContain(SENTINEL_USER);
   });
 
-  it("the private set is one named list that holds the ear-tip answer and every name action", () => {
+  it("the private set is one named list that holds the ear-tip answer, the sex answer and every name action", () => {
     expect([...PRIVATE_ACTIONS].sort()).toEqual(
-      ["ear_tip_answered", "name_another", "name_approved", "name_dismissed", "name_set", "name_suggested"].sort(),
+      ["ear_tip_answered", "name_another", "name_approved", "name_dismissed", "name_set", "name_suggested", "sex_answered"].sort(),
     );
   });
 });
 
 describe("the finder's reveal", () => {
-  const sighting = { publicKey: null, publicReady: false, requestedSex: null, coatSaysFemale: false };
+  const sighting = { publicKey: null, publicReady: false, coatSaysFemale: false };
   const cat = { id: "11111111-1111-4111-8111-111111111111", name: "Pepita", status: "queued", sex: "unknown", coatPattern: "tabby", avatar: null, flags: [] };
 
   it("carries canRename only when told, and never on a review", () => {

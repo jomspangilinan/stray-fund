@@ -4,8 +4,12 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { EarTipChoice, type EarTipAnswer } from "./EarTipChoice";
 
-/** On a cat card, for a signed-in neighbour. One tap sends the answer. It shows only this person's own answer. */
-export function EarTipAsk({ catId, initial }: { catId: string; initial: EarTipAnswer }) {
+/**
+ * On a cat card or the reveal, for a signed-in neighbour. One tap sends the answer to the same endpoint, so the
+ * two-neighbour rule is the same wherever it is asked. It shows only this person's own answer. `bare` drops the
+ * card and its heading for the reveal, which already sits on one.
+ */
+export function EarTipAsk({ catId, initial, bare = false }: { catId: string; initial: EarTipAnswer; bare?: boolean }) {
   const router = useRouter();
   const [answer, setAnswer] = useState<EarTipAnswer>(initial);
   const [busy, setBusy] = useState(false);
@@ -27,12 +31,23 @@ export function EarTipAsk({ catId, initial }: { catId: string; initial: EarTipAn
       }
       setAnswer(next);
       setNote("Saved. Thanks.");
-      router.refresh();
+      if (!bare) router.refresh();
     } catch {
       setNote("Could not save that. Try again.");
     } finally {
       setBusy(false);
     }
+  }
+
+  if (bare) {
+    return (
+      <div>
+        <EarTipChoice value={answer} onChange={pick} disabled={busy} />
+        <p className="small soft mt-2" role="status">
+          {note ?? "Optional. Only you see your answer."}
+        </p>
+      </div>
+    );
   }
 
   return (

@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { insertNewCat, publishPhoto } from "../spot";
 import { resolveReviewBySubject } from "../agent/review";
-import { applyRequestedEarTip, disagreementSubject, lateYesSubject } from "../earTipFlags";
+import { disagreementSubject, lateYesSubject } from "../earTipFlags";
 import { IllegalTransition, MoneyAlreadyMoved, markAlreadyNeutered, transitionCat } from "../catTransitions";
 import { AssessmentSchema } from "../ai/schemas";
 import { withColonyLock, type Tx } from "../db/client";
@@ -47,7 +47,6 @@ export const sightingConfirmNew: Handler = async (caretakerId, body) => {
     }
     const catId = (await insertNewCat(tx, s, assessment)).id;
     await tx.update(sightings).set({ catId, state: "new_cat" }).where(and(eq(sightings.id, s.id), eq(sightings.state, "needs_review")));
-    await applyRequestedEarTip(tx, s, catId);
     await audit(tx, {
       action: "sighting_reviewed",
       caretakerId,
@@ -69,7 +68,6 @@ export const sightingMerge: Handler = async (caretakerId, body) => {
     if (!cat) throw new Refusal(404, "There is no such cat.");
     // Only the sighting moves. The cat keeps its fuzzed location.
     await tx.update(sightings).set({ catId, state: "matched" }).where(and(eq(sightings.id, s.id), eq(sightings.state, "needs_review")));
-    await applyRequestedEarTip(tx, s, catId);
     await audit(tx, {
       action: "sighting_reviewed",
       caretakerId,

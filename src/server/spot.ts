@@ -5,7 +5,6 @@ import { assessPhoto, type Assessment } from "./ai/assess";
 import { AssessmentSchema } from "./ai/schemas";
 import { matchCat } from "./ai/match";
 import { db, lockColony, type Tx } from "./db/client";
-import { applyRequestedEarTip, type EarTipValue } from "./earTipFlags";
 import { cats, guardrails, sightings } from "./db/schema";
 import { catNamesInUse, uniqueName } from "./catNames";
 import { fuzzLocation } from "./location";
@@ -87,9 +86,6 @@ export async function processSpot(i: {
   lat: number | null;
   lng: number | null;
   userId: string;
-  sex?: Sex;
-  /** What the finder said about the ear tip. Left out for Not sure. */
-  earTip?: EarTipValue;
 }): Promise<SpotResult> {
   await assertUnderRateLimit(i.userId);
   const { key } = await storeOriginal(i.jpeg);
@@ -109,8 +105,6 @@ export async function processSpot(i: {
         state: "pending",
         exactLat: hasPoint ? i.lat : null,
         exactLng: hasPoint ? i.lng : null,
-        requestedSex: i.sex ?? null,
-        requestedEarTip: i.earTip ?? null,
       })
       .returning({ id: sightings.id });
     return row;
@@ -244,7 +238,7 @@ function cleanName(raw: string): string {
  */
 export async function applyAssessment(sightingId: string, a: Assessment, m: MatchOutcome): Promise<SpotResult> {
   const outcome = await db.transaction(async (tx) => {
-    // Colony lock first, like every other path, because the finder's ear-tip answer can move a cat.
+    // Colony lock first, like every other path that changes a cat.
     await lockColony(tx);
     const [s] = await tx.select().from(sightings).where(eq(sightings.id, sightingId)).for("update");
     if (!s) throw new Error(`Sighting not found: ${sightingId}`);
@@ -271,7 +265,6 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
         .update(sightings)
         .set({ catId: cat.id, state: "matched", matchConfidence: m.confidence, assessment: a })
         .where(eq(sightings.id, s.id));
-      await applyRequestedEarTip(tx, s, cat.id);
       return { done: true as const, result: result("matched", s.id, cat.id), sighting: s, catId: cat.id };
     }
 
@@ -293,7 +286,6 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
       .update(sightings)
       .set({ catId: cat.id, state: "new_cat", matchConfidence: m.catId ? m.confidence : null, assessment: a })
       .where(eq(sightings.id, s.id));
-    await applyRequestedEarTip(tx, s, cat.id);
     return { done: true as const, result: result("new_cat", s.id, cat.id), sighting: s, catId: cat.id };
   });
 
@@ -311,12 +303,8 @@ export async function insertNewCat(tx: Tx, s: SightingRow, a: Assessment | null)
   const hasPoint = s.exactLat !== null && s.exactLng !== null;
   const exact = hasPoint ? { lat: s.exactLat!, lng: s.exactLng! } : COLONY.centre;
   const fuzzed = fuzzLocation(exact.lat, exact.lng);
-  const sex: Sex =
-    s.requestedSex === "female" || s.requestedSex === "male" || s.requestedSex === "unknown"
-      ? s.requestedSex
-      : a?.probably_female_by_coat
-        ? "female"
-        : "unknown";
+  // Only the server's own coat rule sets a sex here. The finder answers afterwards, on the reveal or the card.
+  const sex: Sex = a?.probably_female_by_coat ? "female" : "unknown";
   const [cat] = await tx
     .insert(cats)
     .values({

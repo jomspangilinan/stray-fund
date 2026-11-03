@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { NEUTRAL_AVATAR, parseAvatar, type Avatar } from "@/lib/avatar";
+import { earTipAskable } from "@/lib/catState";
 import { db } from "./db/client";
 import { cats, sightings } from "./db/schema";
 import { canAskForAnotherName } from "./catNames";
@@ -25,13 +26,19 @@ export type SpotReveal = {
   yourEarTip: EarTipValue | null;
   flags: string[];
   statusLabel: string;
-  /** Only when the server's own coat rule set the sex, never when the finder chose it. */
+  /** Only when the server's own coat rule set the sex. */
   probablyFemale: boolean;
   /** The cat is waiting in the queue for the shared pool. */
   needsFunding: boolean;
   photoUrl: string | null;
   /** This person found the cat and no caretaker has named it, so Another name is on offer. */
   canRename: boolean;
+  /** The cat is a girl, so she wears a ribbon. A yes or no; the card already says the sex in words. */
+  female: boolean;
+  /** The sex is still unknown, so "Girl or boy?" is on offer. Optional for the person. */
+  askSex: boolean;
+  /** This person has not answered and neighbours are still asked about this cat. Optional for the person. */
+  askEarTip: boolean;
 };
 
 export type RevealInput = {
@@ -53,7 +60,6 @@ export type RevealInput = {
   sighting: {
     publicKey: string | null;
     publicReady: boolean;
-    requestedSex: string | null;
     /** The assessment said a clear calico or tortoiseshell coat. */
     coatSaysFemale: boolean;
   };
@@ -70,8 +76,6 @@ const COAT_LABEL: Record<string, string> = {
   other: "Mixed coat",
 };
 
-const SEXES = new Set(["female", "male", "unknown"]);
-
 export function buildReveal(i: RevealInput): SpotReveal | null {
   if (i.state === "needs_review") {
     // A person decides, so nothing about the cat is stated.
@@ -87,11 +91,13 @@ export function buildReveal(i: RevealInput): SpotReveal | null {
       needsFunding: false,
       photoUrl: null,
       canRename: false,
+      female: false,
+      askSex: false,
+      askEarTip: false,
     };
   }
   if ((i.state !== "new_cat" && i.state !== "matched") || !i.cat) return null;
   const { cat, sighting } = i;
-  const finderChose = sighting.requestedSex !== null && SEXES.has(sighting.requestedSex);
   return {
     catId: cat.id,
     name: cat.name,
@@ -100,10 +106,13 @@ export function buildReveal(i: RevealInput): SpotReveal | null {
     yourEarTip: i.yourEarTip ?? null,
     flags: cat.flags.map((f) => FLAG_LABEL[f]).filter((f): f is string => Boolean(f)),
     statusLabel: STATUS_LABEL[cat.status] ?? cat.status,
-    probablyFemale: i.state === "new_cat" && !finderChose && sighting.coatSaysFemale && cat.sex === "female",
+    probablyFemale: i.state === "new_cat" && sighting.coatSaysFemale && cat.sex === "female",
     needsFunding: cat.status === "queued",
     photoUrl: sighting.publicReady && sighting.publicKey ? getStorage().publicUrl(sighting.publicKey) : null,
     canRename: i.canRename === true,
+    female: cat.sex === "female",
+    askSex: cat.sex === "unknown",
+    askEarTip: earTipAskable(cat.status) && !i.yourEarTip,
   };
 }
 
@@ -115,7 +124,6 @@ export async function loadReveal(sightingId: string, state: SpotState): Promise<
       catId: sightings.catId,
       publicKey: sightings.publicKey,
       publicReady: sightings.publicReady,
-      requestedSex: sightings.requestedSex,
       assessment: sightings.assessment,
       finderId: sightings.caughtByUserId,
     })
@@ -147,7 +155,6 @@ export async function loadReveal(sightingId: string, state: SpotState): Promise<
     sighting: {
       publicKey: s.publicKey,
       publicReady: s.publicReady,
-      requestedSex: s.requestedSex,
       coatSaysFemale: a?.probably_female_by_coat === true,
     },
   });

@@ -7,7 +7,7 @@ import { BlockSkeleton } from "@/components/Loading";
 import { nameControls } from "@/server/catNames";
 import { db } from "@/server/db/client";
 import { ownFlags } from "@/server/earTipFlags";
-import { getCatCard } from "@/server/public";
+import { getCatCard, SEX_LABEL } from "@/server/public";
 import { getSession } from "@/server/session";
 import { getCatThanks } from "@/server/thanks";
 
@@ -21,7 +21,7 @@ async function Card({ params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   const mine = session ? (await ownFlags(db, session.userId, [card.cat.id])).get(card.cat.id) : undefined;
   const names = session ? await nameControls(card.cat.id, session.userId) : undefined;
-  return <CatDetail card={card} thanks={await getCatThanks(card.cat.id)} earTip={session ? (mine ?? "unsure") : undefined} names={names} />;
+  return <CatDetail card={card} thanks={await getCatThanks(card.cat.id)} earTip={session ? (mine ?? "unsure") : undefined} names={names} askSex={session !== null && card.cat.sex === SEX_LABEL.unknown} />;
 }
 
 export default function CatPage({ params }: PageProps<"/cats/[id]">) {

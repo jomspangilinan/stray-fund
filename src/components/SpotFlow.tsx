@@ -5,14 +5,12 @@ import { useEffect, useRef, useState } from "react";
 import { boxToView, clampBox } from "@/lib/catDetect";
 import { COLONY } from "@/lib/config";
 import type { SpotReveal as Reveal } from "@/server/spotReveal";
-import { EarTipChoice, type EarTipAnswer } from "./EarTipChoice";
 import { LiveCamera, type CaptureLocation } from "./LiveCamera";
 import { ScanChecklist } from "./ScanChecklist";
 import { SignIn } from "./SignIn";
 import { SpotReveal } from "./SpotReveal";
 import { useCatDetector } from "./useCatDetector";
 
-type Sex = "unknown" | "female" | "male";
 type Done = {
   state: "new_cat" | "matched" | "needs_review" | "rejected" | "queued_for_ai";
   catId: string | null;
@@ -25,12 +23,6 @@ type Phase =
   | { kind: "sending"; startedAt: number; responded: boolean; state?: Done["state"] }
   | { kind: "done"; done: Done }
   | { kind: "error"; message: string };
-
-const SEXES: { value: Sex; label: string }[] = [
-  { value: "unknown", label: "Not sure" },
-  { value: "female", label: "Female" },
-  { value: "male", label: "Male" },
-];
 
 const HEADINGS: Record<Done["state"], string> = {
   new_cat: "A new card",
@@ -53,8 +45,6 @@ const AREA = COLONY.area_name.split(",")[0];
 
 export function SpotFlow({ username }: { username: string | null }) {
   const [phase, setPhase] = useState<Phase>({ kind: "camera" });
-  const [sex, setSex] = useState<Sex>("unknown");
-  const [earTip, setEarTip] = useState<EarTipAnswer>("unsure");
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const urlRef = useRef<string | null>(null);
@@ -109,7 +99,6 @@ export function SpotFlow({ username }: { username: string | null }) {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     urlRef.current = null;
     setCapturedUrl(null);
-    setEarTip("unsure");
     setPhase({ kind: "camera" });
   }
 
@@ -132,8 +121,6 @@ export function SpotFlow({ username }: { username: string | null }) {
       form.set("lat", String(where.lat));
       form.set("lng", String(where.lng));
     }
-    if (sex !== "unknown") form.set("sex", sex);
-    if (earTip !== "unsure") form.set("earTip", earTip);
     try {
       const res = await fetch("/api/spot", { method: "POST", body: form });
       const body = (await res.json().catch(() => ({}))) as Partial<Done> & { error?: string };
@@ -225,32 +212,11 @@ export function SpotFlow({ username }: { username: string | null }) {
             ) : null
           }
           controls={
-            <div className="grid gap-4">
-              <fieldset className="grid gap-2">
-                <legend className="mb-2 font-bold">Is it a girl or a boy?</legend>
-                <div role="radiogroup" aria-label="Sex" className="flex flex-wrap gap-2">
-                  {SEXES.map((o) => (
-                    <button
-                      key={o.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={sex === o.value}
-                      className="chip"
-                      onClick={() => setSex(o.value)}
-                    >
-                      {sex === o.value ? "✓ " : ""}
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-              <EarTipChoice value={earTip} onChange={setEarTip} disabled={sending} />
-              {phase.kind === "error" && (
-                <p role="alert" className="note note-bad font-bold">
-                  {phase.message}
-                </p>
-              )}
-            </div>
+            phase.kind === "error" ? (
+              <p role="alert" className="note note-bad font-bold">
+                {phase.message}
+              </p>
+            ) : undefined
           }
           busyPanel={
             sending ? (

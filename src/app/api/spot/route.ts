@@ -3,13 +3,11 @@ import { describeError } from "@/server/errors";
 import { BodyTooLarge, parseForm, readLimited } from "@/server/http";
 import { AuthError, requireRole } from "@/server/session";
 import { loadReveal } from "@/server/spotReveal";
-import { assertUnderRateLimit, processSpot, RateLimited, type Sex } from "@/server/spot";
+import { assertUnderRateLimit, processSpot, RateLimited } from "@/server/spot";
 import { InvalidPhoto, MAX_BYTES } from "@/server/photos";
 
 // Room for the multipart envelope around a photo that is itself at most MAX_BYTES.
 const MAX_BODY = MAX_BYTES + 64 * 1024;
-const SEXES = new Set<string>(["female", "male", "unknown"]);
-const EAR_TIPS = new Set<string>(["yes", "no", "unsure"]);
 
 const fail = (error: string, status: number) => NextResponse.json({ error }, { status });
 
@@ -21,7 +19,7 @@ function coordinate(raw: FormDataEntryValue | null, min: number, max: number): n
 }
 
 /**
- * Multipart form: photo (image/jpeg), optional lat and lng (both or neither), optional sex, optional earTip (yes, no or unsure).
+ * Multipart form: photo (image/jpeg), optional lat and lng (both or neither). Questions about the cat come after the photo.
  * The answer is a whitelist: state, catId, sightingId, message, and a reveal built by buildReveal. No coordinates, storage keys or assessment text.
  */
 export async function POST(req: Request) {
@@ -42,23 +40,12 @@ export async function POST(req: Request) {
     if (lat === "bad" || lng === "bad" || (lat === null) !== (lng === null)) {
       return fail("Send both a valid latitude and longitude, or neither", 400);
     }
-    const sexRaw = form.get("sex");
-    if (sexRaw !== null && sexRaw !== "" && (typeof sexRaw !== "string" || !SEXES.has(sexRaw))) {
-      return fail("Sex must be female, male or unknown", 400);
-    }
-
-    const earRaw = form.get("earTip");
-    if (earRaw !== null && earRaw !== "" && (typeof earRaw !== "string" || !EAR_TIPS.has(earRaw))) {
-      return fail("The ear-tip answer must be yes, no or unsure", 400);
-    }
 
     const out = await processSpot({
       jpeg: Buffer.from(await photo.arrayBuffer()),
       lat,
       lng,
       userId: session.userId,
-      sex: sexRaw ? (sexRaw as Sex) : undefined,
-      earTip: earRaw === "yes" || earRaw === "no" ? earRaw : undefined,
     });
     return NextResponse.json({
       state: out.state,
