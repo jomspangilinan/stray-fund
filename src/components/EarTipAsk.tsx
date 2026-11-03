@@ -1,10 +1,12 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { EarTipChoice, type EarTipAnswer } from "./EarTipChoice";
 
 /** On a cat card, for a signed-in neighbour. One tap sends the answer. It shows only this person's own answer. */
 export function EarTipAsk({ catId, initial }: { catId: string; initial: EarTipAnswer }) {
+  const router = useRouter();
   const [answer, setAnswer] = useState<EarTipAnswer>(initial);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -25,6 +27,7 @@ export function EarTipAsk({ catId, initial }: { catId: string; initial: EarTipAn
       }
       setAnswer(next);
       setNote("Saved. Thanks.");
+      router.refresh();
     } catch {
       setNote("Could not save that. Try again.");
     } finally {

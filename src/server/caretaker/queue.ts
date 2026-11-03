@@ -68,6 +68,8 @@ export type CaretakerQueue = {
   heldPhotos: { sightingId: string; catId: string | null; catName: string | null; state: string; hasRegions: boolean; date: string }[];
   /** Spotted cats whose ears the flags have not settled yet, with how many people said each. */
   earTipPending: { id: string; name: string; yes: number; no: number; exact: ExactSpot }[];
+  /** Cats marked neutered with no vet record, no money and no payout, so a caretaker can put a wrong call back. */
+  neuteredWithoutRecord: { id: string; name: string }[];
   /** For the merge menu. */
   catChoices: { id: string; name: string; status: string; sex: string; flags: string[] }[];
 };
@@ -211,6 +213,19 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     .groupBy(earTipFlags.catId, earTipFlags.value);
   const countOf = (catId: string, value: string) => flagCounts.find((f) => f.catId === catId && f.value === value)?.n ?? 0;
 
+  const noRecord = await db
+    .select({ id: cats.id, name: cats.name })
+    .from(cats)
+    .where(
+      and(
+        eq(cats.status, "neutered"),
+        sql`not exists (select 1 from treatments t where t.cat_id = ${cats.id} and t.type = 'neuter')`,
+        sql`not exists (select 1 from allocations a where a.cat_id = ${cats.id})`,
+        sql`not exists (select 1 from payouts p where p.cat_id = ${cats.id})`,
+      ),
+    )
+    .orderBy(asc(cats.createdAt), asc(cats.id));
+
   return {
     awaitingApproval,
     needsReview,
@@ -230,6 +245,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
       date: manilaDate(s.createdAt),
     })),
     earTipPending: undecided.map((c) => ({ id: c.id, name: c.name, yes: countOf(c.id, "yes"), no: countOf(c.id, "no"), exact: exactOf(c.lat, c.lng, c.approx) })),
+    neuteredWithoutRecord: noRecord,
     catChoices: allCats,
   };
 }

@@ -403,6 +403,22 @@ function EarTips({ items }: { items: CaretakerQueue["earTipPending"] }) {
   );
 }
 
+function NeuteredWithoutRecord({ items }: { items: CaretakerQueue["neuteredWithoutRecord"] }) {
+  return (
+    <Section id="neutered" title="Neutered with no vet record" count={items.length} empty="Every neutered cat has a vet record.">
+      {items.map((c) => (
+        <li key={c.id} className="card">
+          <h3 className="text-base font-extrabold">{c.name}</h3>
+          <p className="small">Marked neutered without a vet. No money is set aside for this cat.</p>
+          <ActionForm action="cat_undo_neutered" submitLabel="Not neutered, back to the queue" quiet>
+            <Hidden name="catId" value={c.id} />
+          </ActionForm>
+        </li>
+      ))}
+    </Section>
+  );
+}
+
 function Cats({ cats }: { cats: CaretakerQueue["catChoices"] }) {
   return (
     <section className="mt-10" aria-labelledby="cats">
@@ -545,6 +561,7 @@ async function Desk() {
       <Wakeups items={q.failedWakeups} />
       <Photos items={q.heldPhotos} />
       <EarTips items={q.earTipPending} />
+      <NeuteredWithoutRecord items={q.neuteredWithoutRecord} />
       <Cats cats={q.catChoices} />
       <Rules rules={rules} />
     </>

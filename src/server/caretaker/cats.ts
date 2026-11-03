@@ -5,9 +5,10 @@ import { applyRequestedEarTip, disagreementSubject, lateYesSubject } from "../ea
 import { IllegalTransition, MoneyAlreadyMoved, markAlreadyNeutered, transitionCat } from "../catTransitions";
 import { AssessmentSchema } from "../ai/schemas";
 import { withColonyLock, type Tx } from "../db/client";
-import { cats, sightings, wakeups } from "../db/schema";
+import { allocations, cats, earTipFlags, payouts, sightings, treatments, wakeups } from "../db/schema";
 import { publishScrubbed, type Box } from "../photos";
 import { StoredObjectMissing } from "../storage";
+import { enqueueWakeup } from "../wakeups";
 import { audit, flag, reqUuid, Refusal, type Handler } from "./shared";
 import type { CatStatus } from "@/lib/catState";
 
@@ -175,6 +176,39 @@ export const catSetEarTip: Handler = async (caretakerId, body) => {
     await transitionCat(tx, catId, "queued");
     await tx.insert(wakeups).values({ kind: "cat_queued", payload: { catId } });
     return note("Marked as not ear-tipped. The cat joins the queue for funding.", "queued");
+  });
+};
+
+/**
+ * Takes a wrong "already neutered" call back: the cat returns to the queue. Allowed only for a cat that is
+ * marked neutered with no neuter treatment, no allocation and no payout, checked under the lock that every
+ * cat action uses. The Yes answers that caused the call are removed, so they stop counting anywhere; an
+ * answer given afterwards is a new answer and files a review like any late Yes.
+ */
+export const catUndoNeutered: Handler = async (caretakerId, body) => {
+  const catId = reqUuid(body, "catId", "The cat");
+  return withColonyLock(async (tx) => {
+    const [cat] = await tx.select().from(cats).where(eq(cats.id, catId)).for("update");
+    if (!cat) throw new Refusal(404, "There is no such cat.");
+    if (cat.status !== "neutered") throw new Refusal(409, "Only a cat marked neutered can be put back in the queue.");
+    const [treated] = await tx.select({ id: treatments.id }).from(treatments).where(and(eq(treatments.catId, catId), eq(treatments.type, "neuter"))).limit(1);
+    const [allocated] = await tx.select({ id: allocations.id }).from(allocations).where(eq(allocations.catId, catId)).limit(1);
+    const [paid] = await tx.select({ id: payouts.id }).from(payouts).where(eq(payouts.catId, catId)).limit(1);
+    if (treated || allocated || paid) {
+      throw new Refusal(409, "This cat has a vet record, money set aside or a payout, so it cannot be put back in the queue.");
+    }
+
+    const cleared = await tx.delete(earTipFlags).where(and(eq(earTipFlags.catId, catId), eq(earTipFlags.value, "yes"))).returning({ id: earTipFlags.id });
+    await tx.update(cats).set({ earTipped: false, queuedAt: new Date() }).where(eq(cats.id, catId));
+    await transitionCat(tx, catId, "queued");
+    await enqueueWakeup(tx, "cat_queued", { catId });
+    await audit(tx, {
+      action: "cat_updated",
+      caretakerId,
+      reason: "A caretaker updated a cat's card.",
+      inputs: { catId, change: "neutered_undone", from: "neutered", yesAnswersCleared: cleared.length },
+    });
+    return "Put back in the queue. The earlier ear-tip answers no longer count.";
   });
 };
 

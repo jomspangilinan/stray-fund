@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { earTipAskable } from "@/lib/catState";
 import type { CatCardData } from "@/server/public";
 import type { Thanks } from "@/server/thanks";
 import { CatPhoto } from "./CatPhoto";
@@ -44,7 +45,7 @@ export function CatDetail({
         {cat.bio && <p className="mt-4 max-w-[52ch]">{cat.bio}</p>}
       </header>
 
-      {earTip !== undefined && cat.status === "spotted" && cat.earTipped === null && (
+      {earTip !== undefined && earTipAskable(cat.status) && (
         <EarTipAsk catId={cat.id} initial={earTip} />
       )}
 

@@ -10,6 +10,7 @@ import { enqueueWakeup } from "../wakeups";
 import {
   VetFlowError,
   applyVerifiedOutcome,
+  assertEarTipPhotoStored,
   confirmEarTipPhoto,
   depositPaidOn,
   receiptDate,
@@ -83,6 +84,12 @@ export const evidenceAccept: Handler = async (caretakerId, body) => {
     if (!r) throw new Refusal(404, "There is no such receipt.");
     if (r.verification !== "needs_review") {
       throw new Refusal(409, "This receipt is no longer waiting for review.");
+    }
+    try {
+      await assertEarTipPhotoStored(r);
+    } catch (e) {
+      if (e instanceof VetFlowError) throw new Refusal(409, e.message);
+      throw e;
     }
     const [booking] = await tx.select().from(bookings).where(eq(bookings.id, r.bookingId));
     const [cat] = await tx.select().from(cats).where(eq(cats.id, booking.catId)).for("update");

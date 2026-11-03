@@ -597,6 +597,20 @@ async function applyEvidence(receiptId: string, parsed: ReceiptReading | null): 
 }
 
 /**
+ * A caretaker's tick says "I saw the ear-tip in the photo", so the photo has to be there to be seen. The one
+ * check for both ways a caretaker can verify a receipt. Throws PHOTO_MISSING (409) when there is none.
+ */
+export async function assertEarTipPhotoStored(r: { earTipPhotoKey: string | null }): Promise<void> {
+  if (!r.earTipPhotoKey) throw new VetFlowError("PHOTO_MISSING", 409, "There is no ear-tip photo to look at.");
+  try {
+    await getStorage().getPrivate(r.earTipPhotoKey);
+  } catch (e) {
+    if (e instanceof StoredObjectMissing) throw new VetFlowError("PHOTO_MISSING", 409, "The ear-tip photo is missing, so it cannot be confirmed.");
+    throw e;
+  }
+}
+
+/**
  * A caretaker saw the ear-tip in the vet's photo. Caller holds the colony lock and has checked the role. The
  * checks run again on today's facts, since days may have passed, and only a receipt that still passes becomes
  * verified. The effect is the same shared function every verified receipt uses. Returns what became of it.
@@ -607,13 +621,7 @@ export async function confirmEarTipPhoto(tx: Tx, receiptId: string): Promise<Evi
   if (r.verification !== "awaiting_ear_tip_confirmation") {
     throw new VetFlowError("NOT_WAITING", 409, "This receipt is not waiting for an ear-tip confirmation.");
   }
-  if (!r.earTipPhotoKey) throw new VetFlowError("PHOTO_MISSING", 409, "There is no ear-tip photo to look at.");
-  try {
-    await getStorage().getPrivate(r.earTipPhotoKey);
-  } catch (e) {
-    if (e instanceof StoredObjectMissing) throw new VetFlowError("PHOTO_MISSING", 409, "The ear-tip photo is missing, so it cannot be confirmed.");
-    throw e;
-  }
+  await assertEarTipPhotoStored(r);
 
   const read = ReceiptSchema.safeParse(r.parsed);
   const parsed = read.success ? read.data : null;

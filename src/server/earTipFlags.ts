@@ -1,8 +1,9 @@
 import { and, eq, sql } from "drizzle-orm";
 import { fileReview } from "./agent/review";
 import { MoneyAlreadyMoved, markAlreadyNeutered, transitionCat } from "./catTransitions";
-import { withColonyLock, type Tx } from "./db/client";
-import { cats, earTipFlags } from "./db/schema";
+import { db, withColonyLock, type Tx } from "./db/client";
+import { agentActions, cats, earTipFlags } from "./db/schema";
+import { RATE_LIMIT_PER_MINUTE, RateLimited } from "./spot";
 import { enqueueWakeup } from "./wakeups";
 
 /*
@@ -55,7 +56,7 @@ export async function applyEarTipRule(tx: Tx, catId: string, changed: EarTipValu
   if (cat.status === "spotted") {
     const verdict = verdictFor(await countFlags(tx, catId));
     if (verdict === "review") {
-      await fileReview(tx, disagreementSubject(catId), "People gave different answers about this cat's ear-tip. Please look and decide.");
+      await fileReview(tx, disagreementSubject(catId), `People gave different answers about ${cat.name}'s ear-tip. Please look and decide.`);
     } else if (verdict === "queue") {
       await tx.update(cats).set({ earTipped: false, queuedAt: new Date() }).where(eq(cats.id, catId));
       await transitionCat(tx, catId, "queued");
@@ -66,19 +67,47 @@ export async function applyEarTipRule(tx: Tx, catId: string, changed: EarTipValu
         await tx.transaction((inner) => markAlreadyNeutered(inner, catId));
       } catch (e) {
         if (!(e instanceof MoneyAlreadyMoved)) throw e;
-        await fileReview(tx, disagreementSubject(catId), "Two people say this cat has an ear-tip, but money is already set aside for it. Please look and decide.");
+        await fileReview(tx, disagreementSubject(catId), `Two people say ${cat.name} has an ear-tip, but money is already set aside for it. Please look and decide.`);
       }
     }
     return;
   }
 
   if ((WAITING_STATUSES as readonly string[]).includes(cat.status) && changed === "yes") {
-    await fileReview(tx, lateYesSubject(catId), "A person says this cat has an ear-tip, but it is already in the queue or in care. Please look and decide.");
+    await fileReview(tx, lateYesSubject(catId), `A person says ${cat.name} has an ear-tip, but it is already in the queue or in care. Please look and decide.`);
   }
 }
 
-/** Writes or removes one person's answer, then runs the rule. Caller holds the colony lock. */
+export const FLAG_AUDIT_ACTION = "ear_tip_answered";
+
+async function currentAnswer(tx: Pick<Tx, "select">, catId: string, userId: string): Promise<EarTipValue | null> {
+  const [row] = await tx
+    .select({ value: earTipFlags.value })
+    .from(earTipFlags)
+    .where(and(eq(earTipFlags.catId, catId), eq(earTipFlags.userId, userId)));
+  return (row?.value as EarTipValue | undefined) ?? null;
+}
+
+/**
+ * Refuses a person who has changed answers too often in the last minute. Checked before the colony lock is
+ * taken, so a flood is cheap to turn away. It counts the audit rows of real moves, so repeating an answer is free.
+ */
+export async function assertUnderFlagLimit(userId: string): Promise<void> {
+  const { rows } = await db.execute(sql`
+    select count(*)::int as n from agent_actions
+    where action = ${FLAG_AUDIT_ACTION} and inputs->>'userId' = ${userId} and created_at > now() - interval '1 minute'
+  `);
+  if ((rows[0] as { n: number }).n >= RATE_LIMIT_PER_MINUTE) throw new RateLimited();
+}
+
+/**
+ * Writes or removes one person's answer, then runs the rule. Caller holds the colony lock. Saying what the
+ * person already said changes nothing. A real move leaves an audit row; the public feed prints only its fixed
+ * sentence and the cat's name, and never reads inputs, which hold the person's id for the rate limit.
+ */
 export async function setEarTipFlagIn(tx: Tx, catId: string, userId: string, value: EarTipValue | null): Promise<void> {
+  const before = await currentAnswer(tx, catId, userId);
+  if (before === value) return;
   if (value === null) {
     await tx.delete(earTipFlags).where(and(eq(earTipFlags.catId, catId), eq(earTipFlags.userId, userId)));
   } else {
@@ -87,12 +116,22 @@ export async function setEarTipFlagIn(tx: Tx, catId: string, userId: string, val
       .values({ catId, userId, value })
       .onConflictDoUpdate({ target: [earTipFlags.catId, earTipFlags.userId], set: { value, createdAt: sql`now()` } });
   }
+  await tx.insert(agentActions).values({
+    action: FLAG_AUDIT_ACTION,
+    inputs: { catId, userId, from: before, to: value },
+    reason: "A neighbour answered about a cat's ear-tip.",
+    status: "done",
+  });
   await applyEarTipRule(tx, catId, value);
 }
 
-/** One person's answer about one cat, in its own transaction. Null is Not sure and takes an earlier answer back. */
-export function setEarTipFlag(catId: string, userId: string, value: EarTipValue | null): Promise<void> {
-  return withColonyLock((tx) => setEarTipFlagIn(tx, catId, userId, value));
+/**
+ * One person's answer about one cat, in its own transaction. Null is Not sure and takes an earlier answer back.
+ * An answer that is already on record returns before the lock is taken.
+ */
+export async function setEarTipFlag(catId: string, userId: string, value: EarTipValue | null): Promise<void> {
+  if ((await currentAnswer(db, catId, userId)) === value) return;
+  await withColonyLock((tx) => setEarTipFlagIn(tx, catId, userId, value));
 }
 
 /** The caller's own answers only, for the cat card, the reveal and the missions. Never anyone else's. */

@@ -9,10 +9,11 @@ import { db } from "./db/client";
  *  - funded: a net positive allocation from that person's captured donation
  *  - vet care: a receipt that was verified, for the vet on the booking
  *  - ear-tip: an ear-tip answer that matched what settled the cat (a caretaker's decision, or the vet's photo
- *    a caretaker confirmed). An answer nobody else backed, or that was overruled, earns nothing.
+ *    a caretaker confirmed). An answer nobody else backed, or that was overruled, earns nothing. Answers are
+ *    private: this line always reads "A neighbour", with no badges, even for someone who is named elsewhere.
  *  - caretaker: evidence accepted, an ear-tip photo confirmed, or a cat marked adopted, recorded in the audit trail
  * Order is by when it happened. Amounts are never selected, so nothing can sort or show by them.
- * Only a username (or "A neighbour"), a short sentence and badge labels leave this file.
+ * Only a username (never for an ear-tip answer) or "A neighbour", a short sentence and badge labels leave this file.
  */
 
 const MAX_CAT_THANKS = 6;
@@ -150,7 +151,10 @@ async function badgesFor(userIds: string[]): Promise<Map<string, string[]>> {
   return out;
 }
 
-const nameOf = (r: Row) => (r.show ? r.username : "A neighbour");
+/** An ear-tip answer is private, so it is never credited by name, whatever the person chose for their other thanks. */
+const isEarTipKind = (k: Kind) => k === "ear_yes" || k === "ear_no";
+const named = (r: Row) => r.show && !isEarTipKind(r.kind);
+const nameOf = (r: Row) => (named(r) ? r.username : "A neighbour");
 
 /** Up to six people who helped this cat, newest first. */
 export async function getCatThanks(catId: string): Promise<Thanks[]> {
@@ -162,7 +166,7 @@ export async function getCatThanks(catId: string): Promise<Thanks[]> {
   return list.map((r) => ({
     name: nameOf(r),
     text: CARD_TEXT[r.kind],
-    badges: r.show ? (badges.get(r.user_id) ?? []) : [],
+    badges: named(r) ? (badges.get(r.user_id) ?? []) : [],
   }));
 }
 
@@ -180,7 +184,7 @@ export async function getHomeThanks(): Promise<Thanks[]> {
   return list.map((r) => ({
     name: nameOf(r),
     text: HOME_TEXT[r.kind](r.cat),
-    badges: r.show ? (badges.get(r.user_id) ?? []) : [],
+    badges: named(r) ? (badges.get(r.user_id) ?? []) : [],
   }));
 }
 

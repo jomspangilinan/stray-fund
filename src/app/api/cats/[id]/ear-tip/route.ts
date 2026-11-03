@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/server/db/client";
 import { cats } from "@/server/db/schema";
-import { setEarTipFlag, type EarTipValue } from "@/server/earTipFlags";
+import { assertUnderFlagLimit, setEarTipFlag, type EarTipValue } from "@/server/earTipFlags";
 import { describeError } from "@/server/errors";
 import { BodyTooLarge, readLimited } from "@/server/http";
 import { isUuid } from "@/server/public";
+import { RateLimited } from "@/server/spot";
 import { AuthError, requireRole } from "@/server/session";
 
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -35,6 +36,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const answer = (body as { answer?: unknown } | null)?.answer;
     if (typeof answer !== "string" || !Object.hasOwn(ANSWERS, answer)) return fail("Answer yes, no or unsure", 400);
 
+    // Before any lock: a flood is turned away without waiting in line.
+    await assertUnderFlagLimit(session.userId);
+
     const [cat] = await db.select({ id: cats.id }).from(cats).where(eq(cats.id, id));
     if (!cat) return fail("There is no such cat", 404);
 
@@ -42,6 +46,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     await setEarTipFlag(id, session.userId, value);
     return NextResponse.json({ answer: value ?? "unsure" }, { headers: NO_STORE });
   } catch (e) {
+    if (e instanceof RateLimited) return fail("Too many answers in the last minute. Wait a moment and try again.", 429);
     if (e instanceof AuthError) return fail(e.message, e.status);
     console.error("Ear-tip answer failed", describeError(e));
     return fail("Could not save that answer", 500);

@@ -361,6 +361,18 @@ describe("accept evidence", () => {
   const accept = (receiptId: string, over: Record<string, unknown> = {}) =>
     act("evidence_accept", { receiptId, total: "1200", earTipConfirmed: true, note: "Looked at both photos, ear is tipped", ...over });
 
+  it("refuses with 409 when the ear-tip photo is missing or was never stored, changing nothing", async () => {
+    for (const key of ["originals/00000000-0000-4000-8000-00000000dead.jpg", null]) {
+      const w = await evidenceWorld();
+      await db.update(receipts).set({ earTipPhotoKey: key }).where(eq(receipts.id, w.receipt.id));
+      expect(await accept(w.receipt.id)).toMatchObject({ ok: false, status: 409 });
+      expect((await db.select().from(receipts).where(eq(receipts.id, w.receipt.id)))[0].verification).toBe("needs_review");
+      expect(await db.select().from(treatments).where(eq(treatments.catId, w.cat.id))).toHaveLength(0);
+      expect((await db.select().from(cats).where(eq(cats.id, w.cat.id)))[0].status).toBe("in_care");
+      expect(await actionsNamed("evidence_accepted")).toHaveLength(0);
+    }
+  });
+
   it("refuses without the ear-tip tick, without a note, and for bad amounts, changing nothing", async () => {
     const w = await evidenceWorld();
     for (const over of [

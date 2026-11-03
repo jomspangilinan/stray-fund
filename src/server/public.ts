@@ -278,6 +278,8 @@ const ACTION_LABEL: Record<string, string> = {
   vet_details_changed: "Caretaker updated a vet's details",
   evidence_accepted: "Caretaker accepted a vet's receipt",
   evidence_rejected: "Caretaker did not accept a vet's receipt",
+  ear_tip_confirmed: "Caretaker confirmed the ear-tip in a vet's photo",
+  ear_tip_answered: "A neighbour answered about an ear-tip",
   sighting_reviewed: "Caretaker settled a sighting",
   cat_updated: "Caretaker updated a cat's card",
   photo_published: "Caretaker published a photo",
