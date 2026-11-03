@@ -10,7 +10,7 @@ import { describeError } from "../errors";
 import { CONFIRMED_BOOKING } from "../guardrails";
 import { InsufficientFunds, allocateToCat, getPoolStatus } from "../ledger";
 import { requestPayout, type GateResult } from "../moneyGate";
-import { retryBlock } from "../payoutRetry";
+import { PAYOUT_HISTORY_COLUMNS, retryBlock } from "../payoutRetry";
 import { payoutGateway, type PayoutGateway } from "../paypal/payouts";
 import { manilaDate } from "../public";
 import { isPlainText } from "../plainText";
@@ -157,13 +157,7 @@ async function fundCat(catId: string, why: string, now: Date): Promise<Outcome> 
 
 async function history(bookingId: string, kind: "deposit" | "balance") {
   return db
-    .select({
-      status: payouts.status,
-      lastGatewayError: payouts.lastGatewayError,
-      lateSuccessReviewId: payouts.lateSuccessReviewId,
-      retryClearedBy: payouts.retryClearedBy,
-      amount: payouts.amount,
-    })
+    .select({ ...PAYOUT_HISTORY_COLUMNS, amount: payouts.amount })
     .from(payouts)
     .where(and(eq(payouts.bookingId, bookingId), eq(payouts.kind, kind)))
     .orderBy(desc(payouts.createdAt));

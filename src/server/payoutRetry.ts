@@ -7,8 +7,36 @@ export const BATCH_EXISTS_FLAG = "BATCH_EXISTS";
 /** One first try plus the single retry the agent is allowed. */
 export const MAX_FAILED_PAYOUTS = 2;
 
+/** PayPal's own words that the money did not leave or came back. Only these free a row that reached PayPal. */
+const PROVEN_NOT_PAID = new Set(["FAILED", "RETURNED", "REFUNDED", "CANCELED"]);
+/** Errors that say nothing about whether PayPal took the payout. */
+const UNKNOWN_OUTCOME = /^Retries exhausted|with no batch id$/;
+
+/**
+ * Whether a payout may have reached PayPal, so its money may have left: more than one send attempt, a status PayPal
+ * reported, a batch id, or an error that does not say the send was refused. "No batch id" proves nothing, because a
+ * first send can time out after PayPal took it and a second attempt can then be refused. A row with one attempt and a
+ * definite refusal, no payee email, or no send at all is safe.
+ */
+export function mayHaveReachedPayPal(p: {
+  attempts: number;
+  paypalPayoutBatchId: string | null;
+  paypalItemStatus: string | null;
+  lastGatewayError: string | null;
+}): boolean {
+  return (
+    p.attempts > 1 ||
+    p.paypalItemStatus !== null ||
+    p.paypalPayoutBatchId !== null ||
+    (p.lastGatewayError !== null && (p.lastGatewayError.startsWith(BATCH_EXISTS_FLAG) || UNKNOWN_OUTCOME.test(p.lastGatewayError)))
+  );
+}
+
 export type PayoutHistory = {
   status: string;
+  attempts: number;
+  paypalPayoutBatchId: string | null;
+  paypalItemStatus: string | null;
   lastGatewayError: string | null;
   lateSuccessReviewId: string | null;
   /** Set when a caretaker allowed a new try on this row. */
@@ -29,6 +57,11 @@ export function retryBlock(history: PayoutHistory[]): string | undefined {
   if (history.some((p) => p.lateSuccessReviewId)) {
     return "PayPal later reported SUCCESS for an earlier try that was marked failed, so the vet may already be paid. A caretaker must settle it on the desk.";
   }
+  // A rejected or failed row that may have reached PayPal needs PayPal's own word that the money did not leave.
+  // A caretaker's "new try" can never have been given to such a row, so no cleared row is skipped here.
+  if (history.some((p) => (p.status === "failed" || p.status === "rejected") && mayHaveReachedPayPal(p) && !PROVEN_NOT_PAID.has(p.paypalItemStatus ?? ""))) {
+    return "An earlier try may have reached PayPal, so the vet may already be paid. A developer must close it.";
+  }
   // A row a caretaker cleared no longer counts against the booking. It can only have been cleared with no batch at
   // PayPal, no BATCH_EXISTS and no late SUCCESS, which the checks above would have caught anyway.
   const counted = history.filter((p) => !p.retryClearedBy);
@@ -41,10 +74,20 @@ export function retryBlock(history: PayoutHistory[]): string | undefined {
   return undefined;
 }
 
+export const PAYOUT_HISTORY_COLUMNS = {
+  status: payouts.status,
+  attempts: payouts.attempts,
+  paypalPayoutBatchId: payouts.paypalPayoutBatchId,
+  paypalItemStatus: payouts.paypalItemStatus,
+  lastGatewayError: payouts.lastGatewayError,
+  lateSuccessReviewId: payouts.lateSuccessReviewId,
+  retryClearedBy: payouts.retryClearedBy,
+};
+
 /** Caller holds the colony lock when the answer decides a write. */
 export async function payoutHistory(tx: Tx, bookingId: string, kind: "deposit" | "balance"): Promise<PayoutHistory[]> {
   return tx
-    .select({ status: payouts.status, lastGatewayError: payouts.lastGatewayError, lateSuccessReviewId: payouts.lateSuccessReviewId, retryClearedBy: payouts.retryClearedBy })
+    .select(PAYOUT_HISTORY_COLUMNS)
     .from(payouts)
     .where(and(eq(payouts.bookingId, bookingId), eq(payouts.kind, kind)));
 }

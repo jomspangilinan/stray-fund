@@ -150,8 +150,9 @@ async function payoutItems(statuses: string[], olderThanMinutes?: number, lateSu
     date: manilaDate(r.createdAt),
     lateSuccess: r.status === "failed" && lateSuccessReviewId !== null,
     canRuleNotPaid:
-      r.status === "failed" ? lateSuccessReviewId !== null && lateSuccessChoices(r.itemStatus).notPaid : canRuleNotPaid({ paypalPayoutBatchId: r.batchId, lastGatewayError: r.lastGatewayError }),
-    canRulePaid: r.status === "failed" ? lateSuccessReviewId !== null && lateSuccessChoices(r.itemStatus).paid : true,
+      r.status === "failed" ? lateSuccessReviewId !== null && lateSuccessChoices(r.itemStatus).notPaid : canRuleNotPaid({ attempts: r.attempts, paypalPayoutBatchId: r.batchId, paypalItemStatus: r.itemStatus, lastGatewayError: r.lastGatewayError }),
+    // BLOCKED and REVERSED are held for a developer, so no "It was paid" beside that message.
+    canRulePaid: r.status === "failed" ? lateSuccessReviewId !== null && lateSuccessChoices(r.itemStatus).paid : r.itemStatus !== "BLOCKED" && r.itemStatus !== "REVERSED",
     canAllowRetry: false,
   }));
 }

@@ -264,7 +264,7 @@ These were postponed because they cannot run on a laptop.
 14. A refund webhook that PayPal never delivers, on an already captured donation: the app does not poll for it (see Before real money). Stage one in the sandbox by pointing the webhook at a wrong URL, refund, and confirm the pool does NOT change, so you know what a lost refund looks like.
 15. A payout item that PayPal reports BLOCKED or REVERSED: the payout goes to Payouts under review and keeps its reservation. The desk says "Check this at PayPal. A developer must close it." and offers no "not paid" button, on purpose: once a payout has a batch id at PayPal, nothing may create a new payout for that booking and kind unless PayPal itself reports the money did not leave or came back. This cannot be staged easily in the sandbox.
 16. A payout PayPal reports SUCCESS after the fund called it failed: it shows under Payouts under review with Paid and Not paid. The treasurer may never ask for that booking and kind again, whatever happens to the question. Paid is offered only while PayPal's latest status is SUCCESS and makes it succeeded in the books; Not paid is offered only after PayPal says RETURNED, REFUNDED or REVERSED, needs a note, and lifts the block (a later SUCCESS flags it again).
-17. A payout rejected or failed twice that never reached PayPal (no batch id): the desk offers "Allow a new try" with a note, which gives the treasurer exactly one more try. Rows with a batch id never get it.
+17. A payout rejected, or refused outright on its first and only send, that PayPal never saw: the desk offers "Allow a new try" with a note, which gives the treasurer exactly one more try. A row that may have reached PayPal never gets it, and nobody can rule it "not paid": that is a batch id, a PayPal status, more than one send attempt, a BATCH_EXISTS flag, or an unknown-outcome error. "No batch id" does not mean PayPal never got it (a first send can time out after PayPal took it). Only PayPal saying FAILED, RETURNED, REFUNDED or CANCELED frees such a row for the treasurer. A late-success row ruled "Not paid" after REVERSED stays blocked for the same reason, so a developer closes it.
 
 ## Before real money
 
@@ -282,3 +282,8 @@ Everything here is **required before real money**. None of it is needed for the 
 - Verified sign-in accounts instead of the demo role switcher (see the README).
 - A payout stuck in review with a batch id at PayPal (BLOCKED, REVERSED or any status PayPal has not settled) has no desk button to clear it; a developer closes it after checking PayPal. This is deliberate, so a stuck payout is never paid twice. Plan who that developer is.
 - A pool that goes below zero after a refund is shown as it is and funding stops. Decide who on the caretaker desk answers that question and how the gap is covered; the app never takes money back by itself.
+- Payout gaps in the "may have reached PayPal" rule, known and not fixed. One list:
+  - The reconcile worker skips failed rows, so a failed payout with no batch id is only corrected when a webhook arrives.
+  - The server has no live-sibling check on "Allow a new try" (the desk lists it only when nothing live is on the booking and kind); the unique index is the last guard.
+  - "Paid" on a late-success row that has a live sibling payout hits the unique index and fails.
+  - Two failed rows that both have batch ids need a developer; no desk action reaches them.

@@ -2,7 +2,7 @@ import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { db, withColonyLock, type Tx } from "./db/client";
 import { agentActions, payouts, reviewRequests, users } from "./db/schema";
 import { enqueueWakeup } from "./wakeups";
-import { BATCH_EXISTS_FLAG } from "./payoutRetry";
+import { BATCH_EXISTS_FLAG, mayHaveReachedPayPal } from "./payoutRetry";
 import { checkSpend, type GuardrailCode, type SpendRequest } from "./guardrails";
 import {
   describeGatewayError,
@@ -532,8 +532,8 @@ export async function rejectPayout(
  * their money held until a developer closes them. Whether the desk offers "It was not paid" is this same rule.
  * A send still in flight is checked on submit.
  */
-export function canRuleNotPaid(p: { paypalPayoutBatchId: string | null; lastGatewayError: string | null }): boolean {
-  return !p.paypalPayoutBatchId && !p.lastGatewayError?.startsWith(BATCH_EXISTS_FLAG);
+export function canRuleNotPaid(p: Parameters<typeof mayHaveReachedPayPal>[0]): boolean {
+  return !mayHaveReachedPayPal(p);
 }
 
 /** not_paid frees the reservation, so it needs every sign the money stayed put. */
@@ -551,6 +551,9 @@ async function refuseIfMoneyMayHaveLeft(tx: Tx, payout: Payout): Promise<void> {
   `);
   if (rows.length > 0) {
     throw new Error("Cannot rule not_paid: a send may still be in flight, try again shortly");
+  }
+  if (mayHaveReachedPayPal(payout)) {
+    throw new Error("Cannot rule not_paid: this payout may have reached PayPal (more than one send, or a PayPal status). A developer must close it.");
   }
 }
 
@@ -639,9 +642,10 @@ export async function resolveNeedsReview(
  * Why a row cannot get "Allow a new try", or undefined if it can. Only a rejected or failed row that PayPal never
  * saw: no batch id, no BATCH_EXISTS, no late-success pointer, not already cleared.
  */
-export function newTryRefusal(p: Pick<Payout, "status" | "paypalPayoutBatchId" | "lastGatewayError" | "lateSuccessReviewId" | "retryClearedBy">): string | undefined {
+export function newTryRefusal(p: Pick<Payout, "status" | "attempts" | "paypalPayoutBatchId" | "paypalItemStatus" | "lastGatewayError" | "lateSuccessReviewId" | "retryClearedBy">): string | undefined {
   if (p.status !== "rejected" && p.status !== "failed") return "Only a rejected or failed payout can be given a new try";
   if (p.paypalPayoutBatchId) return "Cannot allow a new try: this payout has a PayPal batch";
+  if (mayHaveReachedPayPal(p)) return "Cannot allow a new try: this payout may have reached PayPal";
   if (p.lastGatewayError?.startsWith(BATCH_EXISTS_FLAG)) return "Cannot allow a new try: PayPal reports this batch already exists";
   if (p.lateSuccessReviewId) return "Cannot allow a new try: PayPal reported a success for this payout";
   if (p.retryClearedBy) return "A new try was already allowed for this payout";
@@ -841,7 +845,7 @@ export async function applyPayoutStatusIn(
   // A row whose send has no recorded result gets its real batch id from PayPal.
   const attach =
     payout.paypalPayoutBatchId === null &&
-    (payout.status === "queued" || payout.status === "needs_review");
+    (payout.status === "queued" || payout.status === "needs_review" || payout.status === "failed");
   const paypalPayoutBatchId = attach ? batchId : payout.paypalPayoutBatchId;
   const status = nextStatus(payout, u.itemStatus);
   // The last thing PayPal said, kept as evidence. A caretaker may rule not_paid on a BLOCKED or REVERSED one.

@@ -110,6 +110,8 @@ export async function addPayout(
     batchId?: string;
     attempts?: number;
     lastAttemptAt?: Date;
+    itemStatus?: string;
+    lastGatewayError?: string;
   },
 ) {
   const [action] = await db
@@ -129,6 +131,8 @@ export async function addPayout(
       paypalPayoutBatchId: fields.batchId,
       attempts: fields.attempts ?? 0,
       lastAttemptAt: fields.lastAttemptAt,
+      paypalItemStatus: fields.itemStatus,
+      lastGatewayError: fields.lastGatewayError,
       ...(fields.createdAt ? { createdAt: fields.createdAt } : {}),
     })
     .returning();

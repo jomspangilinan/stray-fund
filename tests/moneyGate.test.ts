@@ -654,17 +654,11 @@ describe("money gate", () => {
       await expectOneWakeup(res.payoutId!, "needs_review", "queued");
     });
 
-    /** The caretaker rules not_paid while the first attempt's response is on its way. */
+    /** The row is failed while the first attempt's response is on its way (one attempt, nothing seen from PayPal). */
     function failedWhileInFlight(result: Parameters<FakeGateway["results"]["push"]>[0]) {
-      const sweepGw = new FakeGateway([REJECTED]);
       const gw = new FakeGateway([result]);
       gw.onCreate = async (i) => {
-        await ageQueuedPayouts();
-        await retryUnknownPayouts(sweepGw);
-        await db.execute(sql`
-          update payouts set last_attempt_at = now() - interval '2 minutes' where id = ${i.senderBatchId}
-        `);
-        await resolveNeedsReview(i.senderBatchId, caretakerId, { outcome: "not_paid", note: "checked" });
+        await db.update(payouts).set({ status: "failed" }).where(eq(payouts.id, i.senderBatchId));
         await db.delete(wakeups);
       };
       return gw;
@@ -1129,7 +1123,7 @@ describe("money gate", () => {
 
   describe("resolveNeedsReview", () => {
     async function underReview(world: World = w, batchId?: string) {
-      return addPayout(world, { amount: 45000, status: "needs_review", attempts: 2, batchId });
+      return addPayout(world, { amount: 45000, status: "needs_review", attempts: batchId ? 2 : 1, batchId });
     }
     const auditRows = () =>
       db.select().from(agentActions).where(eq(agentActions.action, "payout_review_resolved"));
@@ -1210,7 +1204,7 @@ describe("money gate", () => {
         const p = await addPayout(w, {
           amount: 45000,
           status: "needs_review",
-          attempts: 2,
+          attempts: 1,
           lastAttemptAt: secondsAgo(IN_FLIGHT_WINDOW_SECONDS + 5),
         });
         const res = await resolveNeedsReview(p.id, caretakerId, { outcome: "not_paid", note: "x" });

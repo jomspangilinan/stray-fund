@@ -120,7 +120,7 @@ describe("a BLOCKED payout", () => {
     it("the desk does not offer 'not paid', and says to check PayPal and ask a developer", async () => {
       const p = await sentPayout();
       await applyPayoutStatus("B-1", { itemStatus });
-      expect((await getCaretakerQueue()).needsReview.find((i) => i.id === p.id)).toMatchObject({ canRuleNotPaid: false, itemStatus });
+      expect((await getCaretakerQueue()).needsReview.find((i) => i.id === p.id)).toMatchObject({ canRuleNotPaid: false, canRulePaid: false, itemStatus });
     });
 
     it("the agent cannot make another payout for the booking, by the gate or by its tool", async () => {

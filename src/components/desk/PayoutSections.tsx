@@ -58,7 +58,7 @@ export function NeedsReview({ items }: { items: PayoutItem[] }) {
           {p.canAllowRetry ? (
             <>
               <p className="mt-2 small">
-                This payout never reached PayPal and now stops the treasurer from asking again. If it was a mistake, allow one more try.
+                {p.status === "rejected" ? "This payout was rejected and never sent to PayPal, and it now stops the treasurer from asking again." : "PayPal refused this payout on its first try and has no record of it, and it now stops the treasurer from asking again."} If it was a mistake, allow one more try.
               </p>
               <ActionForm
                 action="payout_allow_retry"
@@ -75,8 +75,10 @@ export function NeedsReview({ items }: { items: PayoutItem[] }) {
                 <p className="note note-bad mt-2 small">
                   PayPal says this succeeded after we had called it failed. The treasurer will never ask for it again. Check PayPal, then say what happened.
                 </p>
-              ) : p.batchId ? (
+              ) : !p.canRulePaid ? (
                 <p className="mt-2 small">Check this at PayPal. A developer must close it.</p>
+              ) : !p.canRuleNotPaid ? (
+                <p className="mt-2 small">Check this at PayPal. If it was paid, record it here. If it was not, a developer must close it.</p>
               ) : (
                 <p className="mt-2 small">Check PayPal activity first. Money may have left even if this shows an error.</p>
               )}
