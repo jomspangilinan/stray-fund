@@ -47,6 +47,11 @@ const MAX_ATTEMPTS = 6;
 const RETRY_AFTER_SECONDS = 30;
 const LIVE_PAYOUT_INDEX = "payouts_booking_kind_live_idx";
 
+/** A send attempted this recently may still be in flight, so not_paid is refused. */
+export const IN_FLIGHT_WINDOW_SECONDS = 60;
+/** Leads last_gateway_error when PayPal has said the batch exists. Refuses not_paid. */
+export const BATCH_EXISTS_FLAG = "BATCH_EXISTS";
+
 const ITEM_SUCCEEDED = new Set(["SUCCESS"]);
 const ITEM_FAILED = new Set(["FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "CANCELED"]);
 /** Money that really did come back after a success. */
@@ -86,7 +91,7 @@ async function enqueueStatusChange(
   tx: Tx,
   payout: Payout,
   status: PayoutStatus,
-  extra: { code?: GuardrailCode } = {},
+  extra: { code?: GuardrailCode; alert?: string; lateBatchId?: string } = {},
 ): Promise<void> {
   await tx.insert(wakeups).values({
     kind: "payout_status_changed",
@@ -102,6 +107,50 @@ async function enqueueStatusChange(
   });
 }
 
+async function isBatchOnAnotherPayout(tx: Tx, batchId: string, payoutId: string): Promise<boolean> {
+  const [other] = await tx
+    .select({ id: payouts.id })
+    .from(payouts)
+    .where(and(eq(payouts.paypalPayoutBatchId, batchId), ne(payouts.id, payoutId)));
+  return other !== undefined;
+}
+
+/**
+ * PayPal has shown that a batch exists for a payout already marked failed, so its
+ * money may have left while the reservation is free. Status stays failed, since
+ * terminal states do not regress. This keeps the evidence and asks for a person.
+ */
+async function recordBatchAfterFailed(
+  tx: Tx,
+  payout: Payout,
+  current: Payout,
+  batchId: string | undefined,
+  error: string | undefined,
+): Promise<void> {
+  if (batchId && current.paypalPayoutBatchId === batchId) return;
+  const flagged = `${BATCH_EXISTS_FLAG}: ${error ?? "late batch"}`;
+  if (!batchId && current.lastGatewayError === flagged) return;
+
+  const canStore =
+    batchId !== undefined &&
+    current.paypalPayoutBatchId === null &&
+    !(await isBatchOnAnotherPayout(tx, batchId, payout.id));
+  console.error(
+    `Payout ${payout.id} is failed but PayPal reports batch ${batchId ?? "(no id)"}${canStore ? "" : ", not stored"}`,
+  );
+  await tx
+    .update(payouts)
+    .set({
+      lastGatewayError: flagged,
+      ...(canStore ? { paypalPayoutBatchId: batchId } : {}),
+    })
+    .where(eq(payouts.id, payout.id));
+  await enqueueStatusChange(tx, { ...payout, status: "failed" }, "failed", {
+    alert: "batch_exists_after_failed",
+    lateBatchId: batchId,
+  });
+}
+
 async function currentStatus(payoutId: string): Promise<PayoutStatus> {
   const [row] = await db
     .select({ status: payouts.status })
@@ -114,7 +163,7 @@ async function currentStatus(payoutId: string): Promise<PayoutStatus> {
  * Commits a payout's move to its next status and returns the status it ends up in.
  * A batch id is good news from any attempt, and also clears a needs_review that
  * a newer attempt caused. Bad news only counts from the latest attempt on a
- * queued row.
+ * queued row. A batch id never replaces a different one already on the row.
  */
 async function settle(
   payout: Payout,
@@ -126,7 +175,9 @@ async function settle(
       .update(payouts)
       .set({
         status,
-        paypalPayoutBatchId: fields.batchId,
+        paypalPayoutBatchId: fields.batchId
+          ? sql`coalesce(${payouts.paypalPayoutBatchId}, ${fields.batchId})`
+          : undefined,
         lastGatewayError: fields.error,
       })
       .where(
@@ -137,13 +188,29 @@ async function settle(
             : and(eq(payouts.status, "queued"), eq(payouts.attempts, payout.attempts)),
         ),
       )
-      .returning({ id: payouts.id });
-    if (rows.length === 0) return false;
+      .returning({ batchId: payouts.paypalPayoutBatchId });
+    if (rows.length === 0) {
+      if (status === "sent") {
+        const [current] = await tx
+          .select()
+          .from(payouts)
+          .where(eq(payouts.id, payout.id))
+          .for("update");
+        if (current.status === "failed") {
+          await recordBatchAfterFailed(tx, payout, current, fields.batchId, fields.error);
+        }
+      }
+      return false;
+    }
+    const kept = rows[0].batchId;
+    if (fields.batchId && kept !== fields.batchId) {
+      console.error(`Payout ${payout.id} keeps batch ${kept}, ignoring ${fields.batchId}`);
+    }
     await tx
       .update(agentActions)
       .set({
         status,
-        paypalRef: fields.batchId,
+        paypalRef: fields.batchId ? kept : undefined,
         ...(fields.error ? { inputs: mergedInputs({ gatewayError: fields.error }) } : {}),
       })
       .where(eq(agentActions.id, payout.actionId));
@@ -153,6 +220,38 @@ async function settle(
   return moved ? status : currentStatus(payout.id);
 }
 
+/**
+ * PayPal says the batch exists but gave no id to poll. Holds from any attempt, so
+ * it also flags a row a newer attempt already sent to review. Status stays
+ * reserved and a person decides, with not_paid refused.
+ */
+async function recordBatchExists(payout: Payout, error: string): Promise<PayoutStatus> {
+  await db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(payouts)
+      .where(eq(payouts.id, payout.id))
+      .for("update");
+    if (current.status === "failed") {
+      await recordBatchAfterFailed(tx, payout, current, undefined, error);
+      return;
+    }
+    if (current.status !== "queued" && current.status !== "needs_review") return;
+
+    const flagged = `${BATCH_EXISTS_FLAG}: ${error}`;
+    await tx
+      .update(payouts)
+      .set({ status: "needs_review", lastGatewayError: flagged })
+      .where(eq(payouts.id, payout.id));
+    await tx
+      .update(agentActions)
+      .set({ status: "needs_review", inputs: mergedInputs({ gatewayError: flagged }) })
+      .where(eq(agentActions.id, payout.actionId));
+    if (current.status === "queued") await enqueueStatusChange(tx, current, "needs_review");
+  });
+  return currentStatus(payout.id);
+}
+
 async function applyCreateResult(
   payout: Payout,
   result: PayoutCreateResult,
@@ -160,6 +259,11 @@ async function applyCreateResult(
   switch (result.kind) {
     case "sent":
       return settle(payout, "sent", { batchId: result.batchId });
+    case "duplicate":
+      // Proof the batch exists, on a first attempt as much as a retry, so never failed.
+      return result.batchId
+        ? settle(payout, "sent", { batchId: result.batchId, error: result.error })
+        : recordBatchExists(payout, result.error);
     case "rejected":
       // On a retry PayPal may be refusing a batch it already accepted, so a
       // person has to look. Only a first attempt proves the money never left.
@@ -412,6 +516,24 @@ export async function rejectPayout(
   });
 }
 
+/** not_paid frees the reservation, so it needs every sign the money stayed put. */
+async function refuseIfMoneyMayHaveLeft(tx: Tx, payout: Payout): Promise<void> {
+  if (payout.paypalPayoutBatchId) {
+    throw new Error("Cannot rule not_paid: this payout has a PayPal batch");
+  }
+  if (payout.lastGatewayError?.startsWith(BATCH_EXISTS_FLAG)) {
+    throw new Error("Cannot rule not_paid: PayPal reports this batch already exists");
+  }
+  const { rows } = await tx.execute(sql`
+    select 1 from payouts
+    where id = ${payout.id}
+      and last_attempt_at > clock_timestamp() - make_interval(secs => ${IN_FLIGHT_WINDOW_SECONDS})
+  `);
+  if (rows.length > 0) {
+    throw new Error("Cannot rule not_paid: a send may still be in flight, try again shortly");
+  }
+}
+
 /**
  * A caretaker's ruling on a payout nobody could settle automatically. Only acts
  * from needs_review, so a second resolve is a no-op. The original action keeps
@@ -438,25 +560,39 @@ export async function resolveNeedsReview(
 
     if (r.outcome === "paid") {
       // Status lookups go by batch id, so one reference cannot serve two payouts.
-      const [other] = await tx
-        .select({ id: payouts.id })
-        .from(payouts)
-        .where(and(eq(payouts.paypalPayoutBatchId, evidence), ne(payouts.id, payoutId)));
-      if (other) throw new Error("That PayPal reference is already on another payout");
+      if (await isBatchOnAnotherPayout(tx, evidence, payoutId)) {
+        throw new Error("That PayPal reference is already on another payout");
+      }
+    } else {
+      await refuseIfMoneyMayHaveLeft(tx, payout);
     }
 
     const status: PayoutStatus = r.outcome === "paid" ? "succeeded" : "failed";
-    await tx
+    // A batch id from PayPal outranks a typed one, which the audit row still keeps.
+    const batchId = payout.paypalPayoutBatchId ?? evidence;
+    // settle() takes no colony lock, so it can commit after the read above. These
+    // guards stop this ruling from overwriting what it wrote.
+    const moved = await tx
       .update(payouts)
       .set({
         status,
-        ...(r.outcome === "paid" ? { paypalPayoutBatchId: evidence } : {}),
+        ...(r.outcome === "paid" ? { paypalPayoutBatchId: batchId } : {}),
       })
-      .where(eq(payouts.id, payoutId));
+      .where(and(eq(payouts.id, payoutId), eq(payouts.status, "needs_review")))
+      .returning({ id: payouts.id });
+    if (moved.length === 0) {
+      const [current] = await tx
+        .select({ status: payouts.status })
+        .from(payouts)
+        .where(eq(payouts.id, payoutId));
+      return { ...base, status: current.status as PayoutStatus };
+    }
     await tx
       .update(agentActions)
-      .set({ status, ...(r.outcome === "paid" ? { paypalRef: evidence } : {}) })
-      .where(eq(agentActions.id, payout.actionId));
+      .set({ status, ...(r.outcome === "paid" ? { paypalRef: batchId } : {}) })
+      .where(
+        and(eq(agentActions.id, payout.actionId), eq(agentActions.status, "needs_review")),
+      );
     await tx.insert(agentActions).values({
       action: "payout_review_resolved",
       inputs: {
@@ -519,8 +655,21 @@ export async function applyPayoutStatus(batchId: string, u: PayoutStatusUpdate):
     const payout = await findPayout(tx, batchId, u.senderBatchId);
     if (!payout) return;
 
+    if (payout.paypalPayoutBatchId !== batchId) {
+      // The sender id and batch id name different payouts, so this event settles neither.
+      if (await isBatchOnAnotherPayout(tx, batchId, payout.id)) {
+        console.error(`Batch ${batchId} is on another payout, not applying it to ${payout.id}`);
+        return;
+      }
+      if (payout.paypalPayoutBatchId) {
+        console.error(`Payout ${payout.id} keeps batch ${payout.paypalPayoutBatchId}, ignoring ${batchId}`);
+      }
+    }
+
     // A row whose send has no recorded result gets its real batch id from PayPal.
-    const attach = payout.status === "queued" || payout.status === "needs_review";
+    const attach =
+      payout.paypalPayoutBatchId === null &&
+      (payout.status === "queued" || payout.status === "needs_review");
     const paypalPayoutBatchId = attach ? batchId : payout.paypalPayoutBatchId;
     const status = nextStatus(payout, u.itemStatus);
     if (!status) {

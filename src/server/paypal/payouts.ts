@@ -15,7 +15,9 @@ export type PayoutCreateResult =
   /** The money may or may not have left. Retry with the same id, never a new one. */
   | { kind: "unknown"; error: string }
   /** PayPal refused the request. On a retry this can mean it already has the batch. */
-  | { kind: "rejected"; error: string };
+  | { kind: "rejected"; error: string }
+  /** PayPal already has a batch with this sender id, so this call paid nothing new. */
+  | { kind: "duplicate"; batchId?: string; error: string };
 
 export type PayoutBatchStatus = {
   batchStatus: string;
@@ -100,6 +102,28 @@ async function withDeadline<T>(fn: (signal: AbortSignal) => Promise<T>): Promise
   }
 }
 
+type PayPalErrorBody = {
+  name?: unknown;
+  details?: unknown;
+};
+
+/**
+ * Live sandbox behaviour: HTTP 400 USER_BUSINESS_ERROR, with a details entry for
+ * field SENDER_BATCH_ID whose self link points at the original batch. The name
+ * alone proves nothing, since PayPal uses it for other business errors.
+ */
+function parseDuplicateBatch(body: PayPalErrorBody | null): { batchId?: string } | undefined {
+  if (!Array.isArray(body?.details)) return undefined;
+  const detail = (body.details as { field?: unknown; link?: unknown }[]).find(
+    (d) => d?.field === "SENDER_BATCH_ID",
+  );
+  if (!detail) return undefined;
+  const links = Array.isArray(detail.link) ? (detail.link as { rel?: unknown; href?: unknown }[]) : [];
+  const self = links.find((l) => l?.rel === "self" && typeof l.href === "string");
+  const match = /\/v1\/payments\/payouts\/([A-Za-z0-9_-]+)\/?(?:[?#]|$)/.exec(String(self?.href));
+  return match ? { batchId: match[1] } : {};
+}
+
 /** Foreign error messages may echo the request, so only the error type is kept. */
 export function describeGatewayError(e: unknown): string {
   if (e instanceof SafeGatewayError) return e.message;
@@ -133,12 +157,23 @@ export const restPayoutGateway: PayoutGateway = {
           signal,
         });
 
-        if (res.status >= 400 && res.status < 500 && !AMBIGUOUS_4XX.has(res.status)) {
+        if (res.status >= 400 && res.status < 500) {
           if (res.status === 401) clearPayPalTokenCache();
-          const body = (await res.json().catch(() => null)) as { name?: unknown } | null;
+          const body = (await res.json().catch(() => null)) as PayPalErrorBody | null;
           // The name is a PayPal enum. Messages and details can echo the receiver.
           const name = typeof body?.name === "string" ? ` ${body.name}` : "";
-          return { kind: "rejected", error: `HTTP ${res.status}${name}` };
+          const duplicate = parseDuplicateBatch(body);
+          if (duplicate) {
+            return {
+              kind: "duplicate",
+              ...duplicate,
+              error: `HTTP ${res.status}${name} SENDER_BATCH_ID`,
+            };
+          }
+          return {
+            kind: AMBIGUOUS_4XX.has(res.status) ? "unknown" : "rejected",
+            error: `HTTP ${res.status}${name}`,
+          };
         }
         if (!res.ok) return { kind: "unknown", error: `HTTP ${res.status}` };
 

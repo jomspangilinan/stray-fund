@@ -1,10 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { closePool, db, withColonyLock } from "../src/server/db/client";
 import { agentActions, bookings, payouts, users, wakeups } from "../src/server/db/schema";
 import { getPoolStatus } from "../src/server/ledger";
 import {
+  BATCH_EXISTS_FLAG,
+  IN_FLIGHT_WINDOW_SECONDS,
   applyPayoutStatus,
   approvePayout,
   reconcilePayouts,
@@ -49,6 +51,12 @@ const ask = (w: World, amount = 45000) => ({
   inputs: { source: "test" },
 });
 
+const DUPLICATE_ERROR = "HTTP 400 USER_BUSINESS_ERROR SENDER_BATCH_ID";
+const DUPLICATE = (batchId?: string) => ({
+  kind: "duplicate" as const,
+  error: DUPLICATE_ERROR,
+  ...(batchId ? { batchId } : {}),
+});
 const SENT = (batchId: string) => ({ kind: "sent" as const, batchId, status: "PENDING" });
 const UNKNOWN = { kind: "unknown" as const, error: "timeout" };
 const REJECTED = { kind: "rejected" as const, error: "HTTP 422 VALIDATION_ERROR" };
@@ -639,17 +647,210 @@ describe("money gate", () => {
       await expectOneWakeup(res.payoutId!, "needs_review", "queued");
     });
 
-    it("a sent never revives a payout already settled", async () => {
+    /** The caretaker rules not_paid while the first attempt's response is on its way. */
+    function failedWhileInFlight(result: Parameters<FakeGateway["results"]["push"]>[0]) {
       const sweepGw = new FakeGateway([REJECTED]);
-      const gw = new FakeGateway([SENT("B-late")]);
+      const gw = new FakeGateway([result]);
       gw.onCreate = async (i) => {
         await ageQueuedPayouts();
         await retryUnknownPayouts(sweepGw);
+        await db.execute(sql`
+          update payouts set last_attempt_at = now() - interval '2 minutes' where id = ${i.senderBatchId}
+        `);
         await resolveNeedsReview(i.senderBatchId, caretakerId, { outcome: "not_paid", note: "checked" });
+        await db.delete(wakeups);
+      };
+      return gw;
+    }
+
+    it("a late sent on a failed row keeps the evidence and asks for a person, without reviving it", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const res = await requestPayout(ask(w), failedWhileInFlight(SENT("B-late")));
+
+      expect(res.status).toBe("failed");
+      const row = await payoutRow(res.payoutId!);
+      expect(row).toMatchObject({ status: "failed", paypalPayoutBatchId: "B-late" });
+      expect(row.lastGatewayError).toContain(BATCH_EXISTS_FLAG);
+      expect(error).toHaveBeenCalledOnce();
+      expect(String(error.mock.calls[0][0])).toContain("B-late");
+      const rows = await allWakeups();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].payload).toMatchObject({
+        payoutId: res.payoutId,
+        status: "failed",
+        alert: "batch_exists_after_failed",
+        lateBatchId: "B-late",
+      });
+      error.mockRestore();
+    });
+
+    it("a duplicate with a batch id on a failed row is handled the same way", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const res = await requestPayout(ask(w), failedWhileInFlight(DUPLICATE("B-dup")));
+      expect(await payoutRow(res.payoutId!)).toMatchObject({
+        status: "failed",
+        paypalPayoutBatchId: "B-dup",
+      });
+      expect(await allWakeups()).toHaveLength(1);
+      error.mockRestore();
+    });
+
+    it("a duplicate with no batch id on a failed row flags it and asks for a person", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const res = await requestPayout(ask(w), failedWhileInFlight(DUPLICATE()));
+      const row = await payoutRow(res.payoutId!);
+      expect(row).toMatchObject({ status: "failed", paypalPayoutBatchId: null });
+      expect(row.lastGatewayError).toBe(`${BATCH_EXISTS_FLAG}: ${DUPLICATE_ERROR}`);
+      expect(await allWakeups()).toHaveLength(1);
+      error.mockRestore();
+    });
+
+    it("a late sent repeating the batch a failed row already has is a no-op", async () => {
+      const p = await addPayout(w, { amount: 1, status: "queued", attempts: 1, batchId: "B-same", createdAt: YESTERDAY() });
+      const gw = new FakeGateway([SENT("B-same")]);
+      gw.onCreate = async () => {
+        await db.update(payouts).set({ status: "failed" }).where(eq(payouts.id, p.id));
+      };
+      await retryUnknownPayouts(gw);
+      expect(await payoutRow(p.id)).toMatchObject({ status: "failed", lastGatewayError: null });
+      expect(await allWakeups()).toEqual([]);
+    });
+
+    it("a late sent never replaces a different batch id on a failed row", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const p = await addPayout(w, { amount: 1, status: "queued", attempts: 1, batchId: "B-first", createdAt: YESTERDAY() });
+      const gw = new FakeGateway([SENT("B-second")]);
+      gw.onCreate = async () => {
+        await db.update(payouts).set({ status: "failed" }).where(eq(payouts.id, p.id));
+      };
+      await retryUnknownPayouts(gw);
+      const row = await payoutRow(p.id);
+      expect(row).toMatchObject({ status: "failed", paypalPayoutBatchId: "B-first" });
+      expect(row.lastGatewayError).toContain(BATCH_EXISTS_FLAG);
+      expect(await allWakeups()).toHaveLength(1);
+      error.mockRestore();
+    });
+
+    it("a late sent never stores a batch id already on another payout", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const w2 = await makeWorld();
+      await addPayout(w2, { amount: 1, status: "sent", batchId: "B-taken" });
+      const res = await requestPayout(ask(w), failedWhileInFlight(SENT("B-taken")));
+      expect((await payoutRow(res.payoutId!)).paypalPayoutBatchId).toBeNull();
+      expect(await allWakeups()).toHaveLength(1);
+      error.mockRestore();
+    });
+
+    it("a late sent on a needs_review row with a different batch keeps the first", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const sweepGw = new FakeGateway([REJECTED]);
+      const gw = new FakeGateway([SENT("B-second")]);
+      gw.onCreate = async (i) => {
+        await ageQueuedPayouts();
+        await retryUnknownPayouts(sweepGw);
+        await db.update(payouts).set({ paypalPayoutBatchId: "B-first" }).where(eq(payouts.id, i.senderBatchId));
       };
       const res = await requestPayout(ask(w), gw);
-      expect(res.status).toBe("failed");
-      expect((await payoutRow(res.payoutId!)).paypalPayoutBatchId).toBeNull();
+      expect(await payoutRow(res.payoutId!)).toMatchObject({
+        status: "sent",
+        paypalPayoutBatchId: "B-first",
+      });
+      expect((await actionRow(res.actionId)).paypalRef).toBe("B-first");
+      expect(error).toHaveBeenCalledOnce();
+      error.mockRestore();
+    });
+
+    describe("duplicate results", () => {
+      it("on a retry, a batch id moves the row to sent, and reconcile settles it for real", async () => {
+        const gw = new FakeGateway([UNKNOWN, DUPLICATE("B-dup")]);
+        const res = await requestPayout(ask(w), gw);
+        await ageQueuedPayouts();
+        await retryUnknownPayouts(gw);
+
+        expect(await payoutRow(res.payoutId!)).toMatchObject({
+          status: "sent",
+          paypalPayoutBatchId: "B-dup",
+          lastGatewayError: DUPLICATE_ERROR,
+        });
+        expect((await actionRow(res.actionId)).paypalRef).toBe("B-dup");
+        expect(await reserved()).toBe(45000);
+        expect(await allWakeups()).toEqual([]);
+
+        gw.statuses.set("B-dup", { batchStatus: "SUCCESS", itemStatus: "SUCCESS", itemId: "I", fee: 100 });
+        await reconcilePayouts(gw);
+        expect(await payoutRow(res.payoutId!)).toMatchObject({ status: "succeeded", fee: 100 });
+      });
+
+      it("on a first attempt, a batch id also moves the row to sent, never failed", async () => {
+        const res = await requestPayout(ask(w), new FakeGateway([DUPLICATE("B-dup")]));
+        expect(res.status).toBe("sent");
+        expect(await payoutRow(res.payoutId!)).toMatchObject({
+          status: "sent",
+          attempts: 1,
+          paypalPayoutBatchId: "B-dup",
+        });
+      });
+
+      it("on a retry, no batch id goes to needs_review, flagged, and not_paid is refused", async () => {
+        const gw = new FakeGateway([UNKNOWN, DUPLICATE()]);
+        const res = await requestPayout(ask(w), gw);
+        await ageQueuedPayouts();
+        await retryUnknownPayouts(gw);
+
+        const row = await payoutRow(res.payoutId!);
+        expect(row.status).toBe("needs_review");
+        expect(row.lastGatewayError).toBe(`${BATCH_EXISTS_FLAG}: ${DUPLICATE_ERROR}`);
+        expect(await reserved()).toBe(45000);
+        await expectOneWakeup(res.payoutId!, "needs_review", "queued");
+
+        await db.execute(sql`update payouts set last_attempt_at = now() - interval '1 hour'`);
+        await expect(
+          resolveNeedsReview(res.payoutId!, caretakerId, { outcome: "not_paid", note: "x" }),
+        ).rejects.toThrow(/already exists/i);
+      });
+
+      it("on a first attempt, no batch id also goes to needs_review, never failed", async () => {
+        const res = await requestPayout(ask(w), new FakeGateway([DUPLICATE()]));
+        expect(res.status).toBe("needs_review");
+        expect(await reserved()).toBe(45000);
+        expect((await payoutRow(res.payoutId!)).lastGatewayError).toContain(BATCH_EXISTS_FLAG);
+      });
+
+      it("from an older attempt, no batch id still flags a row already under review", async () => {
+        const sweepGw = new FakeGateway([REJECTED]);
+        const gw = new FakeGateway([DUPLICATE()]);
+        gw.onCreate = async () => {
+          await ageQueuedPayouts();
+          await retryUnknownPayouts(sweepGw);
+        };
+        const res = await requestPayout(ask(w), gw);
+        expect((await payoutRow(res.payoutId!)).lastGatewayError).toContain(BATCH_EXISTS_FLAG);
+        // Only the move to needs_review woke anyone.
+        await expectOneWakeup(res.payoutId!, "needs_review", "queued");
+      });
+
+      it("from an older attempt, no batch id moves a still queued row to needs_review", async () => {
+        const sweepGw = new FakeGateway([UNKNOWN]);
+        const gw = new FakeGateway([DUPLICATE()]);
+        gw.onCreate = async () => {
+          await ageQueuedPayouts();
+          await retryUnknownPayouts(sweepGw);
+        };
+        const res = await requestPayout(ask(w), gw);
+        expect(res.status).toBe("needs_review");
+      });
+
+      it("no batch id does not disturb a row already sent", async () => {
+        const sweepGw = new FakeGateway([SENT("B-1")]);
+        const gw = new FakeGateway([DUPLICATE()]);
+        gw.onCreate = async () => {
+          await ageQueuedPayouts();
+          await retryUnknownPayouts(sweepGw);
+        };
+        const res = await requestPayout(ask(w), gw);
+        expect(res.status).toBe("sent");
+        expect((await payoutRow(res.payoutId!)).paypalPayoutBatchId).toBe("B-1");
+      });
     });
 
     it("a retry that lands records the batch", async () => {
@@ -892,6 +1093,129 @@ describe("money gate", () => {
       expect((await requestPayout(ask(w), new FakeGateway())).status).toBe("sent");
     });
 
+    describe("not_paid cannot free money that has left", () => {
+      async function expectRefused(p: { id: string }, pattern: RegExp) {
+        await expect(
+          resolveNeedsReview(p.id, caretakerId, { outcome: "not_paid", note: "x" }),
+        ).rejects.toThrow(pattern);
+        expect((await payoutRow(p.id)).status).toBe("needs_review");
+        expect(await auditRows()).toEqual([]);
+        expect(await allWakeups()).toEqual([]);
+        expect(await reserved()).toBe(45000);
+      }
+      async function expectPaidStillAllowed(p: { id: string }) {
+        const res = await resolveNeedsReview(p.id, caretakerId, { outcome: "paid", paypalRef: "PB-X" });
+        expect(res.status).toBe("succeeded");
+      }
+      const secondsAgo = (s: number) => new Date(Date.now() - s * 1000);
+
+      it("refuses when a batch id is set; paid stays allowed", async () => {
+        const p = await underReview(w, "PB-1");
+        await expectRefused(p, /has a PayPal batch/);
+        await expectPaidStillAllowed(p);
+      });
+
+      it("refuses when a send may be in flight; paid stays allowed", async () => {
+        expect(IN_FLIGHT_WINDOW_SECONDS).toBe(60);
+        const p = await addPayout(w, {
+          amount: 45000,
+          status: "needs_review",
+          attempts: 2,
+          lastAttemptAt: secondsAgo(IN_FLIGHT_WINDOW_SECONDS - 5),
+        });
+        await expectRefused(p, /in flight/);
+        await expectPaidStillAllowed(p);
+      });
+
+      it("allows once the in-flight window has passed", async () => {
+        const p = await addPayout(w, {
+          amount: 45000,
+          status: "needs_review",
+          attempts: 2,
+          lastAttemptAt: secondsAgo(IN_FLIGHT_WINDOW_SECONDS + 5),
+        });
+        const res = await resolveNeedsReview(p.id, caretakerId, { outcome: "not_paid", note: "x" });
+        expect(res.status).toBe("failed");
+      });
+
+      it("refuses when PayPal said the batch exists; paid stays allowed", async () => {
+        const p = await underReview();
+        await db
+          .update(payouts)
+          .set({ lastGatewayError: `${BATCH_EXISTS_FLAG}: ${DUPLICATE_ERROR}` })
+          .where(eq(payouts.id, p.id));
+        await expectRefused(p, /already exists/);
+        await expectPaidStillAllowed(p);
+      });
+
+      it("allows after an ordinary gateway error", async () => {
+        const p = await underReview();
+        await db.update(payouts).set({ lastGatewayError: REJECTED.error }).where(eq(payouts.id, p.id));
+        const res = await resolveNeedsReview(p.id, caretakerId, { outcome: "not_paid", note: "x" });
+        expect(res.status).toBe("failed");
+      });
+    });
+
+    it("paid keeps a batch id from PayPal, with the typed reference in the audit row", async () => {
+      const p = await underReview(w, "PB-REAL");
+      await resolveNeedsReview(p.id, caretakerId, { outcome: "paid", paypalRef: "TYPED" });
+      expect(await payoutRow(p.id)).toMatchObject({ status: "succeeded", paypalPayoutBatchId: "PB-REAL" });
+      const [audit] = await auditRows();
+      expect(audit.paypalRef).toBe("TYPED");
+      expect(audit.inputs).toMatchObject({ paypalRef: "TYPED", previousBatchId: "PB-REAL" });
+    });
+
+    describe("a settle that commits between the read and the write", () => {
+      /**
+       * Holds the row with an uncommitted move to sent, so the resolve can read
+       * needs_review but blocks at its update. Committing then lands exactly in
+       * that gap, and Postgres re-checks the update's conditions on the new row.
+       */
+      async function interleave(payoutId: string, resolve: () => Promise<{ status: string }>) {
+        const pool = createTestPool();
+        const settler: PoolClient = await pool.connect();
+        try {
+          await settler.query("begin");
+          await settler.query(
+            "update payouts set status = 'sent', paypal_payout_batch_id = 'B-settled' where id = $1",
+            [payoutId],
+          );
+          const pending = resolve();
+          for (let i = 0; i < 200; i++) {
+            const { rows } = await pool.query(
+              `select 1 from pg_stat_activity
+               where datname = current_database() and wait_event_type = 'Lock'
+                 and query like 'update "payouts"%'`,
+            );
+            if (rows.length > 0) break;
+            await new Promise((r) => setTimeout(r, 10));
+          }
+          await settler.query("commit");
+          return await pending;
+        } finally {
+          settler.release();
+          await closeTestPool(pool);
+        }
+      }
+
+      it.each([
+        ["paid", { outcome: "paid" as const, paypalRef: "TYPED" }],
+        ["not_paid", { outcome: "not_paid" as const, note: "x" }],
+      ])("%s does nothing and the batch id survives", async (_name, ruling) => {
+        const p = await underReview();
+        const res = await interleave(p.id, () => resolveNeedsReview(p.id, caretakerId, ruling));
+
+        expect(res.status).toBe("sent");
+        expect(await payoutRow(p.id)).toMatchObject({
+          status: "sent",
+          paypalPayoutBatchId: "B-settled",
+        });
+        expect((await actionRow(p.actionId)).status).toBe("needs_review");
+        expect(await auditRows()).toEqual([]);
+        expect(await allWakeups()).toEqual([]);
+      });
+    });
+
     it.each(["", "   "])("not_paid with note %j throws and changes nothing", async (note) => {
       const p = await underReview();
       await expect(
@@ -1107,16 +1431,47 @@ describe("money gate", () => {
       });
 
       it("does not overwrite the batch id of a settled payout", async () => {
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
         const p = await addPayout(w, { amount: 45000, status: "sent", batchId: "PB-1" });
         await applyPayoutStatus("PB-OTHER", { senderBatchId: p.id, itemStatus: "SUCCESS" });
         expect(await payoutRow(p.id)).toMatchObject({ status: "succeeded", paypalPayoutBatchId: "PB-1" });
+        expect(error).toHaveBeenCalledOnce();
+        error.mockRestore();
+      });
+
+      it.each(["queued", "needs_review"])(
+        "never overwrites a different batch id on a %s row",
+        async (status) => {
+          const error = vi.spyOn(console, "error").mockImplementation(() => {});
+          const p = await addPayout(w, { amount: 45000, status, attempts: 2, batchId: "PB-1" });
+          await applyPayoutStatus("PB-OTHER", { senderBatchId: p.id, itemStatus: "PENDING" });
+          expect((await payoutRow(p.id)).paypalPayoutBatchId).toBe("PB-1");
+          expect(error).toHaveBeenCalledOnce();
+          error.mockRestore();
+        },
+      );
+
+      it("refuses a batch id already on another payout, logs, and changes neither", async () => {
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        const w2 = await makeWorld();
+        const owner = await addPayout(w2, { amount: 1, status: "sent", batchId: "PB-TAKEN" });
+        const p = await addPayout(w, { amount: 45000, status: "needs_review", attempts: 2 });
+        await applyPayoutStatus("PB-TAKEN", { senderBatchId: p.id, itemStatus: "SUCCESS" });
+        expect(await payoutRow(p.id)).toMatchObject({ status: "needs_review", paypalPayoutBatchId: null });
+        expect((await payoutRow(owner.id)).status).toBe("sent");
+        expect(error).toHaveBeenCalledOnce();
+        expect(String(error.mock.calls[0][0])).toContain("PB-TAKEN");
+        expect(await allWakeups()).toEqual([]);
+        error.mockRestore();
       });
 
       it("finds a settled payout whose batch id came from a person, so a return still counts", async () => {
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
         const p = await addPayout(w, { amount: 45000, status: "needs_review", attempts: 2 });
         await resolveNeedsReview(p.id, caretakerId, { outcome: "paid", paypalRef: "TYPED" });
         await applyPayoutStatus("PB-REAL", { senderBatchId: p.id, itemStatus: "RETURNED" });
         expect(await payoutRow(p.id)).toMatchObject({ status: "failed", paypalPayoutBatchId: "TYPED" });
+        error.mockRestore();
       });
 
       it("falls back to the batch id when the sender id matches nothing, even if malformed", async () => {

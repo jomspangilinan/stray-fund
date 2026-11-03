@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearPayPalTokenCache,
@@ -117,6 +118,88 @@ describe("restPayoutGateway", () => {
       expect(await restPayoutGateway.create(INPUT)).toEqual({
         kind: "rejected",
         error: "HTTP 422 VALIDATION_ERROR",
+      });
+    });
+
+    describe("duplicate sender batch id", () => {
+      // The scrubbed body PayPal's sandbox returned, immediately and after SUCCESS.
+      const duplicateBody = (details?: unknown) => ({
+        name: "USER_BUSINESS_ERROR",
+        message: "User business error.",
+        debug_id: "DEBUG_FAKE",
+        information_link: "https://developer.paypal.com/docs/api/payments.payouts-batch/#errors",
+        details: details ?? [
+          {
+            field: "SENDER_BATCH_ID",
+            location: "body",
+            issue: "Batch with given sender_batch_id already exists",
+            link: [
+              {
+                href: "https://api.sandbox.paypal.com/v1/payments/payouts/FAKE",
+                rel: "self",
+                method: "GET",
+                encType: "application/json",
+              },
+            ],
+          },
+        ],
+        links: [],
+      });
+
+      it("parses the real body, taking the batch id from the self link", async () => {
+        stubFetch(() => json(400, duplicateBody()));
+        expect(await restPayoutGateway.create(INPUT)).toEqual({
+          kind: "duplicate",
+          batchId: "FAKE",
+          error: "HTTP 400 USER_BUSINESS_ERROR SENDER_BATCH_ID",
+        });
+      });
+
+      it.each(["payout-duplicate-immediate.json", "payout-duplicate-final.json"])(
+        "parses the recorded response in %s",
+        async (file) => {
+          const recorded = JSON.parse(
+            readFileSync(new URL(`./fixtures/paypal/${file}`, import.meta.url), "utf8"),
+          ) as { status: number; body: unknown };
+          stubFetch(() => json(recorded.status, recorded.body));
+          expect(await restPayoutGateway.create(INPUT)).toEqual({
+            kind: "duplicate",
+            batchId: "FAKE",
+            error: "HTTP 400 USER_BUSINESS_ERROR SENDER_BATCH_ID",
+          });
+        },
+      );
+
+      it.each([
+        ["no link", [{ field: "SENDER_BATCH_ID", issue: "exists" }]],
+        ["an empty link list", [{ field: "SENDER_BATCH_ID", link: [] }]],
+        ["a non-self link", [{ field: "SENDER_BATCH_ID", link: [{ rel: "next", href: "https://x/v1/payments/payouts/NOPE" }] }]],
+        ["a self link elsewhere", [{ field: "SENDER_BATCH_ID", link: [{ rel: "self", href: "https://x/v1/payments/payouts-item/NOPE" }] }]],
+        ["a non-string href", [{ field: "SENDER_BATCH_ID", link: [{ rel: "self", href: 7 }] }]],
+      ])("is a duplicate with no batch id given %s", async (_name, details) => {
+        stubFetch(() => json(400, duplicateBody(details)));
+        const result = await restPayoutGateway.create(INPUT);
+        expect(result.kind).toBe("duplicate");
+        expect(result).not.toHaveProperty("batchId");
+      });
+
+      it.each([
+        ["the same error name on another field", [{ field: "items[0].receiver", issue: "Batch with given sender_batch_id already exists" }]],
+        ["the same error name with no details", []],
+        ["details that are not a list", "SENDER_BATCH_ID"],
+        ["a null entry", [null]],
+      ])("is rejected given %s", async (_name, details) => {
+        stubFetch(() => json(400, duplicateBody(details)));
+        expect(await restPayoutGateway.create(INPUT)).toEqual({
+          kind: "rejected",
+          error: "HTTP 400 USER_BUSINESS_ERROR",
+        });
+      });
+
+      it("keeps details and messages out of the error", async () => {
+        stubFetch(() => json(400, { ...duplicateBody(), message: "vet@example.test" }));
+        const result = await restPayoutGateway.create(INPUT);
+        expect(result.kind === "duplicate" && result.error).not.toContain("@");
       });
     });
 
