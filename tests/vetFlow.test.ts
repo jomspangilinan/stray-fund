@@ -1445,7 +1445,8 @@ describe("vet routes", () => {
     it("401 signed out and 403 for other roles", async () => {
       expect((await bookingPost(bookReq({}))).status).toBe(401);
       for (const role of ["donor", "caretaker", "foster"] as const) {
-        await signIn({ id: "00000000-0000-4000-8000-000000000001", username: "someone" }, role);
+        const [other] = await db.insert(users).values({ username: `other_${role}`, role }).returning();
+        await signIn(other, role);
         expect((await bookingPost(bookReq({}))).status).toBe(403);
       }
     });
@@ -1492,9 +1493,13 @@ describe("vet routes", () => {
     it("401 signed out and 403 for other roles", async () => {
       const w = await careWorld();
       expect((await evidencePost(await evidenceReq(w.booking.id), params(w.booking.id))).status).toBe(401);
-      await signIn({ id: w.vet.id, username: w.vet.username }, "donor");
-      expect((await evidencePost(await evidenceReq(w.booking.id), params(w.booking.id))).status).toBe(403);
-      await signIn({ id: w.vet.id, username: w.vet.username }, "caretaker");
+      for (const role of ["donor", "caretaker"] as const) {
+        const [other] = await db.insert(users).values({ username: `other_${role}`, role }).returning();
+        await signIn(other, role);
+        expect((await evidencePost(await evidenceReq(w.booking.id), params(w.booking.id))).status).toBe(403);
+      }
+      const [lastOther] = await db.select().from(users).where(eq(users.username, "other_caretaker"));
+      await signIn(lastOther, "caretaker");
       expect((await evidencePost(await evidenceReq(w.booking.id), params(w.booking.id))).status).toBe(403);
     });
 

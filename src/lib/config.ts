@@ -16,6 +16,12 @@ export function isDemoMode(): boolean {
   return process.env.DEMO_MODE === "true";
 }
 
+/** True while PayPal is not live. Words like "Test money only" are shown only when this is true. */
+export function moneyIsTest(): boolean {
+  const v = (process.env.PAYPAL_ENV ?? "").trim().toLowerCase();
+  return v !== "production" && v !== "live";
+}
+
 /** Smallest donation, in centavos (PHP 100). */
 export const MIN_DONATION = 10_000;
 /** Largest single donation, in centavos (PHP 100,000). A sanity cap. */

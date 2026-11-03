@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "./db/client";
 import { users } from "./db/schema";
 import { ensureDemoPersonas } from "./demoPersonas";
@@ -8,6 +8,9 @@ import { isDemoMode } from "@/lib/config";
 
 export const SESSION_COOKIE = "sf_session";
 const SESSION_DAYS = 14;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Persona accounts. validateUsername keeps real people off this prefix. */
+const DEMO_PREFIX = "demo_";
 
 export type Role = "donor" | "caretaker" | "vet" | "foster";
 export type Session = { userId: string; role: Role; username: string };
@@ -47,7 +50,13 @@ export async function readSession(token: string | undefined): Promise<Session | 
     if (typeof sub !== "string" || typeof role !== "string" || typeof username !== "string") {
       return null;
     }
-    return { userId: sub, role: role as Role, username };
+    // The token only says who. The role and the name come from the database now, so a role change, a deleted
+    // user or a DEMO_MODE switched off takes effect on the next request instead of when the cookie expires.
+    if (!UUID.test(sub)) return null;
+    const [row] = await db.select().from(users).where(eq(users.id, sub));
+    if (!row) return null;
+    if (row.username.startsWith(DEMO_PREFIX) && !isDemoMode()) return null;
+    return { userId: row.id, role: row.role as Role, username: row.username };
   } catch {
     return null;
   }
@@ -87,7 +96,7 @@ export function validateUsername(raw: unknown): { ok: true; username: string } |
     return { ok: false, error: "Use 3 to 20 letters, digits or underscores" };
   }
   const lower = raw.toLowerCase();
-  if (RESERVED.has(lower) || lower.startsWith("demo_")) {
+  if (RESERVED.has(lower) || lower.startsWith(DEMO_PREFIX)) {
     return { ok: false, error: "That name is reserved" };
   }
   return { ok: true, username: raw };

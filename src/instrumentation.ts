@@ -1,4 +1,4 @@
-import { assertE2eFakesSafe } from "@/server/e2e/guard";
+import { assertBootSafe } from "@/server/e2e/guard";
 
 /**
  * Runs once when the server starts. A production server with E2E_FAKES set does not come up: the process
@@ -6,7 +6,7 @@ import { assertE2eFakesSafe } from "@/server/e2e/guard";
  */
 export function register(): void {
   try {
-    assertE2eFakesSafe();
+    assertBootSafe();
   } catch (e) {
     console.error(`[boot] ${e instanceof Error ? e.message : "Refusing to start."}`);
     if (process.env.NEXT_RUNTIME === "nodejs") process.exit(1);

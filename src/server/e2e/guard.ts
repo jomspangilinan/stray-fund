@@ -28,6 +28,24 @@ export function assertE2eFakesSafe(env: Env = process.env): void {
   }
 }
 
+export class DemoWithLivePayPal extends Error {
+  constructor() {
+    super("DEMO_MODE=true must not run with live PayPal: anyone could pick Caretaker and move real money. Set DEMO_MODE=false or PAYPAL_ENV=sandbox and start again.");
+    this.name = "DemoWithLivePayPal";
+  }
+}
+
+/** Throws when DEMO_MODE is on and PayPal is live. */
+export function assertDemoSafe(env: Env = process.env): void {
+  if (env.DEMO_MODE === "true" && paypalIsLive(env)) throw new DemoWithLivePayPal();
+}
+
+/** Everything the web server and the worker check before they start. */
+export function assertBootSafe(env: Env = process.env): void {
+  assertE2eFakesSafe(env);
+  assertDemoSafe(env);
+}
+
 /** True only for E2E_FAKES=true outside production. Every fake checks this, so none can be reached in production. */
 export function e2eFakesEnabled(env: Env = process.env): boolean {
   assertE2eFakesSafe(env);

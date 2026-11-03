@@ -7,6 +7,7 @@ import { PageHead } from "@/components/PageHead";
 import { PageSwitch } from "@/components/PageSwitch";
 import { FUND_PAGES } from "@/lib/nav";
 import { conservation } from "@/lib/impact";
+import { moneyIsTest } from "@/lib/config";
 import { formatPeso } from "@/lib/money";
 import { getImpact } from "@/server/impact";
 
@@ -65,9 +66,11 @@ async function Impact() {
         </p>
       </section>
 
-      <p className="note mt-8">
-        All money here is PayPal sandbox test money. Nobody was charged and no vet was paid in real pesos.
-      </p>
+      {moneyIsTest() && (
+        <p className="note mt-8">
+          All money here is PayPal sandbox test money. Nobody was charged and no vet was paid in real pesos.
+        </p>
+      )}
     </>
   );
 }

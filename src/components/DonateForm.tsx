@@ -4,6 +4,7 @@ import { PayPalButtons, PayPalScriptProvider } from "@paypal/react-paypal-js";
 import { useId, useState } from "react";
 import { CURRENCY, MAX_DONATION, MIN_DONATION } from "@/lib/config";
 import { formatPeso, parsePesoInput } from "@/lib/money";
+import { feeNote } from "@/lib/moneyCopy";
 import { SignInGate } from "./SignInGate";
 
 const PRESETS = [10_000, 50_000, 150_000] as const;
@@ -16,7 +17,7 @@ type Outcome =
   | { kind: "cancelled" }
   | { kind: "error"; message: string };
 
-export function DonateForm({ clientId, username, demo = false }: { clientId: string; username: string | null; demo?: boolean }) {
+export function DonateForm({ clientId, username, demo = false, testMoney = true }: { clientId: string; username: string | null; demo?: boolean; testMoney?: boolean }) {
   const customId = useId();
   const [preset, setPreset] = useState<number | "other">(50_000);
   const [custom, setCustom] = useState("");
@@ -33,7 +34,7 @@ export function DonateForm({ clientId, username, demo = false }: { clientId: str
     return (
       <SignInGate demo={demo}>
         <p className="font-bold">Pick ₱100, ₱500, ₱1,500 or your own amount.</p>
-        <p className="soft">Pay with PayPal. Test money only. The Ledger shows where it goes.</p>
+        <p className="soft">{testMoney ? "Pay with PayPal. Test money only. The Ledger shows where it goes." : "Pay with PayPal. The Ledger shows where it goes."}</p>
       </SignInGate>
     );
   }
@@ -165,7 +166,7 @@ export function DonateForm({ clientId, username, demo = false }: { clientId: str
       </fieldset>
 
       <p className="note">
-        Test money only. PayPal takes a fee (about ₱18 on ₱100 in the sandbox), shown after you pay.
+        {feeNote(testMoney)}
       </p>
 
       <div aria-live="polite" className="grid gap-3">

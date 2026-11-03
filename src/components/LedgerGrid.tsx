@@ -163,7 +163,7 @@ function Detail({ row, onClose }: { row: Row | null; onClose: () => void }) {
               </div>
             )}
             <div>
-              <dt className="small soft">PayPal sandbox reference</dt>
+              <dt className="small soft">PayPal reference</dt>
               <dd className="flex flex-wrap items-center gap-2">
                 {row.paypalId ? (
                   <>
