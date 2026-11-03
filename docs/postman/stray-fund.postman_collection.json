@@ -1,0 +1,827 @@
+{
+  "info": {
+    "name": "Stray Fund (draft)",
+    "description": "Routes of the Stray Fund app, from src/app/api. No secrets: set baseUrl to your own server. Sign in first with the Session folder; Postman keeps the cookie. Sandbox money only. PayPal's own API is not in this collection.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "catId",
+      "value": "",
+      "description": "A cat id from GET /api/ledger or the cat page URL."
+    },
+    {
+      "key": "orderId",
+      "value": "",
+      "description": "PayPal order id returned by POST /api/donations."
+    },
+    {
+      "key": "bookingId",
+      "value": ""
+    },
+    {
+      "key": "receiptId",
+      "value": ""
+    },
+    {
+      "key": "payoutId",
+      "value": ""
+    },
+    {
+      "key": "sightingId",
+      "value": ""
+    },
+    {
+      "key": "action",
+      "value": "cat_adoptable",
+      "description": "A caretaker action name. See the folder description."
+    },
+    {
+      "key": "feederToken",
+      "value": "",
+      "description": "Set in your own environment. Never commit it."
+    }
+  ],
+  "item": [
+    {
+      "name": "Session",
+      "item": [
+        {
+          "name": "Get session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/session",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "session"
+              ]
+            },
+            "description": "Auth: Public. No sign-in.\n\n"
+          }
+        },
+        {
+          "name": "Sign in as a donor",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/session",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "session"
+              ]
+            },
+            "description": "Auth: Public. No sign-in.\n\nCreates the user if the name is free. Sets the session cookie.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"your_name\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Switch demo role",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/session",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "session"
+              ]
+            },
+            "description": "Auth: Demo session. Only works when the server has DEMO_MODE=true.\n\npersona is neighbour, caretaker or vet (see src/server/session.ts PERSONAS).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"persona\": \"caretaker\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Sign out",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/session",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "session"
+              ]
+            },
+            "description": "Auth: Public. No sign-in.\n\n"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Public",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            },
+            "description": "Auth: Public. No sign-in.\n\n"
+          }
+        },
+        {
+          "name": "Ledger",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ledger",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "ledger"
+              ]
+            },
+            "description": "Auth: Public. No sign-in.\n\n"
+          }
+        },
+        {
+          "name": "Impact",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/impact",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "impact"
+              ]
+            },
+            "description": "Auth: Public. No sign-in.\n\n"
+          }
+        },
+        {
+          "name": "Treasurer feed",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/agent/feed",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "agent",
+                "feed"
+              ]
+            },
+            "description": "Auth: Public. No sign-in.\n\n"
+          }
+        },
+        {
+          "name": "Cat card data",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/cats/{{catId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cats",
+                "{{catId}}"
+              ]
+            },
+            "description": "Auth: Public. No sign-in. Exact location is added only for a caretaker or vet session.\n\n"
+          }
+        },
+        {
+          "name": "Save image data",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/cats/{{catId}}/keepsake",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cats",
+                "{{catId}}",
+                "keepsake"
+              ]
+            },
+            "description": "Auth: Public. No sign-in.\n\n"
+          }
+        },
+        {
+          "name": "Save image photo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/cats/{{catId}}/keepsake/photo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cats",
+                "{{catId}}",
+                "keepsake",
+                "photo"
+              ]
+            },
+            "description": "Auth: Public. No sign-in.\n\n"
+          }
+        },
+        {
+          "name": "Local photo (dev storage only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dev-photos/photos/example.jpg",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dev-photos",
+                "photos",
+                "example.jpg"
+              ]
+            },
+            "description": "Auth: Public. No sign-in.\n\nOnly serves files when STORAGE_DRIVER=local. Replace the path with a real key from a cat's photoUrl."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Neighbour (demo session)",
+      "item": [
+        {
+          "name": "Create donation order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/donations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "donations"
+              ]
+            },
+            "description": "Auth: Needs a session cookie from POST /api/session (any signed-in role). Postman keeps the cookie.\n\namount is in centavos (10000 is PHP 100). attemptId is a new UUID per tap. Returns orderId. Approve it as a PayPal sandbox buyer, then capture.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 10000,\n  \"attemptId\": \"00000000-0000-4000-8000-000000000001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Capture donation",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/donations/{{orderId}}/capture",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "donations",
+                "{{orderId}}",
+                "capture"
+              ]
+            },
+            "description": "Auth: Needs a session cookie from POST /api/session (any signed-in role). Postman keeps the cookie.\n\n"
+          }
+        },
+        {
+          "name": "Spot a cat",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/spot",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "spot"
+              ]
+            },
+            "description": "Auth: Needs a session cookie from POST /api/session (any signed-in role). Postman keeps the cookie.\n\nMultipart. photo is a JPEG from the live camera. lat and lng are optional and come as a pair.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "photo",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "lat",
+                  "value": "",
+                  "type": "text",
+                  "disabled": true
+                },
+                {
+                  "key": "lng",
+                  "value": "",
+                  "type": "text",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Answer ear-tip",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/cats/{{catId}}/ear-tip",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cats",
+                "{{catId}}",
+                "ear-tip"
+              ]
+            },
+            "description": "Auth: Needs a session cookie from POST /api/session (any signed-in role). Postman keeps the cookie.\n\nanswer is yes, no or unsure.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answer\": \"yes\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Answer sex",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/cats/{{catId}}/sex",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cats",
+                "{{catId}}",
+                "sex"
+              ]
+            },
+            "description": "Auth: Needs a session cookie from POST /api/session (any signed-in role). Postman keeps the cookie.\n\nanswer is female or male.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answer\": \"female\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Suggest a name",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/cats/{{catId}}/name",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cats",
+                "{{catId}}",
+                "name"
+              ]
+            },
+            "description": "Auth: Needs a session cookie from POST /api/session (any signed-in role). Postman keeps the cookie.\n\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Mingming\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Ask for another name",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/cats/{{catId}}/another-name",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cats",
+                "{{catId}}",
+                "another-name"
+              ]
+            },
+            "description": "Auth: Needs a session cookie from POST /api/session (any signed-in role). Postman keeps the cookie.\n\nSend an empty JSON body with the JSON content type."
+          }
+        },
+        {
+          "name": "Show or hide my name in thanks",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/account/thanks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "account",
+                "thanks"
+              ]
+            },
+            "description": "Auth: Needs a session cookie from POST /api/session (any signed-in role). Postman keeps the cookie.\n\n",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"show\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Mark a milestone seen",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/helped/seen",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "helped",
+                "seen"
+              ]
+            },
+            "description": "Auth: Needs a session cookie from POST /api/session (any signed-in role). Postman keeps the cookie.\n\nmilestone is neutered or adopted.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"catId\": \"{{catId}}\",\n  \"milestone\": \"neutered\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Mark news seen",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/news/seen",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "news",
+                "seen"
+              ]
+            },
+            "description": "Auth: Needs a session cookie from POST /api/session (any signed-in role). Postman keeps the cookie.\n\n"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Caretaker (demo session)",
+      "description": "One route runs every desk action. Valid action names: payout_approve, payout_reject, payout_resolve, payout_note, payout_allow_retry, evidence_accept, evidence_confirm_ear_tip, evidence_reject, review_resolve, sighting_confirm_new, sighting_merge, sighting_reject, cat_set_details, cat_set_ear_tip, cat_rename, name_approve, name_dismiss, cat_undo_neutered, cat_adoptable, cat_adopted, photo_publish, photo_hold, guardrails_update, payee_add, payee_remove, vet_update, wakeup_retry, wakeup_dismiss. Each takes its own JSON body; see src/server/caretaker/*.ts.",
+      "item": [
+        {
+          "name": "Run a caretaker action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/caretaker/{{action}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "caretaker",
+                "{{action}}"
+              ]
+            },
+            "description": "Auth: Needs a session cookie as the demo caretaker (POST /api/session with persona caretaker). Demo mode only.\n\nBody depends on the action. The example is for cat_adoptable.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"catId\": \"{{catId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Private image",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/caretaker/images/eartip/{{receiptId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "caretaker",
+                "images",
+                "eartip",
+                "{{receiptId}}"
+              ]
+            },
+            "description": "Auth: Needs a session cookie as the demo caretaker (POST /api/session with persona caretaker). Demo mode only. A vet session works for the vet's own booking.\n\nkind is receipt, eartip or sighting. In demo mode non-seeded originals show a placeholder."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Vet (demo session)",
+      "item": [
+        {
+          "name": "Confirm a booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/vet/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "vet",
+                "bookings"
+              ]
+            },
+            "description": "Auth: Needs a session cookie as the demo vet (POST /api/session with persona vet). Demo mode only.\n\ndate is YYYY-MM-DD in Manila.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"catId\": \"{{catId}}\",\n  \"date\": \"2026-11-10\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Send receipt and ear photo",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/vet/bookings/{{bookingId}}/evidence",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "vet",
+                "bookings",
+                "{{bookingId}}",
+                "evidence"
+              ]
+            },
+            "description": "Auth: Needs a session cookie as the demo vet (POST /api/session with persona vet). Demo mode only.\n\nMultipart. receipt is JPEG or PNG. earTipPhoto is a JPEG.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "receipt",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "earTipPhoto",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Device and PayPal",
+      "item": [
+        {
+          "name": "Feeder meal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{feederToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/feeder/meal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "feeder",
+                "meal"
+              ]
+            },
+            "description": "Auth: Bearer token equal to the server's FEEDER_TOKEN. Not a user session.\n\nAt most one meal is recorded a minute.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"feeder\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "PayPal webhook (PayPal calls this)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/webhooks/paypal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "webhooks",
+                "paypal"
+              ]
+            },
+            "description": "Auth: WEBHOOK. Signed by PayPal. The app verifies the signature with PAYPAL_WEBHOOK_ID. Do not call it by hand: an unsigned request is answered 400.\n\nReal events come from PayPal's dashboard webhook. This request exists to show the route and to confirm it rejects unsigned calls.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"WH-EXAMPLE\",\n  \"event_type\": \"PAYMENT.CAPTURE.COMPLETED\",\n  \"resource\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
