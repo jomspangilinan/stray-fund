@@ -1,0 +1,210 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+
+export type CaptureLocation = { lat: number | null; lng: number | null };
+
+type Facing = "environment" | "user";
+type Status = "idle" | "starting" | "ready" | "capturing" | "denied" | "nocamera" | "insecure" | "error";
+
+const MAX_SIDE = 1600;
+const JPEG_QUALITY = 0.9;
+const LOCATION_TIMEOUT_MS = 5000;
+
+/** Resolves with a position, or with nulls on denial, timeout or no support. Never rejects. */
+function locate(): Promise<CaptureLocation> {
+  const none: CaptureLocation = { lat: null, lng: null };
+  if (typeof navigator === "undefined" || !navigator.geolocation) return Promise.resolve(none);
+  return new Promise((resolve) => {
+    // Some browsers do not count the permission prompt against the timeout option, so keep our own.
+    const timer = setTimeout(() => resolve(none), LOCATION_TIMEOUT_MS);
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        clearTimeout(timer);
+        resolve({ lat: p.coords.latitude, lng: p.coords.longitude });
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(none);
+      },
+      { timeout: LOCATION_TIMEOUT_MS, maximumAge: 60_000, enableHighAccuracy: false },
+    );
+  });
+}
+
+function toJpeg(video: HTMLVideoElement): Promise<Blob | null> {
+  const w = video.videoWidth;
+  const h = video.videoHeight;
+  if (!w || !h) return Promise.resolve(null);
+  const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(w * scale);
+  canvas.height = Math.round(h * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return Promise.resolve(null);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY));
+}
+
+function stop(stream: MediaStream | null) {
+  stream?.getTracks().forEach((t) => t.stop());
+}
+
+/**
+ * A live camera with a shutter. There is deliberately no file picker: photos come only from the camera.
+ * The location is asked for when the shutter is pressed, never before, and a missing location still
+ * captures (the caller receives nulls).
+ */
+export function LiveCamera({
+  onCapture,
+  disabled = false,
+}: {
+  onCapture: (blob: Blob, where: CaptureLocation) => void | Promise<void>;
+  disabled?: boolean;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  // Bumped on every start and on unmount, so a camera that opens late is closed instead of kept.
+  const attempt = useRef(0);
+  const [status, setStatus] = useState<Status>("idle");
+  const [facing, setFacing] = useState<Facing>("environment");
+
+  const start = useCallback(async (want: Facing) => {
+    const mine = ++attempt.current;
+    stop(streamRef.current);
+    streamRef.current = null;
+    if (!window.isSecureContext) return setStatus("insecure");
+    if (!navigator.mediaDevices?.getUserMedia) return setStatus("nocamera");
+    setStatus("starting");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: want }, width: { ideal: 1920 }, height: { ideal: 1920 } },
+        audio: false,
+      });
+      if (mine !== attempt.current) return stop(stream);
+      streamRef.current = stream;
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = stream;
+        await video.play().catch(() => {});
+      }
+      setFacing(want);
+      setStatus("ready");
+    } catch (e) {
+      if (mine !== attempt.current) return;
+      const name = e instanceof DOMException ? e.name : "";
+      if (name === "NotAllowedError" || name === "SecurityError") setStatus("denied");
+      else if (name === "NotFoundError" || name === "DevicesNotFoundError" || name === "OverconstrainedError") {
+        setStatus("nocamera");
+      } else setStatus("error");
+    }
+  }, []);
+
+  useEffect(
+    () => () => {
+      attempt.current++;
+      stop(streamRef.current);
+      streamRef.current = null;
+    },
+    [],
+  );
+
+  async function shoot() {
+    const video = videoRef.current;
+    if (!video || status !== "ready") return;
+    setStatus("capturing");
+    const blob = await toJpeg(video);
+    if (!blob) {
+      setStatus("error");
+      return;
+    }
+    const where = await locate();
+    await onCapture(blob, where);
+    setStatus("ready");
+  }
+
+  const live = status === "ready" || status === "capturing";
+
+  return (
+    <div className="grid gap-4">
+      <div
+        className="relative aspect-[3/4] w-full overflow-hidden rounded-[6px] border-2 border-ink bg-ink"
+        style={{ boxShadow: "3px 3px 0 var(--ink)" }}
+      >
+        <video
+          ref={videoRef}
+          playsInline
+          muted
+          autoPlay
+          aria-label="Live camera"
+          className={`h-full w-full object-cover ${live ? "" : "invisible"}`}
+        />
+        {!live && (
+          <div className="absolute inset-0 grid place-items-center p-6 text-center text-paper">
+            <CameraMessage status={status} />
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-3">
+        {!live && (status === "idle" || status === "denied" || status === "error" || status === "nocamera") && (
+          <button type="button" className="btn" onClick={() => start(facing)} disabled={disabled}>
+            {status === "idle" ? "Open camera" : "Try again"}
+          </button>
+        )}
+        {live && (
+          <>
+            <button type="button" className="btn" onClick={shoot} disabled={disabled || status === "capturing"}>
+              {status === "capturing" ? "Taking photo" : "Take photo"}
+            </button>
+            <button
+              type="button"
+              className="btn-quiet"
+              onClick={() => start(facing === "environment" ? "user" : "environment")}
+              disabled={disabled || status === "capturing"}
+            >
+              {facing === "environment" ? "Use front camera" : "Use back camera"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CameraMessage({ status }: { status: Status }) {
+  switch (status) {
+    case "starting":
+      return <p role="status">Starting the camera. Allow access if your browser asks.</p>;
+    case "denied":
+      return (
+        <div role="alert" className="grid gap-2">
+          <p className="font-bold">The camera is blocked.</p>
+          <p>
+            To turn it on, open your browser&apos;s site settings for this page, set Camera to Allow, then come
+            back and tap Try again. Photos can only be taken live with the camera.
+          </p>
+        </div>
+      );
+    case "nocamera":
+      return (
+        <div role="alert" className="grid gap-2">
+          <p className="font-bold">No camera found.</p>
+          <p>This device has no camera we can use. Open this page on a phone to take a photo.</p>
+        </div>
+      );
+    case "insecure":
+      return (
+        <div role="alert" className="grid gap-2">
+          <p className="font-bold">The camera needs a secure page.</p>
+          <p>Open this site with an address that starts with https:// and try again.</p>
+        </div>
+      );
+    case "error":
+      return (
+        <p role="alert">Something went wrong with the camera. Tap Try again, or close other apps that use it.</p>
+      );
+    default:
+      return <p>Point the camera at the cat, then take the photo.</p>;
+  }
+}

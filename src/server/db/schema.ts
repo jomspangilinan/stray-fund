@@ -57,6 +57,8 @@ export const cats = pgTable(
     exactLng: doublePrecision("exact_lng"),
     fuzzedLat: doublePrecision("fuzzed_lat"),
     fuzzedLng: doublePrecision("fuzzed_lng"),
+    // True when the exact point is the colony centre because the photo carried no location.
+    locationApproximate: boolean("location_approximate").notNull().default(false),
     bio: text("bio"),
     queuedAt: timestamp("queued_at", { withTimezone: true }),
     createdAt: createdAt(),
@@ -85,6 +87,10 @@ export const sightings = pgTable(
     takenAt: timestamp("taken_at", { withTimezone: true }),
     caughtByUserId: uuid("caught_by_user_id").references(() => users.id),
     matchConfidence: doublePrecision("match_confidence"),
+    // Private. Kept so a sighting saved before the AI ran can still be finished later.
+    exactLat: doublePrecision("exact_lat"),
+    exactLng: doublePrecision("exact_lng"),
+    requestedSex: text("requested_sex"),
     assessment: jsonb("assessment"),
     state: text("state").notNull().default("pending"),
     createdAt: createdAt(),

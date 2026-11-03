@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import { Bricolage_Grotesque, Figtree } from "next/font/google";
 import "./globals.css";
@@ -18,7 +18,12 @@ const figtree = Figtree({
 export const metadata: Metadata = {
   title: APP_NAME,
   description: "Community funding for neighbourhood stray cat care",
+  manifest: "/manifest.webmanifest",
+  icons: { icon: "/icon.svg", apple: "/icon.svg" },
 };
+
+// The "sign" yellow from globals.css.
+export const viewport: Viewport = { themeColor: "#ffc21a" };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
