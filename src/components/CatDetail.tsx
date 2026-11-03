@@ -71,8 +71,8 @@ export function CatDetail({ card }: { card: CatCardData }) {
                   {h.vet ? ` by ${h.vet}` : ""}
                 </p>
                 {h.nextDue && (
-                  <p className={`small mt-1 ${h.overdue ? "font-bold text-danger" : ""}`}>
-                    {h.overdue ? "Overdue, was due " : "Next due "}
+                  <p className={`small mt-1 ${h.overdue ? "font-bold text-main" : ""}`}>
+                    {h.overdue ? "Due now, since " : "Next due "}
                     {niceDate(h.nextDue)}
                   </p>
                 )}
