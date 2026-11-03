@@ -43,9 +43,15 @@ async function finderOf(tx: Pick<Tx, "select">, catId: string): Promise<string |
   return row?.userId ?? null;
 }
 
-/** Whether this person may ask for another name for a cat: its finder, until a caretaker names it. */
-export async function canAskForAnotherName(tx: Pick<Tx, "select">, cat: { id: string; nameLocked: boolean }, userId: string): Promise<boolean> {
-  return !cat.nameLocked && (await finderOf(tx, cat.id)) === userId;
+/** Another name is open only before funding starts: later, a vet receipt is checked against the cat's name. */
+const RENAMABLE_STATUSES: readonly string[] = ["spotted", "queued"];
+
+/** The one rule for Another name on a cat, shared by the button and the server. */
+export const anotherNameOpen = (cat: { status: string; nameLocked: boolean }) => !cat.nameLocked && RENAMABLE_STATUSES.includes(cat.status);
+
+/** Whether this person may ask for another name for a cat: its finder, while the cat is spotted or queued and no caretaker has named it. */
+export async function canAskForAnotherName(tx: Pick<Tx, "select">, cat: { id: string; status: string; nameLocked: boolean }, userId: string): Promise<boolean> {
+  return anotherNameOpen(cat) && (await finderOf(tx, cat.id)) === userId;
 }
 
 /**
@@ -73,6 +79,7 @@ export async function anotherName(userId: string, catId: string): Promise<string
     if (!cat) throw new Refusal(404, NO_SUCH_CAT);
     if ((await finderOf(tx, catId)) !== userId) throw new Refusal(403, "Only the person who found this cat can do this.");
     if (cat.nameLocked) throw new Refusal(409, "A caretaker has chosen this name.");
+    if (!anotherNameOpen(cat)) throw new Refusal(409, "This cat's name can no longer be changed.");
     const name = pickFreeName(await takenNames(tx));
     await tx.update(cats).set({ name }).where(eq(cats.id, catId));
     await tx.insert(agentActions).values({
@@ -115,7 +122,7 @@ export type NameControls = { canRename: boolean; /** This person's own pending s
 
 /** What the cat card offers this person. */
 export async function nameControls(catId: string, userId: string): Promise<NameControls> {
-  const [cat] = await db.select({ id: cats.id, nameLocked: cats.nameLocked }).from(cats).where(eq(cats.id, catId));
+  const [cat] = await db.select({ id: cats.id, status: cats.status, nameLocked: cats.nameLocked }).from(cats).where(eq(cats.id, catId));
   if (!cat) return { canRename: false, pending: null };
   const [mine] = await db
     .select({ name: nameSuggestions.name })

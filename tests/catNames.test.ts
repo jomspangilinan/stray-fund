@@ -262,6 +262,23 @@ describe("Another name", () => {
     expect((await catRow(cat.id)).name).toBe("Kuya Bong");
   });
 
+  it("is only for a cat that is still spotted or queued: later statuses get 409 and no button", async () => {
+    const { anotherName, canAskForAnotherName } = await import("../src/server/catNames");
+    const finder = await makeUser();
+    for (const status of ["funded", "booked", "in_care", "neutered", "adoptable", "adopted"]) {
+      const cat = await catFoundBy(finder, { name: `Held ${status}`, status });
+      await signIn(finder);
+      expect((await anotherPost(new Request("http://x/api", json({})), ctx(cat.id))).status, status).toBe(409);
+      expect((await catRow(cat.id)).name).toBe(`Held ${status}`);
+      expect(await canAskForAnotherName(db, { id: cat.id, status, nameLocked: false }, finder.id), status).toBe(false);
+    }
+    for (const status of ["spotted", "queued"]) {
+      const cat = await catFoundBy(finder, { status });
+      expect(await canAskForAnotherName(db, { id: cat.id, status, nameLocked: false }, finder.id), status).toBe(true);
+      expect(typeof (await anotherName(finder.id, cat.id))).toBe("string");
+    }
+  });
+
   it("stops once a caretaker has typed a name", async () => {
     const finder = await makeUser();
     const care = await makeCaretaker();
