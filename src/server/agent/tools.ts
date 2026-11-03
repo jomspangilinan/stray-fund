@@ -11,6 +11,8 @@ import { CONFIRMED_BOOKING } from "../guardrails";
 import { InsufficientFunds, allocateToCat, getPoolStatus } from "../ledger";
 import { BATCH_EXISTS_FLAG, requestPayout, type GateResult } from "../moneyGate";
 import { restPayoutGateway, type PayoutGateway } from "../paypal/payouts";
+import { manilaDate } from "../public";
+import { isPlainText } from "../plainText";
 import { fileReview } from "./review";
 import { rankWaitingCats } from "./rank";
 
@@ -27,19 +29,6 @@ export type AgentToolDeps = {
   now?: () => Date;
   syncCat?: (payoutId: string) => Promise<void>;
 };
-
-/** Control characters other than newline and tab. Written out so the source stays printable. */
-const CONTROL_CHAR = new RegExp("[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]");
-const MARKUP = /[<>]/;
-const LINK = /https?:\/\/|www\./i;
-const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/;
-/** A bare domain such as evil.example. A decimal or "e.g." does not match. */
-const DOMAIN = /[a-z0-9-]+\.[a-z]{2,}/i;
-
-/** Reasons appear on a public page, so a manipulated model must not be able to post links or addresses. */
-function isPlainText(s: string): boolean {
-  return !CONTROL_CHAR.test(s) && !MARKUP.test(s) && !LINK.test(s) && !EMAIL.test(s) && !DOMAIN.test(s);
-}
 
 const plainText = (max: number) =>
   z
@@ -363,7 +352,8 @@ export function createAgentTools(deps: AgentToolDeps = {}) {
             catName: b.catName,
             catStatus: b.catStatus,
             packagePrice: b.packagePrice,
-            scheduledFor: b.scheduledFor,
+            // A Manila day, since a UTC timestamp reads as the day before.
+            scheduledFor: b.scheduledFor ? manilaDate(b.scheduledFor) : null,
             depositDue: depositAmount(b.packagePrice, limits.depositPct),
             depositStatus: deposits[0]?.status ?? "none",
             depositRetryAllowed: retryBlock(deposits) === undefined,

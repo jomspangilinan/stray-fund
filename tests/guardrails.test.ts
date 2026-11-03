@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { closePool, db, withColonyLock } from "../src/server/db/client";
-import { allocations, cats, donations } from "../src/server/db/schema";
+import { allocations, bookings, cats, donations } from "../src/server/db/schema";
 import { checkSpend, type SpendRequest } from "../src/server/guardrails";
 import { truncateAll } from "./helpers/db";
 import {
@@ -34,6 +34,9 @@ describe("checkSpend", () => {
   afterAll(async () => {
     await closePool();
   });
+
+  /** A cat has one open booking, so a test giving it a new vet closes the world's first. */
+  const retireWorldBooking = () => db.update(bookings).set({ status: "completed" }).where(eq(bookings.id, w.booking.id));
 
   it("allows a valid deposit", async () => {
     expect(await check(depositRequest(w))).toEqual({ verdict: "allow" });
@@ -89,6 +92,7 @@ describe("checkSpend", () => {
   describe("PAYEE_NOT_ALLOWED", () => {
     it("denies a vet with no allowed_payees row", async () => {
       const vet = await makeVet({ allowed: false });
+      await retireWorldBooking();
       const booking = await makeBooking(w.cat.id, vet.id);
       expect(
         await check({ ...depositRequest(w), payeeId: vet.id, bookingId: booking.id }),
@@ -104,6 +108,7 @@ describe("checkSpend", () => {
 
     it("denies an allowed vet with no PayPal email to pay", async () => {
       const vet = await makeVet({ email: null });
+      await retireWorldBooking();
       const booking = await makeBooking(w.cat.id, vet.id);
       expect(
         await check({ ...depositRequest(w), payeeId: vet.id, bookingId: booking.id }),
@@ -154,7 +159,7 @@ describe("checkSpend", () => {
 
     it("denies a verified receipt for another booking", async () => {
       await addPayout(w, { amount: 45000, status: "succeeded" });
-      const otherBooking = await makeBooking(w.cat.id, w.vet.id);
+      const otherBooking = await makeBooking(w.cat.id, w.vet.id, "completed");
       const receipt = await addReceipt(otherBooking.id);
       expect(await check(balance(receipt.id))).toEqual(denied("RECEIPT_NOT_VERIFIED"));
     });
@@ -169,7 +174,7 @@ describe("checkSpend", () => {
     );
 
     it("denies when the deposit that succeeded was for another booking", async () => {
-      const otherBooking = await makeBooking(w.cat.id, w.vet.id);
+      const otherBooking = await makeBooking(w.cat.id, w.vet.id, "completed");
       await addPayout({ ...w, booking: otherBooking }, { amount: 45000, status: "succeeded" });
       const receipt = await addReceipt(w.booking.id);
       expect(await check(balance(receipt.id))).toEqual(denied("DEPOSIT_NOT_PAID"));
@@ -179,15 +184,15 @@ describe("checkSpend", () => {
   describe("OVER_CAT_CAP", () => {
     it("adds this cat's live payouts to the amount, inclusive at the cap", async () => {
       await fundCat(w.cat.id, 1000000);
-      const other = await makeBooking(w.cat.id, w.vet.id);
+      const other = await makeBooking(w.cat.id, w.vet.id, "completed");
       await addPayout({ ...w, booking: other }, { amount: 100000, status: "succeeded" });
       expect(await check(depositRequest(w, 150000))).toEqual({ verdict: "allow" });
       expect(await check(depositRequest(w, 150001))).toEqual(denied("OVER_CAT_CAP"));
     });
 
     it("ignores failed and rejected payouts", async () => {
-      const a = await makeBooking(w.cat.id, w.vet.id);
-      const b = await makeBooking(w.cat.id, w.vet.id);
+      const a = await makeBooking(w.cat.id, w.vet.id, "completed");
+      const b = await makeBooking(w.cat.id, w.vet.id, "completed");
       await addPayout({ ...w, booking: a }, { amount: 240000, status: "failed" });
       await addPayout({ ...w, booking: b }, { amount: 240000, status: "rejected" });
       expect(await check(depositRequest(w, 200000))).toEqual({ verdict: "allow" });
@@ -264,9 +269,9 @@ describe("checkSpend", () => {
   describe("OVER_ALLOCATION", () => {
     it("counts paid plus in-flight plus this amount, inclusive at the allocation", async () => {
       const w2 = await makeWorld({ funded: 100000 });
-      const other = await makeBooking(w2.cat.id, w2.vet.id);
+      const other = await makeBooking(w2.cat.id, w2.vet.id, "completed");
       await addPayout({ ...w2, booking: other }, { amount: 30000, status: "succeeded" });
-      const third = await makeBooking(w2.cat.id, w2.vet.id);
+      const third = await makeBooking(w2.cat.id, w2.vet.id, "completed");
       await addPayout({ ...w2, booking: third }, { amount: 20000, status: "queued" });
       expect(await check(depositRequest(w2, 50000))).toEqual({ verdict: "allow" });
       expect(await check(depositRequest(w2, 50001))).toEqual(denied("OVER_ALLOCATION"));
@@ -314,7 +319,7 @@ describe("checkSpend", () => {
 
     it("still counts other payouts", async () => {
       const p = await addPayout(w, { amount: 200000, status: "awaiting_approval" });
-      const other = await makeBooking(w.cat.id, w.vet.id);
+      const other = await makeBooking(w.cat.id, w.vet.id, "completed");
       await addPayout({ ...w, booking: other }, { amount: 50001, status: "queued" });
       expect(await check(depositRequest(w, 200000), { approvingPayoutId: p.id })).toEqual(
         denied("OVER_CAT_CAP"),

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { describeError } from "@/server/errors";
+import { BodyTooLarge, parseForm, readLimited } from "@/server/http";
 import { AuthError, requireRole } from "@/server/session";
 import { assertUnderRateLimit, processCatch, RateLimited, type Sex } from "@/server/catch";
 import { InvalidPhoto, MAX_BYTES } from "@/server/photos";
@@ -8,30 +9,7 @@ import { InvalidPhoto, MAX_BYTES } from "@/server/photos";
 const MAX_BODY = MAX_BYTES + 64 * 1024;
 const SEXES = new Set<string>(["female", "male", "unknown"]);
 
-class TooBig extends Error {}
-
 const fail = (error: string, status: number) => NextResponse.json({ error }, { status });
-
-/** Reads the body, giving up as soon as it passes the limit instead of buffering all of it. */
-async function readLimited(req: Request): Promise<Uint8Array> {
-  const declared = Number(req.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_BODY) throw new TooBig();
-  if (!req.body) return new Uint8Array();
-  const reader = req.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > MAX_BODY) {
-      await reader.cancel().catch(() => {});
-      throw new TooBig();
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks);
-}
 
 function coordinate(raw: FormDataEntryValue | null, min: number, max: number): number | null | "bad" {
   if (raw === null || raw === "") return null;
@@ -50,17 +28,8 @@ export async function POST(req: Request) {
     // Checked before the body is read, so a flood of large uploads is cheap to refuse.
     await assertUnderRateLimit(session.userId);
 
-    const raw = await readLimited(req);
-    let form: FormData;
-    try {
-      form = await new Request(req.url, {
-        method: "POST",
-        headers: { "content-type": req.headers.get("content-type") ?? "" },
-        body: raw as BodyInit,
-      }).formData();
-    } catch {
-      return fail("Send the photo as a form", 400);
-    }
+    const form = await parseForm(req, await readLimited(req, MAX_BODY));
+    if (!form) return fail("Send the photo as a form", 400);
 
     const photo = form.get("photo");
     if (!(photo instanceof Blob) || photo.size === 0) return fail("A photo is required", 400);
@@ -91,7 +60,7 @@ export async function POST(req: Request) {
     });
   } catch (e) {
     if (e instanceof AuthError) return fail(e.message, e.status);
-    if (e instanceof TooBig) return fail("That photo is too large", 413);
+    if (e instanceof BodyTooLarge) return fail("That photo is too large", 413);
     if (e instanceof RateLimited) return fail(e.message, 429);
     if (e instanceof InvalidPhoto) {
       return fail(e.reason === "too_large" ? "That photo is too large" : "That does not look like a photo", e.reason === "too_large" ? 413 : 400);

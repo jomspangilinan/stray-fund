@@ -20,6 +20,9 @@ const SENTINELS = [
   "leakcheck.sentinel@example.test", "originals/", "exact_lat", "exactLat", "fuzzed", "originalKey",
   "original_key", "locationApproximate", "paypal_email", "paypalEmail", "requested_sex", "assessment",
   "agentinputs-sentinel", "gatewayerror-sentinel",
+  "Leakcheck Sentinel Clinic", "clinic_name", "clinicName", "OR-LEAK-SENTINEL", "receipt_number", "file_key", "fileKey",
+  "ear_tip_photo_key", "earTipPhotoKey", "ear_tip_result", "earTipResult", "same_cat_confidence",
+  "leakreceipt-sentinel-sha", "LeakItem-Sentinel", "tamper_signs",
 ];
 
 async function main() {
@@ -27,6 +30,10 @@ async function main() {
   const { rows: [donor] } = await pool.query(
     "insert into users (username, role, paypal_email) values ($1,'donor',$2) returning id",
     [`leak_${tag}`, "leakcheck.sentinel@example.test"],
+  );
+  const { rows: [vet] } = await pool.query(
+    "insert into users (username, role, paypal_email, clinic_name) values ($1,'vet',$2,'Leakcheck Sentinel Clinic') returning id",
+    [`leakvet_${tag}`, "leakcheck.sentinel@example.test"],
   );
   const { rows: [cat] } = await pool.query(
     `insert into cats (name, sex, status, area_name, exact_lat, exact_lng, fuzzed_lat, fuzzed_lng, location_approximate, flags)
@@ -44,6 +51,24 @@ async function main() {
   );
   await pool.query("insert into allocations (donation_id, cat_id, purpose, amount) values ($1,$2,'vet',4000)", [don.id, cat.id]);
 
+  const { rows: [booking] } = await pool.query(
+    "insert into bookings (cat_id, vet_id, package_price, status, scheduled_for) values ($1,$2,150000,'completed',now()) returning id",
+    [cat.id, vet.id],
+  );
+  const { rows: [receipt] } = await pool.query(
+    `insert into receipts (booking_id, file_key, sha256, parsed, ear_tip_photo_key, ear_tip_result, verification, reasons)
+     values ($1,'originals/00000000-0000-4000-8000-000000000003.jpg','leakreceipt-sentinel-sha',$2,'originals/00000000-0000-4000-8000-000000000004.jpg',$3,'verified','{}') returning id`,
+    [
+      booking.id,
+      JSON.stringify({ clinic: "Leakcheck Sentinel Clinic", receipt_number: "OR-LEAK-SENTINEL", items: ["LeakItem-Sentinel"], tamper_signs: [] }),
+      JSON.stringify({ ear_tip: "present", confidence: 0.9, same_cat_confidence: 0.9 }),
+    ],
+  );
+  await pool.query(
+    "insert into treatments (cat_id, type, product, date, vet_id, receipt_id) values ($1,'neuter','Leak check spay',current_date,$2,$3)",
+    [cat.id, vet.id, receipt.id],
+  );
+
   const token = await new SignJWT({ role: "donor", username: `leak_${tag}` })
     .setProtectedHeader({ alg: "HS256" }).setSubject(donor.id).setIssuedAt().setExpirationTime("1h").sign(secret);
 
@@ -53,7 +78,7 @@ async function main() {
     [JSON.stringify({ catId: cat.id, secret: "agentinputs-sentinel", gatewayError: "gatewayerror-sentinel" }), donor.id],
   );
 
-  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/collection", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed"];
+  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/collection", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/vet", `/vet/bookings/${booking.id}`];
   const viewers: [string, Record<string, string>][] = [["anon", {}], ["donor", { cookie: `sf_session=${token}` }]];
   let bad = 0, checked = 0;
   try {
@@ -71,6 +96,7 @@ async function main() {
     }
     const html = await (await fetch(`${BASE}/cats/${cat.id}`)).text();
     if (!html.includes(`LeakCat ${tag}`)) { bad++; console.log("FAIL: seeded cat did not render, so the scan proved nothing"); }
+    if (!html.includes("Leak check spay")) { bad++; console.log("FAIL: the seeded treatment did not render"); }
     const feed = await (await fetch(`${BASE}/agent`)).text();
     if (!feed.includes("Leak check reason")) { bad++; console.log("FAIL: agent feed did not render the seeded action"); }
     const col = await (await fetch(`${BASE}/collection`, { headers: { cookie: `sf_session=${token}` } })).text();
@@ -79,8 +105,12 @@ async function main() {
     await pool.query("delete from agent_actions where approved_by=$1", [donor.id]);
     await pool.query("delete from allocations where donation_id=$1", [don.id]);
     await pool.query("delete from donations where id=$1", [don.id]);
+    await pool.query("delete from treatments where cat_id=$1", [cat.id]);
+    await pool.query("delete from receipts where booking_id=$1", [booking.id]);
+    await pool.query("delete from bookings where id=$1", [booking.id]);
     await pool.query("delete from sightings where cat_id=$1", [cat.id]);
     await pool.query("delete from cats where id=$1", [cat.id]);
+    await pool.query("delete from users where id=$1", [vet.id]);
     await pool.query("delete from users where id=$1", [donor.id]);
     await pool.end();
   }

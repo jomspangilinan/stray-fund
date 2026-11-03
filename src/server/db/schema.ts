@@ -29,6 +29,8 @@ export const users = pgTable(
     role: text("role").notNull(),
     // Private: never exposed through the public ledger or any public API.
     paypalEmail: text("paypal_email"),
+    // Vets only. The name printed on this vet's receipts. Private, like the email.
+    clinicName: text("clinic_name"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -156,7 +158,11 @@ export const bookings = pgTable(
     status: text("status").notNull(),
     createdAt: createdAt(),
   },
-  (t) => [check("bookings_price_check", sql`${t.packagePrice} >= 0`)],
+  (t) => [
+    check("bookings_price_check", sql`${t.packagePrice} >= 0`),
+    // One open booking per cat. A completed booking no longer counts.
+    uniqueIndex("bookings_cat_open_idx").on(t.catId).where(sql`${t.status} = 'confirmed'`),
+  ],
 );
 
 export const agentActions = pgTable("agent_actions", {
@@ -191,6 +197,10 @@ export const treatments = pgTable(
       "treatments_type_check",
       sql`${t.type} in ('neuter', 'vaccine', 'deworming')`,
     ),
+    // A verified receipt writes each treatment once, however often it is applied.
+    uniqueIndex("treatments_receipt_type_idx")
+      .on(t.receiptId, t.type)
+      .where(sql`${t.receiptId} is not null`),
   ],
 );
 
@@ -215,6 +225,10 @@ export const receipts = pgTable(
       "receipts_verification_check",
       sql`${t.verification} in ('pending', 'verified', 'rejected', 'needs_review')`,
     ),
+    // One attempt in progress or accepted per booking. Older attempts stay as history.
+    uniqueIndex("receipts_booking_live_idx")
+      .on(t.bookingId)
+      .where(sql`${t.verification} in ('pending', 'verified')`),
   ],
 );
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { APP_NAME, isDemoMode } from "@/lib/config";
 import { getSession } from "@/server/session";
 import { PersonaSwitcher } from "./PersonaSwitcher";
@@ -37,17 +38,35 @@ const LINKS = [
   { href: "/agent", label: "Treasurer" },
 ] as const;
 
+const NAV_LINK = "inline-flex min-h-8 items-center underline-offset-4 hover:underline";
+
+/** Reads the session cookie, so render it inside Suspense. Only vets ever receive this link. */
+async function VetNavItem() {
+  const session = await getSession();
+  if (session?.role !== "vet") return null;
+  return (
+    <li>
+      <Link href="/vet" className={NAV_LINK}>
+        Vet
+      </Link>
+    </li>
+  );
+}
+
 export function SiteNav() {
   return (
     <nav aria-label="Main" className="mx-auto w-full max-w-xl px-4 pb-2">
       <ul className="flex flex-wrap gap-x-5 gap-y-1 text-sm font-bold">
         {LINKS.map((l) => (
           <li key={l.href}>
-            <Link href={l.href} className="inline-flex min-h-8 items-center underline-offset-4 hover:underline">
+            <Link href={l.href} className={NAV_LINK}>
               {l.label}
             </Link>
           </li>
         ))}
+        <Suspense fallback={null}>
+          <VetNavItem />
+        </Suspense>
       </ul>
     </nav>
   );

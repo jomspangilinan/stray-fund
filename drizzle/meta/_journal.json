@@ -43,6 +43,13 @@
       "when": 1793691479986,
       "tag": "0005_wakeup_scheduling",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793693088159,
+      "tag": "0006_vet_flow",
+      "breakpoints": true
     }
   ]
 }

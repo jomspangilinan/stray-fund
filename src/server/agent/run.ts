@@ -109,6 +109,7 @@ const NEXT_STEP: Record<string, string> = {
   donation_captured: "Money has come in. See whether it can fund the next cat.",
   cat_queued: "A cat has joined the queue. See whether the pool can fund the next cat.",
   booking_confirmed: "A vet visit is confirmed. See whether a deposit is due on the open bookings.",
+  evidence_ready: "A vet's receipt and ear-tip photo have been verified by code. See whether a balance is due on the open bookings.",
   payout_status_changed: "A vet payment has changed. See whether anything is now due on the open bookings.",
 };
 

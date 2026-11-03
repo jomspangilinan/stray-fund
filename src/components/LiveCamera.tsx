@@ -60,6 +60,7 @@ export function LiveCamera({
   disabled = false,
   onVideoReady,
   hideShutter = false,
+  askLocation = true,
 }: {
   onCapture: (blob: Blob, where: CaptureLocation) => void | Promise<void>;
   disabled?: boolean;
@@ -67,6 +68,8 @@ export function LiveCamera({
   onVideoReady?: (video: HTMLVideoElement | null) => void;
   /** Hides the shutter button, for callers that capture on their own. */
   hideShutter?: boolean;
+  /** Off for photos whose place does not matter, so no location prompt appears. */
+  askLocation?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -131,7 +134,7 @@ export function LiveCamera({
       setStatus("error");
       return;
     }
-    const where = await locate();
+    const where: CaptureLocation = askLocation ? await locate() : { lat: null, lng: null };
     await onCapture(blob, where);
     setStatus("ready");
   }

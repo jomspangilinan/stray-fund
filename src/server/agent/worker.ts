@@ -5,6 +5,7 @@ import { db, type Tx } from "../db/client";
 import { wakeups } from "../db/schema";
 import { describeError } from "../errors";
 import { reconcilePayouts, retryUnknownPayouts } from "../moneyGate";
+import { retryPendingEvidence } from "../vetFlow";
 import { restPayoutGateway } from "../paypal/payouts";
 import { isUuid } from "../public";
 import { fileReview } from "./review";
@@ -32,6 +33,7 @@ export type WorkerDeps = AgentDeps & {
   reconcile?: () => Promise<unknown>;
   retryUnknown?: () => Promise<unknown>;
   retrySightings?: () => Promise<unknown>;
+  retryEvidence?: () => Promise<unknown>;
   /** Replaces the poll in a test. */
   tick?: () => Promise<unknown>;
 };
@@ -265,6 +267,7 @@ export async function runMaintenance(deps: WorkerDeps = {}): Promise<void> {
   await isolated("reconcile", deps.reconcile ?? (() => reconcilePayouts(gateway)));
   await isolated("payout retry", deps.retryUnknown ?? (() => retryUnknownPayouts(gateway)));
   await isolated("sighting retry", deps.retrySightings ?? retryPendingSightings);
+  await isolated("evidence retry", deps.retryEvidence ?? retryPendingEvidence);
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

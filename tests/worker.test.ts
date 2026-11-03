@@ -407,7 +407,7 @@ describe("payout wakeups", () => {
 });
 
 describe("maintenance", () => {
-  it("runs all three jobs, isolating a failure in any of them", async () => {
+  it("runs all four jobs, isolating a failure in any of them", async () => {
     const ran: string[] = [];
     const job = (name: string, fail = false) => async () => {
       ran.push(name);
@@ -417,9 +417,10 @@ describe("maintenance", () => {
       gateway: new FakeGateway(),
       reconcile: job("reconcile", true),
       retryUnknown: job("retryUnknown", true),
-      retrySightings: job("sightings"),
+      retrySightings: job("sightings", true),
+      retryEvidence: job("evidence"),
     });
-    expect(ran).toEqual(["reconcile", "retryUnknown", "sightings"]);
+    expect(ran).toEqual(["reconcile", "retryUnknown", "sightings", "evidence"]);
   });
 });
 
@@ -439,7 +440,7 @@ describe("the loops", () => {
       },
     ]);
     await runWorkerLoops(
-      { ...d, reconcile: async () => {}, retryUnknown: async () => {}, retrySightings: async () => {} },
+      { ...d, reconcile: async () => {}, retryUnknown: async () => {}, retrySightings: async () => {}, retryEvidence: async () => {} },
       stop.signal,
       { pollMs: 5, maintenanceMs: 5 },
     );
@@ -456,6 +457,7 @@ describe("the loops", () => {
         reconcile: async () => {},
         retryUnknown: async () => {},
         retrySightings: async () => {},
+        retryEvidence: async () => {},
         tick: async () => {
           if (++polls >= 3) stop.abort();
           throw new Error("db down");

@@ -1,0 +1,138 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { Suspense } from "react";
+import { EvidenceForm } from "@/components/EvidenceForm";
+import { ExactLocation } from "@/components/ExactLocation";
+import { SignIn } from "@/components/SignIn";
+import { formatPeso } from "@/lib/money";
+import { isUuid } from "@/server/public";
+import { getSession } from "@/server/session";
+import { getVetBooking, type VetBookingView, type VetPayout } from "@/server/vetFlow";
+
+export const metadata: Metadata = { title: "Booking | Stray Fund" };
+
+const PAYOUT_KIND: Record<string, string> = { deposit: "Deposit", balance: "Balance" };
+const PAYOUT_STATUS: Record<string, string> = {
+  awaiting_approval: "Waiting for a caretaker",
+  queued: "Sending",
+  sent: "Sent, waiting for PayPal",
+  succeeded: "Paid",
+  failed: "Failed",
+  needs_review: "Being checked",
+  rejected: "Rejected",
+};
+const VERIFICATION: Record<string, string> = {
+  pending: "Being checked",
+  verified: "Verified",
+  needs_review: "A caretaker will look",
+  rejected: "Not accepted",
+};
+
+function Payouts({ payouts }: { payouts: VetPayout[] }) {
+  if (payouts.length === 0) return <p className="mt-2 text-dusk">No payments yet. The treasurer pays the deposit shortly after booking.</p>;
+  return (
+    <ul className="mt-3 grid gap-3">
+      {payouts.map((p, i) => (
+        <li key={`${p.kind}-${i}`} className="border-b border-line pb-3 last:border-b-0">
+          <p className="font-display text-2xl font-extrabold">{formatPeso(p.amount)}</p>
+          <p className="text-sm">
+            {PAYOUT_KIND[p.kind] ?? p.kind}, {PAYOUT_STATUS[p.status] ?? p.status}, {p.date}
+          </p>
+          <p className="text-sm break-all text-dusk">PayPal reference: {p.paypalRef ?? "none yet"}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function EvidenceSection({ view }: { view: VetBookingView }) {
+  const { evidence, receipt, booking } = view;
+  return (
+    <section className="mt-8" aria-labelledby="evidence">
+      <h2 id="evidence" className="text-3xl font-extrabold">
+        Evidence
+      </h2>
+      {receipt && receipt.verification !== "verified" && (
+        <div className={`note mt-3 ${receipt.verification === "rejected" ? "note-bad" : ""}`}>
+          <p className="font-bold">
+            Last submission, {receipt.submitted}: {VERIFICATION[receipt.verification]}
+          </p>
+          {receipt.messages.length > 0 && (
+            <ul className="mt-1 list-disc pl-5">
+              {receipt.messages.map((m) => (
+                <li key={m}>{m}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      <div className="mt-4">
+        {evidence.state === "open" && <EvidenceForm bookingId={booking.id} catName={booking.catName} />}
+        {evidence.state === "waiting_deposit" && (
+          <p className="note">The form opens once the deposit has reached you. PayPal can take a few minutes.</p>
+        )}
+        {evidence.state === "waiting_cat" && <p className="note">The form opens once the cat is in care.</p>}
+        {evidence.state === "checking" && <p className="note">Your last submission is still being checked. You do not need to send it again.</p>}
+        {evidence.state === "verified" && (
+          <p className="note note-ok font-bold">Verified. The treasurer releases the balance next, and it shows above once sent.</p>
+        )}
+        {evidence.state === "closed" && <p className="note">This booking is closed.</p>}
+      </div>
+    </section>
+  );
+}
+
+async function BookingView({ params }: { params: Promise<{ id: string }> }) {
+  const session = await getSession();
+  if (!session) {
+    return (
+      <div className="ticket mt-8">
+        <p className="mb-4 font-bold">Sign in with a vet account to see this booking.</p>
+        <SignIn username={null} inline />
+      </div>
+    );
+  }
+  if (session.role !== "vet") return <p className="note note-bad mt-8 font-bold">This page is for partner vets.</p>;
+
+  const { id } = await params;
+  if (!isUuid(id)) notFound();
+  // Another vet's booking looks the same as one that does not exist.
+  const view = await getVetBooking(session.userId, id);
+  if (!view) notFound();
+
+  const { booking } = view;
+  return (
+    <>
+      <h1 className="text-5xl font-extrabold">{booking.catName}.</h1>
+      <p className="mt-4">
+        Visit on {booking.scheduledFor ?? "a date to be set"}. Package {formatPeso(booking.packagePrice)}.
+      </p>
+      <div className="mt-2">
+        <ExactLocation exact={booking.exact} />
+      </div>
+      <section className="ticket mt-8" aria-labelledby="payments">
+        <h2 id="payments" className="text-3xl font-extrabold">
+          Your payments
+        </h2>
+        <Payouts payouts={view.payouts} />
+      </section>
+      <EvidenceSection view={view} />
+    </>
+  );
+}
+
+export default function VetBookingPage({ params }: PageProps<"/vet/bookings/[id]">) {
+  return (
+    <main className="pt-4">
+      <Link href="/vet" className="text-sm font-bold underline underline-offset-4">
+        All bookings
+      </Link>
+      <div className="mt-3">
+        <Suspense fallback={<p className="mt-8 text-dusk">Loading</p>}>
+          <BookingView params={params} />
+        </Suspense>
+      </div>
+    </main>
+  );
+}

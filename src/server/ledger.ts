@@ -114,13 +114,11 @@ export async function allocateToCat(
     .returning();
 }
 
-/** Caller must hold withColonyLock. Writes negative rows, newest donations first. */
-export async function returnSurplus(
+/** What each donation still holds for this cat, newest first, and how much of it no payout has claimed. */
+async function heldForCat(
   tx: Tx,
   catId: string,
-  amount: number,
-): Promise<void> {
-  assertPositiveInt(amount);
+): Promise<{ rows: { donation_id: string; held: unknown }[]; unspent: number }> {
   const result = await tx.execute(sql`
     select a.donation_id, sum(a.amount)::bigint as held
     from allocations a
@@ -139,7 +137,22 @@ export async function returnSurplus(
     where cat_id = ${catId}
       and status in ('succeeded', 'awaiting_approval', 'queued', 'sent', 'needs_review')
   `);
-  const unspent = catNet - toInt((committed.rows[0] as { committed: unknown }).committed);
+  return { rows, unspent: catNet - toInt((committed.rows[0] as { committed: unknown }).committed) };
+}
+
+/** Caller must hold withColonyLock. How much returnSurplus could give back for this cat. */
+export async function unspentForCat(tx: Tx, catId: string): Promise<number> {
+  return (await heldForCat(tx, catId)).unspent;
+}
+
+/** Caller must hold withColonyLock. Writes negative rows, newest donations first. */
+export async function returnSurplus(
+  tx: Tx,
+  catId: string,
+  amount: number,
+): Promise<void> {
+  assertPositiveInt(amount);
+  const { rows, unspent } = await heldForCat(tx, catId);
   if (amount > unspent) {
     throw new Error(`Cannot return ${amount}: cat has only ${unspent} unspent`);
   }
