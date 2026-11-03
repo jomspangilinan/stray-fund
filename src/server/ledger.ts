@@ -133,8 +133,15 @@ export async function returnSurplus(
 
   const rows = result.rows as { donation_id: string; held: unknown }[];
   const catNet = rows.reduce((s, r) => s + toInt(r.held), 0);
-  if (amount > catNet) {
-    throw new Error(`Cannot return ${amount}: cat only holds ${catNet}`);
+  // Money tied to a succeeded or live payout can never return to the pool.
+  const committed = await tx.execute(sql`
+    select coalesce(sum(amount), 0)::bigint as committed from payouts
+    where cat_id = ${catId}
+      and status in ('succeeded', 'awaiting_approval', 'queued', 'sent', 'needs_review')
+  `);
+  const unspent = catNet - toInt((committed.rows[0] as { committed: unknown }).committed);
+  if (amount > unspent) {
+    throw new Error(`Cannot return ${amount}: cat has only ${unspent} unspent`);
   }
 
   const returns: { donationId: string; amount: number }[] = [];

@@ -180,6 +180,34 @@ describe("ledger", () => {
     expect(await db.select().from(allocations)).toHaveLength(2);
   });
 
+  it("returnSurplus cannot dip into succeeded or live payouts", async () => {
+    await donate(100000);
+    const cat = await makeCat();
+    await alloc(cat.id, 80000);
+    await addPayout(cat.id, "succeeded", 30000, 100);
+    await expect(returnSurplus_(cat.id, 50001)).rejects.toThrow();
+    await addPayout(cat.id, "queued", 20000, null, "balance");
+    await expect(returnSurplus_(cat.id, 30001)).rejects.toThrow();
+    await returnSurplus_(cat.id, 30000);
+    expect((await pool()).heldForCats).toBe(0);
+  });
+
+  it("returnSurplus is allowed after a payout fails, and conservation holds", async () => {
+    await donate(100000, { fee: 1000 });
+    const cat = await makeCat();
+    await alloc(cat.id, 80000);
+    await addPayout(cat.id, "queued", 80000, null);
+    await expect(returnSurplus_(cat.id, 1)).rejects.toThrow();
+    await db.update(payouts).set({ status: "failed" });
+    await returnSurplus_(cat.id, 80000);
+    const s = await pool();
+    expect(s.available).toBe(100000);
+    expect(s.heldForCats).toBe(0);
+    expect(s.grossIn).toBe(
+      s.paypalFees + s.vetPaid + s.payoutFees + s.heldForCats + s.reservedPayouts + s.available,
+    );
+  });
+
   it("buckets payout statuses", async () => {
     await donate(1000000, { fee: 10000 });
     const cat = await makeCat();
