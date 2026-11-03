@@ -1,27 +1,57 @@
-# Render blueprint. Plan names are unverified until the first deploy.
+# Render Blueprint. Plan names checked against https://render.com/docs/blueprint-spec and the
+# published schema at https://render.com/schema/render.yaml.json. See docs/deploy.md for setup.
 services:
   - type: web
     name: stray-fund
     runtime: node
     region: singapore
-    plan: starter
+    plan: 0.5c-512mb
     # NODE_ENV=production would make npm ci skip the devDependencies the build needs.
     buildCommand: npm ci --include=dev && npm run build
+    # Runs once per deploy, after the build and before the new version takes traffic.
     preDeployCommand: npm run db:migrate
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
       - key: DATABASE_URL
         fromDatabase:
           name: stray-fund-db
           property: connectionString
-      - key: NODE_ENV
-        value: production
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: FEEDER_TOKEN
+        generateValue: true
       - key: DEMO_MODE
         value: "true"
-      - key: NODE_VERSION
-        value: "22"
+      - key: AWS_REGION
+        value: ap-southeast-1
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AI_MODEL
+        value: global.anthropic.claude-haiku-4-5-20251001-v1:0
       - key: AI_DAILY_CALL_CAP
+        value: "500"
+      - key: S3_PRIVATE_BUCKET
+        sync: false
+      - key: S3_PUBLIC_BUCKET
+        sync: false
+      - key: S3_PUBLIC_BASE_URL
+        sync: false
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_VET_EMAIL
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
         sync: false
 
   # The treasurer: claims wakeups, calls Bedrock, and keeps payouts in step with PayPal.
@@ -29,36 +59,37 @@ services:
     name: stray-fund-worker
     runtime: node
     region: singapore
-    plan: starter
+    plan: 0.5c-512mb
+    # tsx is a runtime dependency, so a plain npm ci is enough.
     buildCommand: npm ci
     startCommand: npm run worker
     # SIGTERM lets the current wakeup finish. A run has an 8 minute deadline, past this limit
     # the platform kills it and another worker reclaims the wakeup after 10 minutes.
     maxShutdownDelaySeconds: 300
     envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: stray-fund-db
-          property: connectionString
       - key: NODE_ENV
         value: production
       - key: NODE_VERSION
         value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stray-fund-db
+          property: connectionString
       - key: AWS_REGION
+        value: ap-southeast-1
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
         sync: false
       - key: AI_MODEL
-        sync: false
+        value: global.anthropic.claude-haiku-4-5-20251001-v1:0
       - key: AI_DAILY_CALL_CAP
-        sync: false
+        value: "500"
       - key: S3_PRIVATE_BUCKET
         sync: false
       - key: S3_PUBLIC_BUCKET
         sync: false
       - key: S3_PUBLIC_BASE_URL
-        sync: false
-      - key: AWS_ACCESS_KEY_ID
-        sync: false
-      - key: AWS_SECRET_ACCESS_KEY
         sync: false
       - key: PAYPAL_ENV
         value: sandbox
@@ -70,5 +101,7 @@ services:
 databases:
   - name: stray-fund-db
     region: singapore
-    plan: basic-256mb
+    plan: 0.1c-256mb
+    # Photos live in S3, so the database only holds rows. 1 GB is the smallest size.
+    diskSizeGB: 1
     databaseName: strayfund
