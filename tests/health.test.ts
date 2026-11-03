@@ -5,7 +5,7 @@ const originalUrl = process.env.DATABASE_URL;
 async function loadHandler() {
   vi.resetModules();
   const mod = await import("../src/app/api/health/route");
-  const db = await import("../src/lib/db");
+  const db = await import("../src/server/db/pool");
   return { GET: mod.GET, closePool: db.closePool };
 }
 

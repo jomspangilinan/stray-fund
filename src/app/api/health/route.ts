@@ -1,4 +1,4 @@
-import { getPool } from "@/lib/db";
+import { getPool } from "@/server/db/pool";
 
 export async function GET() {
   try {
