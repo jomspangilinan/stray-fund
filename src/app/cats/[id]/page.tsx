@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { CatDetail } from "@/components/CatDetail";
 import { BlockSkeleton } from "@/components/Loading";
 import { getCatCard } from "@/server/public";
+import { getCatThanks } from "@/server/thanks";
 
 export const metadata: Metadata = { title: "Cat | Stray Fund" };
 
@@ -13,7 +14,7 @@ async function Card({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const card = await getCatCard(id);
   if (!card) notFound();
-  return <CatDetail card={card} />;
+  return <CatDetail card={card} thanks={await getCatThanks(card.cat.id)} />;
 }
 
 export default function CatPage({ params }: PageProps<"/cats/[id]">) {

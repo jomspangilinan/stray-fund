@@ -9,6 +9,7 @@ import { formatPeso } from "@/lib/money";
 import { CelebrationNote } from "@/components/CelebrationNote";
 import { streakLabel } from "@/lib/streak";
 import { getStreak } from "@/server/streak";
+import { getBadgesFor } from "@/server/thanks";
 import { celebrationText, findCelebration, milestoneLabel } from "@/server/milestones";
 import { getHelpedEntries, getUnallocated } from "@/server/public";
 import { getSession } from "@/server/session";
@@ -32,9 +33,19 @@ async function Helped() {
   // One moment at a time, and only for a cat this donor helped. The browser marks it seen after showing it.
   const celebration = await findCelebration(session.userId, entries);
   const streak = streakLabel(await getStreak(session.userId));
+  const badges = await getBadgesFor(session.userId);
   return (
     <>
       {streak && <p className="mt-4 font-bold text-main">{streak}</p>}
+      {badges.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-2" aria-label="Your badges">
+          {badges.map((b) => (
+            <li key={b} className="tag">
+              {b}
+            </li>
+          ))}
+        </ul>
+      )}
       {celebration && (
         <CelebrationNote text={celebrationText(celebration)} catId={celebration.catId} milestone={celebration.milestone} />
       )}

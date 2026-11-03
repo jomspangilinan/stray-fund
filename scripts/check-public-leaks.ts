@@ -35,10 +35,18 @@ async function main() {
     "insert into users (username, role, paypal_email, clinic_name) values ($1,'vet',$2,'Leakcheck Sentinel Clinic') returning id",
     [`leakvet_${tag}`, "leakcheck.sentinel@example.test"],
   );
+  const { rows: [hidden] } = await pool.query(
+    "insert into users (username, role, show_name_in_thanks) values ($1,'donor',false) returning id",
+    [`leakhidden_${tag}`],
+  );
   const { rows: [cat] } = await pool.query(
     `insert into cats (name, sex, status, area_name, exact_lat, exact_lng, fuzzed_lat, fuzzed_lng, location_approximate, flags)
      values ($1,'female','neutered','Brgy. San Antonio, near the market',10.987654321,120.123456789,10.55555555,120.66666666,true,'{pregnant}') returning id`,
     [`LeakCat ${tag}`],
+  );
+  await pool.query(
+    "insert into sightings (cat_id, original_key, caught_by_user_id, state) values ($1,'originals/00000000-0000-4000-8000-000000000009.jpg',$2,'matched')",
+    [cat.id, hidden.id],
   );
   await pool.query(
     `insert into sightings (cat_id, original_key, public_key, public_ready, taken_at, exact_lat, exact_lng, requested_sex, assessment, state)
@@ -136,6 +144,10 @@ async function main() {
     const html = await (await fetch(`${BASE}/cats/${cat.id}`)).text();
     if (!html.includes(`LeakCat ${tag}`)) { bad++; console.log("FAIL: seeded cat did not render, so the scan proved nothing"); }
     if (!html.includes("Leak check spay")) { bad++; console.log("FAIL: the seeded treatment did not render"); }
+    if (!html.includes("Thanks to") || !html.includes("helped fund") || !html.includes(`leak_${tag}`)) { bad++; console.log("FAIL: the cat card did not thank the donor"); }
+    if (html.includes(`leakhidden_${tag}`) || !html.includes("A neighbour")) { bad++; console.log("FAIL: an opted-out name showed, or A neighbour did not"); }
+    const homeHtml = await (await fetch(`${BASE}/`)).text();
+    if (homeHtml.includes(`leakhidden_${tag}`)) { bad++; console.log("FAIL: an opted-out name showed on home"); }
     const feed = await (await fetch(`${BASE}/agent`)).text();
     if (!feed.includes("Leak check reason")) { bad++; console.log("FAIL: agent feed did not render the seeded action"); }
     const ledger = await (await fetch(`${BASE}/api/ledger`)).text();
@@ -158,6 +170,7 @@ async function main() {
     await pool.query("delete from receipts where booking_id=$1", [booking.id]);
     await pool.query("delete from bookings where id=$1", [booking.id]);
     await pool.query("delete from sightings where cat_id=$1", [cat.id]);
+    await pool.query("delete from users where id=$1", [hidden.id]);
     await pool.query("delete from cats where id=$1", [cat.id]);
     await pool.query("delete from users where id=$1", [vet.id]);
     await pool.query("delete from users where id=$1", [donor.id]);

@@ -12,8 +12,11 @@ export function SignIn({
   username,
   inline = false,
   console: consoleLink = null,
+  showName = true,
 }: {
   username: string | null;
+  /** Whether the username may appear in thanks. */
+  showName?: boolean;
   inline?: boolean;
   console?: { href: string; label: string } | null;
 }) {
@@ -39,6 +42,19 @@ export function SignIn({
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [shown, setShown] = useState(showName);
+
+  async function toggleName() {
+    const next = !shown;
+    setShown(next);
+    const res = await fetch("/api/account/thanks", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ show: next }),
+    }).catch(() => null);
+    if (!res?.ok) setShown(!next);
+    else router.refresh();
+  }
 
   async function signOut() {
     await fetch("/api/session", { method: "DELETE" });
@@ -83,6 +99,18 @@ export function SignIn({
               {consoleLink.label}
             </Link>
           )}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={shown}
+            onClick={toggleName}
+            className="press flex min-h-12 w-full items-center justify-between gap-3 rounded-in px-3 text-left font-semibold"
+          >
+            <span>Show my name in thanks</span>
+            <span aria-hidden="true" className="tag flex-none">
+              {shown ? "On" : "Off"}
+            </span>
+          </button>
           <button type="button" onClick={signOut} className="press flex min-h-12 w-full items-center rounded-in px-3 text-left font-semibold">
             Sign out
           </button>

@@ -1,10 +1,11 @@
 import Link from "next/link";
 import type { CatCardData } from "@/server/public";
+import type { Thanks } from "@/server/thanks";
 import { CatPhoto } from "./CatPhoto";
 import { Progress } from "./CatRow";
 import { JourneyTimeline, niceDate } from "./JourneyTimeline";
 
-export function CatDetail({ card }: { card: CatCardData }) {
+export function CatDetail({ card, thanks = [] }: { card: CatCardData; thanks?: Thanks[] }) {
   const { cat, sightings, health } = card;
   return (
     <article className="grid gap-8">
@@ -101,6 +102,24 @@ export function CatDetail({ card }: { card: CatCardData }) {
           </ul>
         )}
       </section>
+
+      {thanks.length > 0 && (
+        <section aria-labelledby="thanks">
+          <h2 id="thanks" className="h2 mb-3">
+            Thanks to
+          </h2>
+          <ul className="grid gap-2">
+            {thanks.map((t, i) => (
+              <li key={i} className="card !py-3">
+                <p>
+                  <strong>{t.name}</strong> {t.text}
+                </p>
+                {t.badges.length > 0 && <p className="small soft mt-1">{t.badges.join(", ")}</p>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <Link href="/donate" className="btn-pop">
         Help fund the colony

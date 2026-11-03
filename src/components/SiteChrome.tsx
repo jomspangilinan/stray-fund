@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { APP_NAME, isDemoMode } from "@/lib/config";
 import { consoleFor } from "@/lib/nav";
+import { eq } from "drizzle-orm";
+import { db } from "@/server/db/client";
+import { users } from "@/server/db/schema";
 import { getSession } from "@/server/session";
 import { PersonaSwitcher } from "./PersonaSwitcher";
 import { SignIn } from "./SignIn";
@@ -23,5 +26,8 @@ export function Brand() {
 /** Reads the session cookie, so render it inside Suspense. Only caretakers and vets are handed a console link. */
 export async function HeaderSession() {
   const session = await getSession();
-  return <SignIn username={session?.username ?? null} console={consoleFor(session?.role)} />;
+  const [me] = session
+    ? await db.select({ show: users.showNameInThanks }).from(users).where(eq(users.id, session.userId))
+    : [];
+  return <SignIn username={session?.username ?? null} console={consoleFor(session?.role)} showName={me?.show ?? true} />;
 }
