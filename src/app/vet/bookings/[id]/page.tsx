@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { EvidenceForm } from "@/components/EvidenceForm";
 import { ExactLocation } from "@/components/ExactLocation";
+import { ListSkeleton } from "@/components/Loading";
+import { PageHead } from "@/components/PageHead";
 import { SignIn } from "@/components/SignIn";
 import { formatPeso } from "@/lib/money";
 import { isUuid } from "@/server/public";
@@ -30,16 +32,16 @@ const VERIFICATION: Record<string, string> = {
 };
 
 function Payouts({ payouts }: { payouts: VetPayout[] }) {
-  if (payouts.length === 0) return <p className="mt-2 text-dusk">No payments yet. The treasurer pays the deposit shortly after booking.</p>;
+  if (payouts.length === 0) return <p className="mt-2 soft">No payments yet. The treasurer pays the deposit shortly after booking.</p>;
   return (
     <ul className="mt-3 grid gap-3">
       {payouts.map((p, i) => (
-        <li key={`${p.kind}-${i}`} className="border-b border-line pb-3 last:border-b-0">
-          <p className="font-display text-2xl font-extrabold">{formatPeso(p.amount)}</p>
-          <p className="text-sm">
+        <li key={`${p.kind}-${i}`} className="rounded-in bg-bg p-3">
+          <p className="text-lg font-extrabold">{formatPeso(p.amount)}</p>
+          <p className="small">
             {PAYOUT_KIND[p.kind] ?? p.kind}, {PAYOUT_STATUS[p.status] ?? p.status}, {p.date}
           </p>
-          <p className="text-sm break-all text-dusk">PayPal reference: {p.paypalRef ?? "none yet"}</p>
+          <p className="small break-all soft">PayPal reference: {p.paypalRef ?? "none yet"}</p>
         </li>
       ))}
     </ul>
@@ -50,7 +52,7 @@ function EvidenceSection({ view }: { view: VetBookingView }) {
   const { evidence, receipt, booking } = view;
   return (
     <section className="mt-8" aria-labelledby="evidence">
-      <h2 id="evidence" className="text-3xl font-extrabold">
+      <h2 id="evidence" className="h2">
         Evidence
       </h2>
       {receipt && receipt.verification !== "verified" && (
@@ -87,7 +89,7 @@ async function BookingView({ params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   if (!session) {
     return (
-      <div className="ticket mt-8">
+      <div className="card mt-8">
         <p className="mb-4 font-bold">Sign in with a vet account to see this booking.</p>
         <SignIn username={null} inline />
       </div>
@@ -104,15 +106,14 @@ async function BookingView({ params }: { params: Promise<{ id: string }> }) {
   const { booking } = view;
   return (
     <>
-      <h1 className="text-5xl font-extrabold">{booking.catName}.</h1>
-      <p className="mt-4">
+      <PageHead title={booking.catName}>
         Visit on {booking.scheduledFor ?? "a date to be set"}. Package {formatPeso(booking.packagePrice)}.
-      </p>
-      <div className="mt-2">
+      </PageHead>
+      <div className="mt-3">
         <ExactLocation exact={booking.exact} />
       </div>
-      <section className="ticket mt-8" aria-labelledby="payments">
-        <h2 id="payments" className="text-3xl font-extrabold">
+      <section className="card mt-8" aria-labelledby="payments">
+        <h2 id="payments" className="h2">
           Your payments
         </h2>
         <Payouts payouts={view.payouts} />
@@ -124,12 +125,12 @@ async function BookingView({ params }: { params: Promise<{ id: string }> }) {
 
 export default function VetBookingPage({ params }: PageProps<"/vet/bookings/[id]">) {
   return (
-    <main className="pt-4">
-      <Link href="/vet" className="text-sm font-bold underline underline-offset-4">
+    <main>
+      <Link href="/vet" className="link -ml-1 px-1">
         All bookings
       </Link>
       <div className="mt-3">
-        <Suspense fallback={<p className="mt-8 text-dusk">Loading</p>}>
+        <Suspense fallback={<ListSkeleton rows={3} label="Loading" />}>
           <BookingView params={params} />
         </Suspense>
       </div>

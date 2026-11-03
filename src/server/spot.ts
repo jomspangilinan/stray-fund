@@ -12,8 +12,8 @@ import { getStorage } from "./storage";
 import { enqueueWakeup } from "./wakeups";
 
 export type Sex = "female" | "male" | "unknown";
-export type CatchState = "new_cat" | "matched" | "needs_review" | "rejected" | "queued_for_ai";
-export type CatchResult = { state: CatchState; catId?: string; sightingId: string; message: string };
+export type SpotState = "new_cat" | "matched" | "needs_review" | "rejected" | "queued_for_ai";
+export type SpotResult = { state: SpotState; catId?: string; sightingId: string; message: string };
 
 export const RATE_LIMIT_PER_MINUTE = 10;
 export const RETRY_AFTER_SECONDS = 60;
@@ -31,7 +31,7 @@ export class RateLimited extends Error {
   }
 }
 
-const MESSAGES: Record<CatchState, string> = {
+const MESSAGES: Record<SpotState, string> = {
   new_cat: "This looks like a cat we have not met, so we started a card for them. A caretaker will check the details.",
   matched: "This looks like a cat we already know. We added your photo to their card.",
   needs_review: "Thanks. A caretaker will take a look.",
@@ -40,14 +40,14 @@ const MESSAGES: Record<CatchState, string> = {
   queued_for_ai: "Saved. We'll finish this soon.",
 };
 
-function result(state: CatchState, sightingId: string, catId?: string | null): CatchResult {
+function result(state: SpotState, sightingId: string, catId?: string | null): SpotResult {
   return catId ? { state, catId, sightingId, message: MESSAGES[state] } : { state, sightingId, message: MESSAGES[state] };
 }
 
 type SightingRow = typeof sightings.$inferSelect;
 
-function resultOf(s: SightingRow): CatchResult {
-  const state: CatchState = s.state === "pending" ? "queued_for_ai" : (s.state as CatchState);
+function resultOf(s: SightingRow): SpotResult {
+  const state: SpotState = s.state === "pending" ? "queued_for_ai" : (s.state as SpotState);
   return result(state, s.id, s.catId);
 }
 
@@ -66,13 +66,13 @@ export async function assertUnderRateLimit(userId: string): Promise<void> {
   if (!(await underRateLimit(db, userId))) throw new RateLimited();
 }
 
-export async function processCatch(i: {
+export async function processSpot(i: {
   jpeg: Buffer;
   lat: number | null;
   lng: number | null;
   userId: string;
   sex?: Sex;
-}): Promise<CatchResult> {
+}): Promise<SpotResult> {
   await assertUnderRateLimit(i.userId);
   const { key } = await storeOriginal(i.jpeg);
   const hasPoint = i.lat !== null && i.lng !== null;
@@ -80,7 +80,7 @@ export async function processCatch(i: {
   // Commit the pending row first so nothing is lost if the AI step fails.
   const sighting = await db.transaction(async (tx) => {
     // Serialise one user's inserts so two requests cannot both slip under the limit.
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"catch:" + i.userId}))`);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"spot:" + i.userId}))`);
     if (!(await underRateLimit(tx, i.userId))) throw new RateLimited();
     const [row] = await tx
       .insert(sightings)
@@ -100,12 +100,12 @@ export async function processCatch(i: {
   return finishSighting(sighting.id);
 }
 
-export async function finishSighting(sightingId: string): Promise<CatchResult> {
+export async function finishSighting(sightingId: string): Promise<SpotResult> {
   return (await runSighting(sightingId)).result;
 }
 
 type Stop = "budget" | "unavailable";
-type Run = { result: CatchResult; stop?: Stop };
+type Run = { result: SpotResult; stop?: Stop };
 
 /** Runs the AI steps for a pending sighting, with no database transaction open, then applies the outcome. */
 async function runSighting(sightingId: string): Promise<Run> {
@@ -192,7 +192,7 @@ async function loadCandidates(coatPattern: string): Promise<{ catId: string; pho
 }
 
 /** The AI refused or returned nothing usable. A person decides; no cat is made. */
-async function markReview(sightingId: string, assessment: Assessment | null, candidateIds: string[]): Promise<CatchResult> {
+async function markReview(sightingId: string, assessment: Assessment | null, candidateIds: string[]): Promise<SpotResult> {
   const [row] = await db
     .update(sightings)
     .set({
@@ -237,7 +237,7 @@ async function uniqueName(tx: Tx, base: string): Promise<string> {
  * Applies the AI outcome to a pending sighting in one transaction. Conditional on state `pending`, so a
  * second call for the same sighting changes nothing and returns the first outcome.
  */
-export async function applyAssessment(sightingId: string, a: Assessment, m: MatchOutcome): Promise<CatchResult> {
+export async function applyAssessment(sightingId: string, a: Assessment, m: MatchOutcome): Promise<SpotResult> {
   const outcome = await db.transaction(async (tx) => {
     const [s] = await tx.select().from(sightings).where(eq(sightings.id, sightingId)).for("update");
     if (!s) throw new Error(`Sighting not found: ${sightingId}`);
@@ -363,7 +363,7 @@ export async function resolveEarTip(tx: Tx, catId: string, tipped: boolean): Pro
   await enqueueWakeup(tx, "cat_queued", { catId });
 }
 
-/** Only an assessment that listed its sensitive regions (even none) makes a photo public. Never fails the catch. */
+/** Only an assessment that listed its sensitive regions (even none) makes a photo public. Never fails the spot. */
 export async function publishPhoto(sightingId: string, originalKey: string, regions: unknown): Promise<void> {
   if (!Array.isArray(regions)) return;
   try {
@@ -374,7 +374,7 @@ export async function publishPhoto(sightingId: string, originalKey: string, regi
       .where(and(eq(sightings.id, sightingId), sql`${sightings.publicKey} is null`));
   } catch (e) {
     // Class name only: errors from storage can carry keys.
-    console.error(`[catch] could not publish photo: ${e instanceof Error ? e.name : typeof e}`);
+    console.error(`[spot] could not publish photo: ${e instanceof Error ? e.name : typeof e}`);
   }
 }
 
@@ -402,7 +402,7 @@ export async function retryPendingSightings(): Promise<RetrySummary> {
       }
       if (run.result.state !== "queued_for_ai") summary.completed++;
     } catch (e) {
-      console.error(`[catch] retry failed: ${e instanceof Error ? e.name : typeof e}`);
+      console.error(`[spot] retry failed: ${e instanceof Error ? e.name : typeof e}`);
     }
   }
   return summary;

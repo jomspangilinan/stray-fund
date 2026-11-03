@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { describeError } from "@/server/errors";
 import { BodyTooLarge, parseForm, readLimited } from "@/server/http";
 import { AuthError, requireRole } from "@/server/session";
-import { assertUnderRateLimit, processCatch, RateLimited, type Sex } from "@/server/catch";
+import { assertUnderRateLimit, processSpot, RateLimited, type Sex } from "@/server/spot";
 import { InvalidPhoto, MAX_BYTES } from "@/server/photos";
 
 // Room for the multipart envelope around a photo that is itself at most MAX_BYTES.
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
       return fail("Sex must be female, male or unknown", 400);
     }
 
-    const out = await processCatch({
+    const out = await processSpot({
       jpeg: Buffer.from(await photo.arrayBuffer()),
       lat,
       lng,
@@ -65,7 +65,7 @@ export async function POST(req: Request) {
     if (e instanceof InvalidPhoto) {
       return fail(e.reason === "too_large" ? "That photo is too large" : "That does not look like a photo", e.reason === "too_large" ? 413 : 400);
     }
-    console.error("Catch failed", describeError(e));
+    console.error("Spot failed", describeError(e));
     return fail("Could not save that photo", 500);
   }
 }

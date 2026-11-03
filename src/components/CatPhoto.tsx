@@ -1,17 +1,42 @@
 import Image from "next/image";
 
-/** A public photo, or a designed placeholder when there is none. Sizes come from the parent box. */
-export function CatPhoto({ url, name, sizes = "(min-width: 576px) 20rem, 50vw" }: { url: string | null; name: string; sizes?: string }) {
+const TONES = ["var(--t1)", "var(--t2)", "var(--t3)", "var(--t4)"];
+
+function toneFor(name: string): string {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
+  return TONES[h % TONES.length];
+}
+
+/**
+ * A public photo, or a placeholder when there is none: the cat's initial on a tone picked from its name.
+ * Sizes come from the parent box. Pass `caption` on large boxes to say the photo is missing in words.
+ */
+export function CatPhoto({
+  url,
+  name,
+  sizes = "(min-width: 576px) 20rem, 50vw",
+  caption = false,
+}: {
+  url: string | null;
+  name: string;
+  sizes?: string;
+  caption?: boolean;
+}) {
   if (!url) {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-line text-dusk" role="img" aria-label={`No photo yet for ${name}`}>
-        <svg viewBox="0 0 64 64" className="h-14 w-14" fill="none" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" aria-hidden="true">
-          <path d="M12 54V24l8 6c3-2 7-3 12-3s9 1 12 3l8-6v30c0 0-8 4-20 4s-20-4-20-4Z" />
-          <circle cx="25" cy="39" r="2" fill="currentColor" />
-          <circle cx="39" cy="39" r="2" fill="currentColor" />
-          <path d="M30 45h4" />
-        </svg>
-        <span className="text-sm font-bold">No photo yet</span>
+      <div
+        className="grid h-full w-full place-items-center text-ink"
+        style={{ background: toneFor(name), containerType: "size" }}
+        role="img"
+        aria-label={`No photo yet for ${name}`}
+      >
+        <span className="flex flex-col items-center leading-none">
+          <span aria-hidden="true" className="font-extrabold" style={{ fontSize: "min(46cqmin, 5rem)" }}>
+            {name.trim().charAt(0).toUpperCase() || "?"}
+          </span>
+          {caption && <span className="small mt-2 font-semibold">No photo yet</span>}
+        </span>
       </div>
     );
   }

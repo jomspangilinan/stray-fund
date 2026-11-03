@@ -8,8 +8,8 @@ import {
   catForViewer,
   getCatCard,
   getCatForViewer,
-  getCollectionEntries,
-  getCollection,
+  getHelpedEntries,
+  getHelped,
   getUnallocated,
   journey,
   listCats,
@@ -17,7 +17,7 @@ import {
   publicLedgerRow,
   publicSighting,
 } from "../src/server/public";
-import { CatCard } from "../src/components/CatCard";
+import { CatRow } from "../src/components/CatRow";
 import { CatDetail } from "../src/components/CatDetail";
 import { GET as catGet } from "../src/app/api/cats/[id]/route";
 import { vi } from "vitest";
@@ -156,7 +156,7 @@ describe("serializers", () => {
     expect(ready.photoUrl).toContain(PUBLIC_KEY);
     const s = publicSighting({ id: "s", takenAt: null, createdAt: new Date("2026-01-01T00:00:00Z"), publicKey: PUBLIC_KEY, publicReady: false });
     expect(s.photoUrl).toBeNull();
-    const html = renderToStaticMarkup(createElement(CatCard, { cat: { ...card!.cat, photoUrl: null } }));
+    const html = renderToStaticMarkup(createElement(CatRow, { cat: { ...card!.cat, photoUrl: null } }));
     expect(html).toContain("No photo yet");
     expect(html).not.toContain("<img");
   });
@@ -309,7 +309,7 @@ describe("listing", () => {
   });
 });
 
-describe("collection", () => {
+describe("helped", () => {
   async function donor(name: string) {
     const [u] = await db.insert(users).values({ username: name, role: "donor" }).returning();
     return u;
@@ -340,9 +340,9 @@ describe("collection", () => {
     await alloc(da.id, c2.id, -3_000); // fully returned
     await alloc(db_.id, c3.id, 2_000);
 
-    expect((await getCollection(a.id)).map((c) => c.name)).toEqual(["One"]);
-    expect((await getCollection(b.id)).map((c) => c.name).sort()).toEqual(["One", "Three"]);
-    const entries = await getCollectionEntries(a.id);
+    expect((await getHelped(a.id)).map((c) => c.name)).toEqual(["One"]);
+    expect((await getHelped(b.id)).map((c) => c.name).sort()).toEqual(["One", "Three"]);
+    const entries = await getHelpedEntries(a.id);
     expect(entries.map((e) => [e.cat.name, e.amount])).toEqual([["One", 6_000]]);
   });
 
@@ -351,7 +351,7 @@ describe("collection", () => {
     const c1 = await cat("One");
     const pending = await don(a.id, 5_000, "pending");
     await alloc(pending.id, c1.id, 5_000);
-    expect(await getCollection(a.id)).toEqual([]);
+    expect(await getHelped(a.id)).toEqual([]);
   });
 
   it("unallocated money is waiting in the pool", async () => {
@@ -371,7 +371,7 @@ describe("rendered public HTML", () => {
     const { cat } = await seed();
     const card = await getCatCard(cat.id);
     const html =
-      renderToStaticMarkup(createElement(CatCard, { cat: card!.cat })) +
+      renderToStaticMarkup(createElement(CatRow, { cat: card!.cat })) +
       renderToStaticMarkup(createElement(CatDetail, { card: card! }));
     expectClean(html);
     expect(html).toContain("Brgy. San Antonio, near the market");

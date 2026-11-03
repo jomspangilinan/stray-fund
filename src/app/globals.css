@@ -1,177 +1,399 @@
 @import "tailwindcss";
 
 /*
- * Stray Fund design tokens. Later UI tasks reuse these, so add to them rather
- * than introducing new colours or fonts.
+ * Stray Fund design tokens. Reuse these rather than adding colours, radii or fonts.
  *
- * Direction: street-level and trustworthy with money. A pavement-grey page, ink
- * text, and one loud accent borrowed from jeepney signage. Money is always
- * shown on a "ticket": a white slip with hard ink edges and a perforated bottom.
+ * Direction: a calm, green neighbourhood app. One ground, one ink, one accent.
+ * The peso balance is the one dominant thing on a screen; everything else is
+ * quiet type on tone steps.
  *
  * Colour
- *   pavement  page background (cool grey, not cream)
- *   paper     surfaces that hold money or forms
- *   ink       text and all borders
- *   dusk      secondary text
- *   sign      the one accent (jeepney yellow): primary actions, the selected amount
- *   sampaguita  money that arrived, confirmations
- *   chili     errors and refusals only
- *   line      quiet dividers
+ *   bg       the ground
+ *   surface  cards, lists and the tab bar (one tone step above the ground)
+ *   pale     a step above surface tint: tags, quiet buttons, pressed rows
+ *   ink      text
+ *   soft     secondary notes (4.5:1 or better on bg and surface)
+ *   main     brand and primary actions
+ *   pop      the accent. Donate buttons and "Needs funding" only.
+ *   danger   errors and refusals, always with words
+ *   t1..t4   placeholder tones for a cat with no photo yet
  * Type
- *   font-display  Bricolage Grotesque, headings and amounts
- *   font-sans     Figtree, everything else. Body 17px, lines under 70 characters.
+ *   Gabarito only. Sizes: 44 balance, 22 page title, 18 section title,
+ *   16 body, 13 small. Weight carries emphasis. Figures are tabular.
  * Shape
- *   Controls and tickets have 2px ink borders, 6px radius, and a hard 3px offset
- *   shadow (no blur). Classes: .btn, .btn-quiet, .field, .ticket, .chip, .note.
+ *   Two radii: --r-in (12px) for buttons, fields, tags and photos inside a
+ *   card, and --r-out (20px) for cards, lists and the camera frame.
+ *   Surfaces separate by tone, not by lines. Shadows only on what floats.
  * Motion
- *   Only responses to a tap: buttons press into their shadow. Reduced motion
- *   turns that off.
+ *   A press scales to 0.97 in 120ms on pointer down. Hover only on devices
+ *   that hover. Reduced motion drops movement and keeps colour changes.
  */
 
 :root {
-  --pavement: #e7e9e6;
-  --paper: #fbfbf9;
-  --ink: #1c2230;
-  --dusk: #566070;
-  --sign: #ffc21a;
-  --sampaguita: #0b6b52;
-  --chili: #b8321f;
-  --line: #c9ceca;
+  --bg: #edf4ec;
+  --surface: #ffffff;
+  --pale: #d7e9dd;
+  --ink: #12352a;
+  --soft: #4a6358;
+  --main: #0b6b4f;
+  --pop: #ffc21a;
+  --danger: #9f2a1c;
+  --danger-tint: #f8e1dc;
+  --bar-off: #6f8f7e;
+  --t1: #ffd978;
+  --t2: #f7a68e;
+  --t3: #a9dcc6;
+  --t4: #bfe3f2;
+  --r-in: 12px;
+  --r-out: 20px;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 @theme inline {
-  --color-pavement: var(--pavement);
-  --color-paper: var(--paper);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-pale: var(--pale);
   --color-ink: var(--ink);
-  --color-dusk: var(--dusk);
-  --color-sign: var(--sign);
-  --color-sampaguita: var(--sampaguita);
-  --color-chili: var(--chili);
-  --color-line: var(--line);
-  --font-display: var(--font-bricolage);
-  --font-sans: var(--font-figtree);
+  --color-soft: var(--soft);
+  --color-main: var(--main);
+  --color-pop: var(--pop);
+  --color-danger: var(--danger);
+  --color-danger-tint: var(--danger-tint);
+  --color-bar-off: var(--bar-off);
+  --font-sans: var(--font-gabarito);
+  --radius-in: var(--r-in);
+  --radius-out: var(--r-out);
 }
 
 html {
   color-scheme: light;
+  background: var(--bg);
 }
 
 body {
-  background: var(--pavement);
+  background: var(--bg);
   color: var(--ink);
-  font-family: var(--font-figtree), system-ui, sans-serif;
-  font-size: 1.0625rem;
-  line-height: 1.55;
+  font-family: var(--font-gabarito), system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  -webkit-tap-highlight-color: transparent;
 }
 
-h1,
-h2,
-h3 {
-  font-family: var(--font-bricolage), system-ui, sans-serif;
-  line-height: 1.05;
-  letter-spacing: -0.02em;
+::selection {
+  background: var(--main);
+  color: #ffffff;
 }
 
 :focus-visible {
-  outline: 3px solid var(--ink);
-  outline-offset: 3px;
+  outline: 3px solid var(--main);
+  outline-offset: 2px;
+}
+.on-main:focus-visible,
+.on-main :focus-visible {
+  outline-color: #ffffff;
 }
 
+/* Type scale */
+.title {
+  font-size: 1.375rem;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+}
+.h2 {
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+}
+.small {
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  letter-spacing: 0.005em;
+}
+.soft {
+  color: var(--soft);
+}
+.balance {
+  font-size: 2.75rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Surfaces */
+.card {
+  background: var(--surface);
+  border-radius: var(--r-out);
+  padding: 1rem;
+}
+.list {
+  display: grid;
+  gap: 2px;
+  border-radius: var(--r-out);
+  overflow: hidden;
+  background: var(--bg);
+}
+.list > li {
+  background: var(--surface);
+}
+
+/* A tappable row inside a list */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  min-height: 4rem;
+}
+.press,
 .btn,
 .btn-quiet,
+.btn-pop,
 .chip {
+  transition:
+    transform 120ms var(--ease-out),
+    background-color 120ms var(--ease-out),
+    color 120ms var(--ease-out);
+}
+.press:active,
+.btn:active:not(:disabled),
+.btn-quiet:active:not(:disabled),
+.btn-pop:active:not(:disabled),
+.chip:active {
+  transform: scale(0.97);
+}
+a.row:active,
+.row.press:active {
+  background: var(--pale);
+}
+
+/* Controls. Primary is main green, .btn-pop is the accent for donating only. */
+.btn,
+.btn-quiet,
+.btn-pop,
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   min-height: 3rem;
   padding: 0.5rem 1.1rem;
-  border: 2px solid var(--ink);
-  border-radius: 6px;
+  border-radius: var(--r-in);
   font-weight: 700;
+  line-height: 1.2;
   cursor: pointer;
-  transition: transform 80ms ease, box-shadow 80ms ease;
+  text-align: center;
 }
-
 .btn {
-  background: var(--sign);
-  box-shadow: 3px 3px 0 var(--ink);
+  background: var(--main);
+  color: #ffffff;
+}
+.btn-pop {
+  background: var(--pop);
+  color: var(--ink);
 }
 .btn-quiet {
-  background: var(--paper);
-  box-shadow: 3px 3px 0 var(--ink);
+  background: var(--pale);
+  color: var(--main);
 }
-.btn:active,
-.btn-quiet:active,
-.chip:active {
-  transform: translate(3px, 3px);
-  box-shadow: 0 0 0 var(--ink);
-}
-.btn:disabled {
-  background: var(--line);
-  color: var(--dusk);
-  border-color: var(--dusk);
-  box-shadow: none;
+.btn:disabled,
+.btn-quiet:disabled,
+.btn-pop:disabled {
+  background: var(--pale);
+  color: var(--soft);
   cursor: not-allowed;
+  transform: none;
 }
 
-/* A preset amount. Selected state is carried by colour and the check mark, not colour alone. */
+/* A preset or filter. Selected is carried by fill and a check mark, not colour alone. */
 .chip {
-  background: var(--paper);
-  font-family: var(--font-bricolage), system-ui, sans-serif;
-  font-size: 1.35rem;
-  letter-spacing: -0.01em;
+  min-height: 2.5rem;
+  padding: 0.25rem 0.9rem;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  white-space: nowrap;
 }
-.chip[aria-checked="true"] {
-  background: var(--sign);
-  box-shadow: 3px 3px 0 var(--ink);
+.chip[aria-checked="true"],
+.chip[aria-current="page"] {
+  background: var(--ink);
+  color: #ffffff;
+}
+.chip-amount {
+  min-height: 3.5rem;
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .field {
   min-height: 3rem;
   width: 100%;
   padding: 0.5rem 0.75rem;
-  border: 2px solid var(--ink);
-  border-radius: 6px;
-  background: var(--paper);
+  border-radius: var(--r-in);
+  background: var(--surface);
+  color: var(--ink);
   font: inherit;
 }
-
-.ticket {
-  position: relative;
-  padding: 1.25rem 1.25rem 1.75rem;
-  border: 2px solid var(--ink);
-  border-radius: 6px;
-  background: var(--paper);
-  box-shadow: 3px 3px 0 var(--ink);
+.card .field {
+  background: var(--bg);
 }
-/* Perforated bottom edge */
-.ticket::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0.5rem;
-  border-bottom: 2px dashed var(--line);
+.field:focus-visible {
+  outline-offset: 0;
+}
+.field[aria-invalid="true"] {
+  outline: 2px solid var(--danger);
+  outline-offset: 0;
 }
 
+/* Messages. A tone step, with words that say what kind of message it is. */
 .note {
   padding: 0.75rem 1rem;
-  border-left: 6px solid var(--ink);
-  background: var(--paper);
+  border-radius: var(--r-in);
+  background: var(--surface);
+}
+.card .note {
+  background: var(--bg);
 }
 .note-ok {
-  border-left-color: var(--sampaguita);
+  background: var(--pale);
+}
+.card .note-ok {
+  background: var(--pale);
 }
 .note-bad {
-  border-left-color: var(--chili);
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+.card .note-bad {
+  background: var(--danger-tint);
+}
+
+/* A short tag. Amber is only for "Needs funding". */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--r-in);
+  background: var(--pale);
+  color: var(--main);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.tag-pop {
+  background: var(--pop);
+  color: var(--ink);
+}
+.tag-bad {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+/* Progress shown as segments plus words. The bar is only a picture of the words. */
+.steps {
+  display: flex;
+  gap: 3px;
+}
+.steps i {
+  width: 14px;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--bar-off);
+  opacity: 0.45;
+}
+.steps i.on {
+  background: var(--main);
+  opacity: 1;
+}
+
+/* Loading */
+.skeleton {
+  background: var(--pale);
+  border-radius: var(--r-in);
+  animation: skeleton-fade 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-fade {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* Hover only where a pointer can hover. */
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover:not(:disabled) {
+    background: #095c43;
+  }
+  .btn-pop:hover:not(:disabled) {
+    background: #f2b400;
+  }
+  .btn-quiet:hover:not(:disabled) {
+    background: #c9e0d1;
+  }
+  .chip:hover:not([aria-checked="true"]):not([aria-current="page"]) {
+    background: var(--pale);
+  }
+  a.row:hover {
+    background: #f4f9f4;
+  }
+  .link:hover {
+    text-decoration: underline;
+  }
+}
+.link {
+  color: var(--main);
+  font-weight: 700;
+  text-underline-offset: 3px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --soft: #2f463c;
+    --pale: #c5ddcd;
+  }
+  .card,
+  .list,
+  .note,
+  .field,
+  .chip {
+    outline: 1px solid var(--ink);
+    outline-offset: -1px;
+  }
+  .list > li {
+    outline: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .press,
   .btn,
   .btn-quiet,
+  .btn-pop,
   .chip {
-    transition: none;
+    transition:
+      background-color 120ms linear,
+      color 120ms linear;
   }
-  .btn:active,
-  .btn-quiet:active,
+  .press:active,
+  .btn:active:not(:disabled),
+  .btn-quiet:active:not(:disabled),
+  .btn-pop:active:not(:disabled),
   .chip:active {
     transform: none;
   }
+  .skeleton {
+    animation: none;
+  }
+}
+
+input[type="checkbox"] {
+  accent-color: var(--main);
 }

@@ -21,11 +21,11 @@ vi.mock("next/headers", () => ({
 import {
   applyAssessment,
   finishSighting,
-  processCatch,
+  processSpot,
   RateLimited,
   retryPendingSightings,
-} from "../src/server/catch";
-import { POST as catchPost } from "../src/app/api/catch/route";
+} from "../src/server/spot";
+import { POST as spotPost } from "../src/app/api/spot/route";
 
 const ASSESS = {
   is_cat: true,
@@ -152,10 +152,10 @@ afterAll(async () => {
   await closePool();
 });
 
-describe("processCatch: new cats", () => {
+describe("processSpot: new cats", () => {
   it("creates a queued cat with a generated name, bio and a public photo", async () => {
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("new_cat");
     const [cat] = await catRows();
     expect(out.catId).toBe(cat.id);
@@ -180,7 +180,7 @@ describe("processCatch: new cats", () => {
   it("marks an ear-tipped cat neutered with no wakeup", async () => {
     script.assess = () => assessWith({ ear_tip: "present", ear_tip_confidence: 0.95 });
     const u = await makeUser();
-    await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     const [cat] = await catRows();
     expect(cat).toMatchObject({ status: "neutered", earTipped: true, queuedAt: null });
     expect(await wakeupKinds()).toEqual([]);
@@ -193,7 +193,7 @@ describe("processCatch: new cats", () => {
   ])("keeps a spotted cat for a %s ear tip at %s confidence and asks for review", async (ear, conf) => {
     script.assess = () => assessWith({ ear_tip: ear, ear_tip_confidence: conf });
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("needs_review");
     expect(out.catId).toBeTruthy();
     const [cat] = await catRows();
@@ -207,17 +207,17 @@ describe("processCatch: new cats", () => {
     await db.execute((await import("drizzle-orm")).sql`update guardrails set ear_tip_confidence_min = 0.5`);
     script.assess = () => assessWith({ ear_tip: "absent", ear_tip_confidence: 0.6 });
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("new_cat");
     expect((await catRows())[0].status).toBe("queued");
   });
 
   it("numbers a name that is already taken and falls back for a blank name", async () => {
     const u = await makeUser();
-    await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
-    await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     script.assess = () => assessWith({ suggested_name: "   " });
-    await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     const names = (await catRows()).map((c) => c.name).sort();
     expect(names).toEqual(["Little stray", "Muning", "Muning 2"]);
   });
@@ -226,11 +226,11 @@ describe("processCatch: new cats", () => {
     const u = await makeUser();
     const base = { jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id };
     script.assess = () => assessWith({ suggested_name: "A", probably_female_by_coat: true });
-    await processCatch(base);
+    await processSpot(base);
     script.assess = () => assessWith({ suggested_name: "B", probably_female_by_coat: true });
-    await processCatch({ ...base, sex: "male" });
+    await processSpot({ ...base, sex: "male" });
     script.assess = () => assessWith({ suggested_name: "C" });
-    await processCatch(base);
+    await processSpot(base);
     const bySex = Object.fromEntries((await catRows()).map((c) => [c.name, c.sex]));
     expect(bySex).toEqual({ A: "female", B: "male", C: "unknown" });
   });
@@ -238,12 +238,12 @@ describe("processCatch: new cats", () => {
   it("copies flags from the assessment", async () => {
     script.assess = () => assessWith({ flags: { kitten: true, pregnant: false, injured: true, sick: false } });
     const u = await makeUser();
-    await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect((await catRows())[0].flags.sort()).toEqual(["injured", "kitten"]);
   });
 });
 
-describe("processCatch: rejected photos", () => {
+describe("processSpot: rejected photos", () => {
   it.each([
     ["a dog", { is_cat: false }],
     ["a poor photo", { cat_visible_quality: "poor" }],
@@ -251,7 +251,7 @@ describe("processCatch: rejected photos", () => {
     const u = await makeUser();
     await seedCat({});
     script.assess = () => assessWith(patch);
-    const out2 = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out2 = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out2.state).toBe("rejected");
     expect(out2.catId).toBeUndefined();
     expect(out2.message).toMatch(/try/i);
@@ -262,12 +262,12 @@ describe("processCatch: rejected photos", () => {
   });
 });
 
-describe("processCatch: matching", () => {
+describe("processSpot: matching", () => {
   it("adds a sighting to the matched cat and creates no new cat", async () => {
     const { cat } = await seedCat({});
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same face" });
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out).toMatchObject({ state: "matched", catId: cat.id });
     expect(await catRows()).toHaveLength(1);
     const [s] = await db.select().from(sightings).orderBy(desc(sightings.createdAt));
@@ -279,7 +279,7 @@ describe("processCatch: matching", () => {
     for (let i = 0; i < 7; i++) tabbies.push((await seedCat({ name: `T${i}`, photos: 4 })).cat.id);
     const calico = (await seedCat({ name: "Calico", coatPattern: "calico" })).cat.id;
     const u = await makeUser();
-    await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(seen.match).toBe(1);
     const content = seen.matchParams[0].messages[0].content as { type: string; text?: string }[];
     const text = content.find((c) => c.type === "text")?.text ?? "";
@@ -292,7 +292,7 @@ describe("processCatch: matching", () => {
   it("sends the private original, matching what the scrubber later blurs", async () => {
     await seedCat({});
     const u = await makeUser();
-    await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     const [s] = await db.select().from(sightings).orderBy(desc(sightings.createdAt));
     const stored = await getStorage().getPrivate(s.originalKey);
     const content = seen.matchParams[0].messages[0].content as { type: string; source?: { data: string } }[];
@@ -304,7 +304,7 @@ describe("processCatch: matching", () => {
     const { cat } = await seedCat({});
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.6, reason: "maybe" });
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("needs_review");
     expect(out.catId).toBeUndefined();
     expect(await catRows()).toHaveLength(1);
@@ -317,7 +317,7 @@ describe("processCatch: matching", () => {
     const { cat } = await seedCat({});
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.4, reason: "unlikely" });
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("new_cat");
     expect(await catRows()).toHaveLength(2);
   });
@@ -327,7 +327,7 @@ describe("processCatch: matching", () => {
     const { cat } = await seedCat({});
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "close" });
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("needs_review");
   });
 
@@ -335,7 +335,7 @@ describe("processCatch: matching", () => {
     const { cat } = await seedCat({ status: "queued", earTipped: false });
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("matched");
     expect((await catRows())[0]).toMatchObject({ status: "queued", earTipped: false });
     expect(await wakeupKinds()).toEqual([]);
@@ -346,7 +346,7 @@ describe("processCatch: matching", () => {
     script.assess = () => assessWith({ ear_tip: "present", ear_tip_confidence: 0.95 });
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out).toMatchObject({ state: "needs_review", catId: cat.id });
     expect((await catRows())[0]).toMatchObject({ status: "queued", earTipped: false });
     const [s] = await db.select().from(sightings).orderBy(desc(sightings.createdAt));
@@ -357,7 +357,7 @@ describe("processCatch: matching", () => {
     const { cat } = await seedCat({ status: "neutered", earTipped: true });
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("matched");
     expect((await catRows())[0]).toMatchObject({ status: "neutered", earTipped: true });
   });
@@ -366,7 +366,7 @@ describe("processCatch: matching", () => {
     const { cat } = await seedCat({});
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
-    await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     const [row] = await catRows();
     expect(row).toMatchObject({ status: "queued", earTipped: false });
     expect(row.queuedAt).not.toBeNull();
@@ -378,7 +378,7 @@ describe("processCatch: matching", () => {
     script.assess = () => assessWith({ ear_tip: "unknown", ear_tip_confidence: 0.2 });
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("matched");
     expect((await catRows())[0]).toMatchObject({ status: "spotted", earTipped: null });
   });
@@ -388,7 +388,7 @@ describe("processCatch: matching", () => {
     script.assess = () => assessWith({ flags: { kitten: false, pregnant: true, injured: false, sick: false } });
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
-    await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect((await catRows())[0].flags.sort()).toEqual(["injured", "pregnant"]);
   });
 
@@ -400,7 +400,7 @@ describe("processCatch: matching", () => {
       return { stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(assessWith()) }] };
     });
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("needs_review");
     expect(await catRows()).toHaveLength(1);
     const [s] = await db.select().from(sightings).orderBy(desc(sightings.createdAt));
@@ -411,7 +411,7 @@ describe("processCatch: matching", () => {
 describe("location", () => {
   it("fixes the fuzz at creation; a later sighting changes nothing", async () => {
     const u = await makeUser();
-    await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     const [before] = await catRows();
     expect(before.exactLat).toBe(10.2);
     expect(before.exactLng).toBe(120.6);
@@ -422,7 +422,7 @@ describe("location", () => {
     expect(metres).toBeLessThan(750);
 
     script.match = () => ({ match_cat_id: before.id, confidence: 0.9, reason: "same" });
-    await processCatch({ jpeg: await jpeg(), lat: 10.3, lng: 120.7, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.3, lng: 120.7, userId: u.id });
     const [after] = await catRows();
     expect(after).toMatchObject({
       exactLat: before.exactLat,
@@ -434,7 +434,7 @@ describe("location", () => {
 
   it("uses the colony centre, marked approximate, when there is no location", async () => {
     const u = await makeUser();
-    await processCatch({ jpeg: await jpeg(), lat: null, lng: null, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: null, lng: null, userId: u.id });
     const [cat] = await catRows();
     expect(cat.locationApproximate).toBe(true);
     expect(cat.exactLat).toBe(COLONY.centre.lat);
@@ -447,7 +447,7 @@ describe("public photo", () => {
   it("blurs the assessment's sensitive regions and makes the photo public", async () => {
     script.assess = () => assessWith({ sensitive_regions: [{ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }] });
     const u = await makeUser();
-    await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     const [s] = await sightingRows();
     expect(s.publicReady).toBe(true);
     const memory = getStorage() as unknown as { readPublic(k: string): Buffer };
@@ -458,7 +458,7 @@ describe("public photo", () => {
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(getStorage(), "putPublic").mockRejectedValue(new Error("disk full"));
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("new_cat");
     const [s] = await sightingRows();
     expect(s).toMatchObject({ publicReady: false, publicKey: null, state: "new_cat" });
@@ -466,11 +466,11 @@ describe("public photo", () => {
   });
 });
 
-describe("processCatch: input and AI outage", () => {
+describe("processSpot: input and AI outage", () => {
   it("rejects a file that is not an image and writes nothing", async () => {
     const u = await makeUser();
     await expect(
-      processCatch({ jpeg: Buffer.from("not a photo"), lat: null, lng: null, userId: u.id }),
+      processSpot({ jpeg: Buffer.from("not a photo"), lat: null, lng: null, userId: u.id }),
     ).rejects.toBeInstanceOf(InvalidPhoto);
     expect(await sightingRows()).toHaveLength(0);
   });
@@ -479,7 +479,7 @@ describe("processCatch: input and AI outage", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     script.assess = () => new Error("down");
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("queued_for_ai");
     expect(out.message).toMatch(/Saved/);
     expect(await catRows()).toHaveLength(0);
@@ -502,7 +502,7 @@ describe("processCatch: input and AI outage", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     process.env.AI_DAILY_CALL_CAP = "0";
     const u = await makeUser();
-    const out = await processCatch({ jpeg: await jpeg(), lat: null, lng: null, userId: u.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: null, lng: null, userId: u.id });
     expect(out.state).toBe("queued_for_ai");
     expect(seen.assess).toBe(0);
   });
@@ -511,7 +511,7 @@ describe("processCatch: input and AI outage", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     script.assess = () => new Error("down");
     const u = await makeUser();
-    await processCatch({ jpeg: await jpeg(), lat: null, lng: null, userId: u.id, sex: "male" });
+    await processSpot({ jpeg: await jpeg(), lat: null, lng: null, userId: u.id, sex: "male" });
     script.assess = () => assessWith();
     await db.execute((await import("drizzle-orm")).sql`update sightings set created_at = now() - interval '2 minutes'`);
     await retryPendingSightings();
@@ -568,7 +568,7 @@ describe("one-time apply", () => {
     await seedCat({});
     const u = await makeUser();
     try {
-      await processCatch({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+      await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     } finally {
       await pool.end();
     }
@@ -635,14 +635,14 @@ describe("rate limit", () => {
     const old = await pendingSighting(300, u.id);
     expect(old.id).toBeTruthy();
     for (let i = 0; i < 9; i++) await pendingSighting(5, u.id);
-    await processCatch({ jpeg: await jpeg(), lat: null, lng: null, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: null, lng: null, userId: u.id });
     await expect(
-      processCatch({ jpeg: await jpeg(), lat: null, lng: null, userId: u.id }),
+      processSpot({ jpeg: await jpeg(), lat: null, lng: null, userId: u.id }),
     ).rejects.toBeInstanceOf(RateLimited);
   });
 });
 
-describe("POST /api/catch", () => {
+describe("POST /api/spot", () => {
   async function signIn() {
     const u = await makeUser();
     jar.set(SESSION_COOKIE, await signSession({ userId: u.id, role: "donor", username: u.username }));
@@ -660,7 +660,7 @@ describe("POST /api/catch", () => {
     return f;
   }
   const post = (f: FormData, headers: Record<string, string> = {}) =>
-    catchPost(new Request("http://localhost/api/catch", { method: "POST", body: f, headers }));
+    spotPost(new Request("http://localhost/api/spot", { method: "POST", body: f, headers }));
 
   it("requires a session", async () => {
     const res = await post(await body());

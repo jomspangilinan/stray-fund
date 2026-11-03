@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { BookCatForm } from "@/components/BookCatForm";
 import { ExactLocation } from "@/components/ExactLocation";
+import { ListSkeleton } from "@/components/Loading";
+import { PageHead } from "@/components/PageHead";
 import { SignIn } from "@/components/SignIn";
 import { formatPeso } from "@/lib/money";
 import { manilaDate } from "@/server/public";
@@ -24,7 +26,7 @@ async function Dashboard() {
   const session = await getSession();
   if (!session) {
     return (
-      <div className="ticket mt-8">
+      <div className="card mt-8">
         <p className="mb-4 font-bold">Sign in with a vet account to see bookings.</p>
         <SignIn username={null} inline />
       </div>
@@ -39,17 +41,17 @@ async function Dashboard() {
   return (
     <>
       <section className="mt-8" aria-labelledby="waiting">
-        <h2 id="waiting" className="text-3xl font-extrabold">
+        <h2 id="waiting" className="h2">
           Funded, waiting for a booking
         </h2>
         {fundedCats.length === 0 ? (
-          <p className="mt-3 text-dusk">No cats are waiting right now.</p>
+          <p className="mt-3 soft">No cats are waiting right now.</p>
         ) : (
-          <ul className="mt-4 grid gap-5">
+          <ul className="mt-4 grid gap-3">
             {fundedCats.map((c) => (
-              <li key={c.id} className="ticket">
-                <h3 className="text-2xl font-extrabold">{c.name}</h3>
-                <p className="text-sm text-dusk">
+              <li key={c.id} className="card">
+                <h3 className="text-base font-extrabold">{c.name}</h3>
+                <p className="small soft">
                   {c.sex === "unknown" ? "Sex unknown" : c.sex === "female" ? "Female" : "Male"}, {c.area}
                 </p>
                 <div className="mt-2">
@@ -63,20 +65,20 @@ async function Dashboard() {
       </section>
 
       <section className="mt-10" aria-labelledby="mine">
-        <h2 id="mine" className="text-3xl font-extrabold">
+        <h2 id="mine" className="h2">
           Your bookings
         </h2>
         {bookings.length === 0 ? (
-          <p className="mt-3 text-dusk">You have no bookings yet.</p>
+          <p className="mt-3 soft">You have no bookings yet.</p>
         ) : (
-          <ul className="mt-4 grid gap-5">
+          <ul className="mt-4 grid gap-3">
             {bookings.map((b) => (
-              <li key={b.id} className="ticket">
-                <h3 className="text-2xl font-extrabold">{b.catName}</h3>
-                <p className="text-sm">
+              <li key={b.id} className="card">
+                <h3 className="text-base font-extrabold">{b.catName}</h3>
+                <p className="small">
                   {BOOKING_STATUS[b.status] ?? b.status}, visit on {b.scheduledFor ?? "a date to be set"}
                 </p>
-                <p className="text-sm text-dusk">
+                <p className="small soft">
                   {CAT_STATUS[b.catStatus] ?? b.catStatus}. Package {formatPeso(b.packagePrice)}.
                 </p>
                 <div className="mt-2">
@@ -96,10 +98,9 @@ async function Dashboard() {
 
 export default function VetPage() {
   return (
-    <main className="pt-4">
-      <h1 className="text-5xl font-extrabold">Vet desk.</h1>
-      <p className="mt-4 max-w-[40ch]">Take a funded cat, then send the receipt and a photo once the surgery is done.</p>
-      <Suspense fallback={<p className="mt-8 text-dusk">Loading</p>}>
+    <main>
+      <PageHead title="Vet desk">Take a funded cat, then send the receipt and a photo once the surgery is done.</PageHead>
+      <Suspense fallback={<ListSkeleton rows={3} label="Loading" />}>
         <Dashboard />
       </Suspense>
     </main>

@@ -29,7 +29,7 @@ export type PayoutItem = {
 export type SightingItem = {
   id: string;
   date: string;
-  /** Why it is here: a code from the catch flow. */
+  /** Why it is here: a code from the spot flow. */
   reason: string | null;
   catId: string | null;
   catName: string | null;

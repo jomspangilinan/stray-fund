@@ -1,8 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Stray Fund">
-  <rect width="512" height="512" rx="96" fill="#ffc21a"/>
-  <rect x="24" y="24" width="464" height="464" rx="76" fill="none" stroke="#1c2230" stroke-width="16"/>
-  <path d="M136 372V196l62 52h116l62-52v176c0 28-22 48-50 48H186c-28 0-50-20-50-48z" fill="#1c2230"/>
-  <circle cx="214" cy="304" r="14" fill="#ffc21a"/>
-  <circle cx="298" cy="304" r="14" fill="#ffc21a"/>
-  <path d="M236 346q20 18 40 0" fill="none" stroke="#ffc21a" stroke-width="12" stroke-linecap="round"/>
+  <rect width="512" height="512" rx="112" fill="#0b6b4f"/>
+  <path d="M136 372V196l62 52h116l62-52v176c0 28-22 48-50 48H186c-28 0-50-20-50-48z" fill="#edf4ec"/>
+  <circle cx="214" cy="304" r="14" fill="#0b6b4f"/>
+  <circle cx="298" cy="304" r="14" fill="#0b6b4f"/>
+  <path d="M236 346q20 18 40 0" fill="none" stroke="#0b6b4f" stroke-width="12" stroke-linecap="round"/>
 </svg>

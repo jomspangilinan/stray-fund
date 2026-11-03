@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
-import { CatCard } from "@/components/CatCard";
-import { listCats, STATUS_GROUPS, STATUS_GROUP_LABEL, type StatusGroup } from "@/server/public";
+import { CatRow } from "@/components/CatRow";
+import { ListSkeleton } from "@/components/Loading";
+import { PageHead } from "@/components/PageHead";
+import { StatusFilter } from "@/components/StatusFilter";
+import { listCats, STATUS_GROUPS, type StatusGroup } from "@/server/public";
 
 export const metadata: Metadata = { title: "Cats | Stray Fund" };
-
-const GROUPS = Object.keys(STATUS_GROUPS) as StatusGroup[];
 
 async function Grid({ searchParams }: { searchParams: Promise<{ status?: string | string[] }> }) {
   await connection();
@@ -16,24 +17,23 @@ async function Grid({ searchParams }: { searchParams: Promise<{ status?: string 
   const cats = await listCats(group);
   return (
     <>
-      <nav aria-label="Filter cats" className="mt-6 flex flex-wrap gap-2">
-        {(["all", ...GROUPS] as const).map((g) => (
-          <Link
-            key={g}
-            href={g === "all" ? "/cats" : `/cats?status=${g}`}
-            aria-current={g === group ? "page" : undefined}
-            className={`border-2 border-ink px-3 py-1 text-sm font-bold ${g === group ? "bg-sign" : "bg-paper"}`}
-          >
-            {g === "all" ? "All" : STATUS_GROUP_LABEL[g]}
-          </Link>
-        ))}
-      </nav>
+      <div className="mt-5">
+        <StatusFilter current={group} />
+      </div>
       {cats.length === 0 ? (
-        <p className="note mt-8">No cats here yet. Spot one from the Catch page.</p>
+        <div className="card mt-4">
+          <p className="font-bold">No cats here yet.</p>
+          <p className="mt-1 soft">
+            {group === "all" ? "Spot one and it gets a card." : "Nothing is at this stage right now."}
+          </p>
+          <Link href={group === "all" ? "/spot" : "/cats"} className="btn mt-4">
+            {group === "all" ? "Spot a cat" : "See all cats"}
+          </Link>
+        </div>
       ) : (
-        <ul className="mt-6 grid grid-cols-1 gap-5 min-[480px]:grid-cols-2">
+        <ul className="list mt-4">
           {cats.map((c) => (
-            <CatCard key={c.id} cat={c} />
+            <CatRow key={c.id} cat={c} />
           ))}
         </ul>
       )}
@@ -43,12 +43,9 @@ async function Grid({ searchParams }: { searchParams: Promise<{ status?: string 
 
 export default function CatsPage({ searchParams }: PageProps<"/cats">) {
   return (
-    <main className="pt-4">
-      <h1 className="text-5xl font-extrabold">The colony.</h1>
-      <p className="mt-4 max-w-[40ch]">
-        Every stray we know by name. Exact spots stay private to protect the cats.
-      </p>
-      <Suspense fallback={<p className="mt-8 text-dusk">Loading</p>}>
+    <main>
+      <PageHead title="Cats">Every stray we know by name. Exact spots stay private to protect the cats.</PageHead>
+      <Suspense fallback={<ListSkeleton label="Loading the cats" />}>
         <Grid searchParams={searchParams} />
       </Suspense>
     </main>

@@ -1,70 +1,77 @@
 import Link from "next/link";
 import type { CatCardData } from "@/server/public";
 import { CatPhoto } from "./CatPhoto";
+import { Progress } from "./CatRow";
 import { JourneyTimeline, niceDate } from "./JourneyTimeline";
 
 export function CatDetail({ card }: { card: CatCardData }) {
   const { cat, sightings, health } = card;
   return (
-    <article className="grid gap-8 pt-2">
+    <article className="grid gap-8">
       <header>
-        <div className="relative aspect-[4/3] overflow-hidden rounded-md border-2 border-ink" style={{ boxShadow: "3px 3px 0 var(--ink)" }}>
-          <CatPhoto url={cat.photoUrl} name={cat.name} sizes="(min-width: 576px) 36rem, 100vw" />
+        <Link href="/cats" className="link -ml-1 px-1">
+          All cats
+        </Link>
+        <div className="relative mt-1 aspect-[4/3] overflow-hidden rounded-out">
+          <CatPhoto url={cat.photoUrl} name={cat.name} sizes="(min-width: 576px) 36rem, 100vw" caption />
         </div>
-        <h1 className="mt-5 text-5xl font-extrabold">{cat.name}</h1>
-        <p className="mt-2 text-dusk">
-          {cat.sex} &middot; {cat.statusLabel}
+        <h1 className="title mt-4">{cat.name}</h1>
+        <p className="mt-1 soft">
+          {cat.sex}, {cat.statusLabel.toLowerCase()}
         </p>
+        <Progress cat={cat} />
         {cat.flags.length > 0 && (
           <ul className="mt-3 flex flex-wrap gap-2">
             {cat.flags.map((f) => (
-              <li key={f} className="border-2 border-ink bg-paper px-2 text-sm font-bold">
+              <li key={f} className="tag">
                 {f}
               </li>
             ))}
           </ul>
         )}
-        {cat.bio && <p className="mt-4 max-w-[48ch]">{cat.bio}</p>}
+        {cat.bio && <p className="mt-4 max-w-[52ch]">{cat.bio}</p>}
       </header>
 
       <section aria-labelledby="where">
-        <h2 id="where" className="text-2xl font-extrabold">
+        <h2 id="where" className="h2">
           Where
         </h2>
-        <p className="mt-2 font-bold">{cat.area}</p>
-        <p className="mt-1 text-sm text-dusk">
-          Exact spots are private to protect the cats. If you catch or meet this cat, please do not post its exact
+        <p className="mt-1 font-semibold">{cat.area}</p>
+        <p className="small soft mt-1 max-w-[52ch]">
+          Exact spots are private to protect the cats. If you spot or meet this cat, please do not post its exact
           location anywhere else.
         </p>
       </section>
 
       <section aria-labelledby="journey">
-        <h2 id="journey" className="mb-3 text-2xl font-extrabold">
+        <h2 id="journey" className="h2 mb-3">
           Journey
         </h2>
-        <JourneyTimeline steps={cat.journey} />
+        <div className="card">
+          <JourneyTimeline steps={cat.journey} />
+        </div>
       </section>
 
       <section aria-labelledby="health">
-        <h2 id="health" className="mb-3 text-2xl font-extrabold">
+        <h2 id="health" className="h2 mb-3">
           Health record
         </h2>
         {health.length === 0 ? (
-          <p className="text-dusk">Nothing recorded yet.</p>
+          <p className="note">Nothing recorded yet.</p>
         ) : (
-          <ul className="grid gap-3">
+          <ul className="list">
             {health.map((h) => (
-              <li key={h.id} className="note">
+              <li key={h.id} className="p-3">
                 <p className="font-bold">
                   {h.type}
                   {h.product ? `: ${h.product}` : ""}
                 </p>
-                <p className="text-sm text-dusk">
+                <p className="small soft">
                   {niceDate(h.date)}
                   {h.vet ? ` by ${h.vet}` : ""}
                 </p>
                 {h.nextDue && (
-                  <p className={h.overdue ? "mt-1 text-sm font-bold text-chili" : "mt-1 text-sm"}>
+                  <p className={`small mt-1 ${h.overdue ? "font-bold text-danger" : ""}`}>
                     {h.overdue ? "Overdue, was due " : "Next due "}
                     {niceDate(h.nextDue)}
                   </p>
@@ -76,26 +83,26 @@ export function CatDetail({ card }: { card: CatCardData }) {
       </section>
 
       <section aria-labelledby="sightings">
-        <h2 id="sightings" className="mb-3 text-2xl font-extrabold">
+        <h2 id="sightings" className="h2 mb-3">
           Sightings ({sightings.length})
         </h2>
         {sightings.length === 0 ? (
-          <p className="text-dusk">No sightings yet.</p>
+          <p className="note">No sightings yet.</p>
         ) : (
-          <ul className="grid grid-cols-2 gap-3">
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {sightings.map((s) => (
               <li key={s.id}>
-                <div className="relative aspect-square overflow-hidden border-2 border-ink">
-                  <CatPhoto url={s.photoUrl} name={cat.name} sizes="50vw" />
+                <div className="relative aspect-square overflow-hidden rounded-in">
+                  <CatPhoto url={s.photoUrl} name={cat.name} sizes="(min-width: 576px) 12rem, 50vw" />
                 </div>
-                <p className="mt-1 text-sm text-dusk">{niceDate(s.date)}</p>
+                <p className="small soft mt-1">{niceDate(s.date)}</p>
               </li>
             ))}
           </ul>
         )}
       </section>
 
-      <Link href="/donate" className="btn inline-flex items-center justify-center">
+      <Link href="/donate" className="btn-pop">
         Help fund the colony
       </Link>
     </article>

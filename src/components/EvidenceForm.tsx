@@ -64,7 +64,7 @@ export function EvidenceForm({ bookingId, catName }: { bookingId: string; catNam
     return (
       <div className="grid gap-4" role="status">
         <div className={`note ${result.verification === "rejected" ? "note-bad" : result.verification === "verified" ? "note-ok" : ""}`}>
-          <h3 className="text-2xl font-extrabold">{HEADINGS[result.verification]}</h3>
+          <h3 className="h2">{HEADINGS[result.verification]}</h3>
           <p className="mt-2">{result.message}</p>
           {result.messages.length > 0 && (
             <ul className="mt-2 list-disc pl-5">
@@ -89,7 +89,7 @@ export function EvidenceForm({ bookingId, catName }: { bookingId: string; catNam
         <label htmlFor="receipt" className="font-bold">
           Photo of the receipt
         </label>
-        <p className="text-sm text-dusk">The whole receipt, flat and in good light. JPEG or PNG, up to 10 MB.</p>
+        <p className="small soft">The whole receipt, flat and in good light. JPEG or PNG, up to 10 MB.</p>
         <input
           id="receipt"
           type="file"
@@ -106,8 +106,8 @@ export function EvidenceForm({ bookingId, catName }: { bookingId: string; catNam
       </div>
 
       <div className="grid gap-2">
-        <h3 className="text-xl font-extrabold">Photo of {catName} after surgery</h3>
-        <p className="text-sm text-dusk">Show the tipped ear and the coat, so we can tell it is the same cat.</p>
+        <h3 className="h2">Photo of {catName} after surgery</h3>
+        <p className="small soft">Show the tipped ear and the coat, so we can tell it is the same cat.</p>
         {earPhoto ? (
           <div className="flex flex-wrap items-center gap-3">
             <p className="note note-ok font-bold">Photo taken.</p>

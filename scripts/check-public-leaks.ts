@@ -95,7 +95,7 @@ async function main() {
     [`leakreview-${tag}`, donor.id],
   );
 
-  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/collection", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
+  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/helped", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
   const viewers: [string, Record<string, string>][] = [["anon", {}], ["donor", { cookie: `sf_session=${token}` }]];
   let bad = 0, checked = 0;
   try {
@@ -116,8 +116,8 @@ async function main() {
     if (!html.includes("Leak check spay")) { bad++; console.log("FAIL: the seeded treatment did not render"); }
     const feed = await (await fetch(`${BASE}/agent`)).text();
     if (!feed.includes("Leak check reason")) { bad++; console.log("FAIL: agent feed did not render the seeded action"); }
-    const col = await (await fetch(`${BASE}/collection`, { headers: { cookie: `sf_session=${token}` } })).text();
-    if (!col.includes(`LeakCat ${tag}`)) { bad++; console.log("FAIL: collection did not render the seeded cat"); }
+    const helped = await (await fetch(`${BASE}/helped`, { headers: { cookie: `sf_session=${token}` } })).text();
+    if (!helped.includes(`LeakCat ${tag}`)) { bad++; console.log("FAIL: helped page did not render the seeded cat"); }
   } finally {
     await pool.query("delete from review_requests where resolved_by=$1", [donor.id]);
     await pool.query("delete from agent_actions where approved_by=$1", [donor.id]);

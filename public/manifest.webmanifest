@@ -2,12 +2,12 @@
   "name": "Stray Fund",
   "short_name": "Stray Fund",
   "description": "Community funding for neighbourhood stray cat care",
-  "start_url": "/catch",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#e7e9e6",
-  "theme_color": "#ffc21a",
+  "background_color": "#edf4ec",
+  "theme_color": "#edf4ec",
   "icons": [
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }

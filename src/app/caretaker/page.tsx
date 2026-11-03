@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { ActionForm } from "@/components/ActionForm";
+import { ListSkeleton } from "@/components/Loading";
+import { PageHead } from "@/components/PageHead";
 import { SignIn } from "@/components/SignIn";
 import { formatPeso } from "@/lib/money";
 import {
@@ -27,11 +29,11 @@ const SIGHTING_REASON: Record<string, string> = {
 };
 
 function Where({ exact }: { exact: ExactSpot }) {
-  if (!exact) return <p className="text-sm text-dusk">No location on file.</p>;
+  if (!exact) return <p className="small soft">No location on file.</p>;
   return (
-    <p className="text-sm">
+    <p className="small">
       <span className="font-bold">Exact location:</span> {exact.lat.toFixed(5)}, {exact.lng.toFixed(5)}
-      {exact.approximate && <span className="block text-dusk">Approximate: the middle of the colony.</span>}
+      {exact.approximate && <span className="block soft">Approximate: the middle of the colony.</span>}
     </p>
   );
 }
@@ -39,10 +41,10 @@ function Where({ exact }: { exact: ExactSpot }) {
 function Section({ id, title, count, empty, children }: { id: string; title: string; count: number; empty: string; children: React.ReactNode }) {
   return (
     <section className="mt-10" aria-labelledby={id}>
-      <h2 id={id} className="text-3xl font-extrabold">
-        {title} <span className="text-dusk">({count})</span>
+      <h2 id={id} className="h2">
+        {title} <span className="soft">({count})</span>
       </h2>
-      {count === 0 ? <p className="mt-3 text-dusk">{empty}</p> : <ul className="mt-4 grid gap-5">{children}</ul>}
+      {count === 0 ? <p className="mt-3 soft">{empty}</p> : <ul className="mt-4 grid gap-3">{children}</ul>}
     </section>
   );
 }
@@ -51,7 +53,7 @@ function Field({ label, name, type = "text", defaultValue, required = true, hint
   return (
     <label className="grid gap-1">
       <span className="font-bold">{label}</span>
-      {hint && <span className="text-sm text-dusk">{hint}</span>}
+      {hint && <span className="small soft">{hint}</span>}
       <input name={name} type={type} defaultValue={defaultValue} required={required} className="field" autoComplete="off" />
     </label>
   );
@@ -64,14 +66,14 @@ function Hidden({ name, value }: { name: string; value: string }) {
 function PayoutFacts({ p }: { p: PayoutItem }) {
   return (
     <>
-      <h3 className="text-2xl font-extrabold">
+      <h3 className="text-base font-extrabold">
         {formatPeso(p.amount)} to {p.vetName}
       </h3>
-      <p className="text-sm">
+      <p className="small">
         {KIND[p.kind] ?? p.kind} for {p.catName}, {p.date}. Attempts: {p.attempts}.
       </p>
-      {p.batchId && <p className="text-sm break-all text-dusk">PayPal batch: {p.batchId}</p>}
-      {p.agentReason && <p className="mt-2 text-sm text-dusk">The treasurer wrote: {p.agentReason}</p>}
+      {p.batchId && <p className="small break-all soft">PayPal batch: {p.batchId}</p>}
+      {p.agentReason && <p className="mt-2 small soft">The treasurer wrote: {p.agentReason}</p>}
     </>
   );
 }
@@ -80,7 +82,7 @@ function Approvals({ items }: { items: PayoutItem[] }) {
   return (
     <Section id="approvals" title="Payouts awaiting approval" count={items.length} empty="Nothing is waiting for your approval.">
       {items.map((p) => (
-        <li key={p.id} className="ticket">
+        <li key={p.id} className="card">
           <PayoutFacts p={p} />
           <ActionForm action="payout_approve" submitLabel="Approve and send">
             <Hidden name="payoutId" value={p.id} />
@@ -99,12 +101,12 @@ function NeedsReview({ items }: { items: PayoutItem[] }) {
   return (
     <Section id="payout-review" title="Payouts under review" count={items.length} empty="No payout needs a ruling.">
       {items.map((p) => (
-        <li key={p.id} className="ticket">
+        <li key={p.id} className="card">
           <PayoutFacts p={p} />
           {p.lastGatewayError && (
-            <p className="note note-bad mt-2 text-sm break-words">Last gateway error: {p.lastGatewayError}</p>
+            <p className="note note-bad mt-2 small break-words">Last gateway error: {p.lastGatewayError}</p>
           )}
-          <p className="mt-2 text-sm">Check PayPal activity first. Money may have left even if this shows an error.</p>
+          <p className="mt-2 small">Check PayPal activity first. Money may have left even if this shows an error.</p>
           <ActionForm action="payout_resolve" submitLabel="It was paid">
             <Hidden name="payoutId" value={p.id} />
             <Hidden name="outcome" value="paid" />
@@ -125,9 +127,9 @@ function LongSent({ items }: { items: PayoutItem[] }) {
   return (
     <Section id="long-sent" title="Sent, but not confirmed for over an hour" count={items.length} empty="Every sent payout has been confirmed, or was sent within the hour.">
       {items.map((p) => (
-        <li key={p.id} className="ticket">
+        <li key={p.id} className="card">
           <PayoutFacts p={p} />
-          <p className="note mt-2 text-sm">
+          <p className="note mt-2 small">
             Warning: PayPal has not confirmed this yet. If the vet&apos;s PayPal email has no account, the money stays
             unclaimed. Ask the vet to check, then leave a note. Nothing else can be done here.
           </p>
@@ -143,7 +145,7 @@ function LongSent({ items }: { items: PayoutItem[] }) {
 
 function Assessment({ a }: { a: NonNullable<SightingItem["assessment"]> }) {
   return (
-    <div className="note mt-2 text-sm">
+    <div className="note mt-2 small">
       <p className="font-bold">As read by the AI (may be wrong)</p>
       <p>Cat visible: {a.is_cat ? "yes" : "no"}, photo quality {a.cat_visible_quality}.</p>
       <p>
@@ -162,13 +164,13 @@ function Sightings({ items, cats }: { items: SightingItem[]; cats: CaretakerQueu
   return (
     <Section id="sightings" title="Sighting reviews" count={items.length} empty="No photo is waiting for a decision.">
       {items.map((s) => (
-        <li key={s.id} className="ticket">
-          <h3 className="text-2xl font-extrabold">Photo from {s.date}</h3>
-          <p className="text-sm">{(s.reason && SIGHTING_REASON[s.reason]) ?? "A caretaker needs to decide."}</p>
-          {s.catName && <p className="text-sm">Linked to: {s.catName}</p>}
+        <li key={s.id} className="card">
+          <h3 className="text-base font-extrabold">Photo from {s.date}</h3>
+          <p className="small">{(s.reason && SIGHTING_REASON[s.reason]) ?? "A caretaker needs to decide."}</p>
+          {s.catName && <p className="small">Linked to: {s.catName}</p>}
           <Where exact={s.exact} />
           {/* eslint-disable-next-line @next/next/no-img-element -- a private photo behind a signed-in route */}
-          <img src={`/api/caretaker/images/sighting/${s.id}`} alt="The original photo" className="mt-3 max-h-72 w-full rounded border-2 border-ink object-contain" />
+          <img src={`/api/caretaker/images/sighting/${s.id}`} alt="The original photo" className="mt-3 max-h-72 w-full rounded-in object-contain" />
           {s.assessment && <Assessment a={s.assessment} />}
           <ActionForm action="sighting_confirm_new" submitLabel="Confirm as a new cat">
             <Hidden name="sightingId" value={s.id} />
@@ -208,7 +210,7 @@ function Sightings({ items, cats }: { items: SightingItem[]; cats: CaretakerQueu
 function Reading({ r }: { r: ReceiptItem }) {
   const p = r.parsed;
   return (
-    <div className="note mt-2 text-sm">
+    <div className="note mt-2 small">
       <p className="font-bold">As read by the AI (may be wrong)</p>
       {p ? (
         <>
@@ -236,16 +238,16 @@ function Receipts({ items }: { items: ReceiptItem[] }) {
       {items.map((r) => {
         const prefill = r.parsed?.total_centavos != null && r.parsed.total_centavos > 0 ? String(Math.round(r.parsed.total_centavos / 100)) : "";
         return (
-          <li key={r.id} className="ticket">
-            <h3 className="text-2xl font-extrabold">{r.catName}</h3>
-            <p className="text-sm">
+          <li key={r.id} className="card">
+            <h3 className="text-base font-extrabold">{r.catName}</h3>
+            <p className="small">
               Vet {r.vetName}, clinic on account: {r.clinicName ?? "none"}. Sent {r.date}.
             </p>
-            <p className="text-sm">
+            <p className="small">
               Package {formatPeso(r.packagePrice)}, deposit paid {formatPeso(r.depositPaid)}.
             </p>
             {r.reasonMessages.length > 0 && (
-              <ul className="mt-2 list-disc pl-5 text-sm">
+              <ul className="mt-2 list-disc pl-5 small">
                 {r.reasonMessages.map((m) => (
                   <li key={m}>{m}</li>
                 ))}
@@ -253,9 +255,9 @@ function Receipts({ items }: { items: ReceiptItem[] }) {
             )}
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {/* eslint-disable-next-line @next/next/no-img-element -- private evidence behind a signed-in route */}
-              <img src={`/api/caretaker/images/receipt/${r.id}`} alt="The original receipt" className="max-h-72 w-full rounded border-2 border-ink object-contain" />
+              <img src={`/api/caretaker/images/receipt/${r.id}`} alt="The original receipt" className="max-h-72 w-full rounded-in object-contain" />
               {/* eslint-disable-next-line @next/next/no-img-element -- private evidence behind a signed-in route */}
-              <img src={`/api/caretaker/images/eartip/${r.id}`} alt="The ear-tip photo" className="max-h-72 w-full rounded border-2 border-ink object-contain" />
+              <img src={`/api/caretaker/images/eartip/${r.id}`} alt="The ear-tip photo" className="max-h-72 w-full rounded-in object-contain" />
             </div>
             <Reading r={r} />
             <ActionForm action="evidence_accept" submitLabel="Accept this evidence">
@@ -287,10 +289,10 @@ function Reviews({ items }: { items: CaretakerQueue["reviews"] }) {
   return (
     <Section id="reviews" title="Questions from the treasurer" count={items.length} empty="The treasurer has no open questions.">
       {items.map((r) => (
-        <li key={r.id} className="ticket">
-          <h3 className="text-xl font-extrabold break-words">{r.subject}</h3>
-          <p className="text-sm break-words">{r.reason}</p>
-          <p className="text-sm text-dusk">Asked {r.date}</p>
+        <li key={r.id} className="card">
+          <h3 className="text-base font-extrabold break-words">{r.subject}</h3>
+          <p className="small break-words">{r.reason}</p>
+          <p className="small soft">Asked {r.date}</p>
           <ActionForm action="review_resolve" submitLabel="Close this question">
             <Hidden name="reviewId" value={r.id} />
             <Field label="Note: what you decided or did" name="resolution" />
@@ -305,9 +307,9 @@ function Wakeups({ items }: { items: CaretakerQueue["failedWakeups"] }) {
   return (
     <Section id="wakeups" title="Jobs the treasurer gave up on" count={items.length} empty="No job has failed.">
       {items.map((w) => (
-        <li key={w.id} className="ticket">
-          <h3 className="text-xl font-extrabold">{w.kind}</h3>
-          <p className="text-sm">
+        <li key={w.id} className="card">
+          <h3 className="text-base font-extrabold">{w.kind}</h3>
+          <p className="small">
             Failed after {w.attempts} tries, queued {w.date}.
           </p>
           <ActionForm action="wakeup_retry" submitLabel="Try again">
@@ -326,15 +328,15 @@ function Photos({ items }: { items: CaretakerQueue["heldPhotos"] }) {
   return (
     <Section id="photos" title="Photos held back" count={items.length} empty="Every photo is public or has no cat yet.">
       {items.map((p) => (
-        <li key={p.sightingId} className="ticket">
-          <h3 className="text-xl font-extrabold">{p.catName ?? "No cat yet"}</h3>
-          <p className="text-sm">Taken {p.date}. Not shown publicly.</p>
+        <li key={p.sightingId} className="card">
+          <h3 className="text-base font-extrabold">{p.catName ?? "No cat yet"}</h3>
+          <p className="small">Taken {p.date}. Not shown publicly.</p>
           {/* eslint-disable-next-line @next/next/no-img-element -- a private photo behind a signed-in route */}
-          <img src={`/api/caretaker/images/sighting/${p.sightingId}`} alt="The original photo" className="mt-3 max-h-72 w-full rounded border-2 border-ink object-contain" />
+          <img src={`/api/caretaker/images/sighting/${p.sightingId}`} alt="The original photo" className="mt-3 max-h-72 w-full rounded-in object-contain" />
           <ActionForm action="photo_publish" submitLabel="Publish with areas blurred">
             <Hidden name="sightingId" value={p.sightingId} />
             {p.hasRegions ? (
-              <p className="text-sm">The AI marked areas to blur. They will be blurred.</p>
+              <p className="small">The AI marked areas to blur. They will be blurred.</p>
             ) : (
               <label className="flex items-start gap-3">
                 <input type="checkbox" name="noSensitive" value="on" className="mt-1 h-5 w-5" />
@@ -355,8 +357,8 @@ function EarTips({ items }: { items: CaretakerQueue["earTipPending"] }) {
   return (
     <Section id="ears" title="Cats with no ear-tip decision" count={items.length} empty="Every spotted cat has its ears settled.">
       {items.map((c) => (
-        <li key={c.id} className="ticket">
-          <h3 className="text-xl font-extrabold">{c.name}</h3>
+        <li key={c.id} className="card">
+          <h3 className="text-base font-extrabold">{c.name}</h3>
           <Where exact={c.exact} />
           <ActionForm action="cat_set_ear_tip" submitLabel="Ear is tipped, already neutered">
             <Hidden name="catId" value={c.id} />
@@ -375,15 +377,15 @@ function EarTips({ items }: { items: CaretakerQueue["earTipPending"] }) {
 function Cats({ cats }: { cats: CaretakerQueue["catChoices"] }) {
   return (
     <section className="mt-10" aria-labelledby="cats">
-      <h2 id="cats" className="text-3xl font-extrabold">
+      <h2 id="cats" className="h2">
         Cat cards
       </h2>
-      <p className="mt-2 text-sm text-dusk">The 200 newest cats. Sex and flags, ear-tip, and the last steps to a home.</p>
-      <ul className="mt-4 grid gap-5">
+      <p className="mt-2 small soft">The 200 newest cats. Sex and flags, ear-tip, and the last steps to a home.</p>
+      <ul className="mt-4 grid gap-3">
         {cats.map((c) => (
-          <li key={c.id} className="ticket">
-            <h3 className="text-xl font-extrabold">
-              {c.name} <span className="text-base font-normal text-dusk">{c.status}</span>
+          <li key={c.id} className="card">
+            <h3 className="text-base font-extrabold">
+              {c.name} <span className="font-normal soft">{c.status}</span>
             </h3>
             <ActionForm action="cat_set_details" submitLabel="Save sex and flags" quiet>
               <Hidden name="catId" value={c.id} />
@@ -435,13 +437,13 @@ function Rules({ rules }: { rules: RulesView }) {
   const pesos = (c: number) => c / 100;
   return (
     <section className="mt-10" aria-labelledby="rules">
-      <h2 id="rules" className="text-3xl font-extrabold">
+      <h2 id="rules" className="h2">
         Spending rules
       </h2>
-      <p className="mt-2 text-sm text-dusk">
+      <p className="mt-2 small soft">
         Whole pesos. Lowering a cap also applies to payouts already waiting for approval. Every change is written to the treasurer&apos;s public feed as a change, without the values.
       </p>
-      <div className="ticket mt-4">
+      <div className="card mt-4">
         <ActionForm action="guardrails_update" submitLabel="Save rules">
           <Field label="Care package price" name="packagePrice" type="number" defaultValue={pesos(l.packagePrice)} />
           <Field label="Deposit percent (1 to 100)" name="depositPct" type="number" defaultValue={l.depositPct} />
@@ -453,12 +455,12 @@ function Rules({ rules }: { rules: RulesView }) {
         </ActionForm>
       </div>
 
-      <h3 className="mt-8 text-2xl font-extrabold">Vets</h3>
-      <ul className="mt-4 grid gap-5">
+      <h3 className="mt-8 h2">Vets</h3>
+      <ul className="mt-4 grid gap-3">
         {rules.vets.map((v) => (
-          <li key={v.id} className="ticket">
-            <h4 className="text-xl font-extrabold">
-              {v.username} <span className="text-base font-normal text-dusk">{v.allowed ? "can be paid" : "not allowed"}</span>
+          <li key={v.id} className="card">
+            <h4 className="h2">
+              {v.username} <span className="font-normal soft">{v.allowed ? "can be paid" : "not allowed"}</span>
             </h4>
             {v.allowed ? (
               <ActionForm action="payee_remove" submitLabel="Stop payments to this vet" quiet>
@@ -477,8 +479,8 @@ function Rules({ rules }: { rules: RulesView }) {
           </li>
         ))}
       </ul>
-      <div className="ticket mt-5">
-        <h4 className="text-xl font-extrabold">Allow another vet</h4>
+      <div className="card mt-5">
+        <h4 className="h2">Allow another vet</h4>
         <ActionForm action="payee_add" submitLabel="Allow">
           <Field label="Vet username" name="username" />
         </ActionForm>
@@ -492,7 +494,7 @@ async function Desk() {
   const session = await getSession();
   if (!session) {
     return (
-      <div className="ticket mt-8">
+      <div className="card mt-8">
         <p className="mb-4 font-bold">Sign in with a caretaker account to see the queue.</p>
         <SignIn username={null} inline />
       </div>
@@ -522,12 +524,11 @@ async function Desk() {
 
 export default function CaretakerPage() {
   return (
-    <main className="pt-4">
-      <h1 className="text-5xl font-extrabold">Caretaker desk.</h1>
-      <p className="mt-4 max-w-[40ch]">
+    <main>
+      <PageHead title="Caretaker desk">
         The treasurer asks you when it is unsure. Exact locations and private photos show here, and nowhere public.
-      </p>
-      <Suspense fallback={<p className="mt-8 text-dusk">Loading</p>}>
+      </PageHead>
+      <Suspense fallback={<ListSkeleton rows={3} label="Loading" />}>
         <Desk />
       </Suspense>
     </main>

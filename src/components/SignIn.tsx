@@ -1,11 +1,41 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 
-/** Header control when compact, a full form when inline. Sign-in needs only a username. */
-export function SignIn({ username, inline = false }: { username: string | null; inline?: boolean }) {
+/**
+ * Header control when compact, a full form when inline. Sign-in needs only a username.
+ * A signed-in caretaker or vet also finds their console link in the account menu.
+ */
+export function SignIn({
+  username,
+  inline = false,
+  console: consoleLink = null,
+}: {
+  username: string | null;
+  inline?: boolean;
+  console?: { href: string; label: string } | null;
+}) {
   const router = useRouter();
+  const menu = useRef<HTMLDetailsElement>(null);
+
+  // A floating menu closes on an outside tap or Escape.
+  useEffect(() => {
+    const close = (e: Event) => {
+      const el = menu.current;
+      if (!el?.open) return;
+      if (e instanceof KeyboardEvent && e.key !== "Escape") return;
+      if (e instanceof MouseEvent && e.target instanceof Node && el.contains(e.target)) return;
+      el.open = false;
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, []);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,12 +69,25 @@ export function SignIn({ username, inline = false }: { username: string | null; 
 
   if (username && !inline) {
     return (
-      <div className="flex items-center gap-3 text-sm">
-        <span className="max-w-[9rem] truncate font-bold">{username}</span>
-        <button type="button" onClick={signOut} className="underline underline-offset-4">
-          Sign out
-        </button>
-      </div>
+      <details ref={menu} className="relative">
+        <summary
+          aria-label={`Account, signed in as ${username}`}
+          className="press grid h-11 w-11 cursor-pointer list-none place-items-center rounded-in bg-pale text-sm font-extrabold text-main [&::-webkit-details-marker]:hidden"
+        >
+          {username.slice(0, 2).toUpperCase()}
+        </summary>
+        <div className="absolute right-0 z-40 mt-2 grid w-[min(16rem,calc(100vw-2rem))] gap-1 rounded-out bg-surface p-2 shadow-[0_8px_30px_rgba(18,53,42,0.18)]">
+          <p className="truncate px-3 pt-2 font-bold">{username}</p>
+          {consoleLink && (
+            <Link href={consoleLink.href} className="press flex min-h-12 items-center rounded-in px-3 font-bold text-main" onClick={() => menu.current?.removeAttribute("open")}>
+              {consoleLink.label}
+            </Link>
+          )}
+          <button type="button" onClick={signOut} className="press flex min-h-12 w-full items-center rounded-in px-3 text-left font-semibold">
+            Sign out
+          </button>
+        </div>
+      </details>
     );
   }
   if (username) return null;
@@ -70,11 +113,11 @@ export function SignIn({ username, inline = false }: { username: string | null; 
           Continue
         </button>
       </div>
-      <p id="signin-help" className="text-sm text-dusk">
+      <p id="signin-help" className="small soft">
         3 to 20 letters, digits or underscores. No password. Use the same name to come back.
       </p>
       {error && (
-        <p id="signin-error" role="alert" className="font-bold text-chili">
+        <p id="signin-error" role="alert" className="font-bold text-danger">
           {error}
         </p>
       )}
@@ -83,9 +126,9 @@ export function SignIn({ username, inline = false }: { username: string | null; 
 
   if (inline) return form;
   return (
-    <details className="relative">
-      <summary className="btn-quiet inline-flex cursor-pointer list-none items-center">Sign in</summary>
-      <div className="ticket absolute right-0 z-10 mt-3 w-[min(20rem,calc(100vw-2rem))]">{form}</div>
+    <details ref={menu} className="relative">
+      <summary className="btn-quiet cursor-pointer list-none [&::-webkit-details-marker]:hidden">Sign in</summary>
+      <div className="absolute right-0 z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-out bg-surface p-4 shadow-[0_8px_30px_rgba(18,53,42,0.18)]">{form}</div>
     </details>
   );
 }

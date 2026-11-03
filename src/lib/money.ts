@@ -38,3 +38,8 @@ export function parsePesoInput(text: string): number | null {
   if (!m) return null;
   return Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0"));
 }
+
+/** Whole pesos when there are no centavos, as in the home balance: 190700 -> "₱1,907". */
+export function formatPesoShort(c: number): string {
+  return formatPeso(c).replace(/\.00$/, "");
+}

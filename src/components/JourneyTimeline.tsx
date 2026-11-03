@@ -20,19 +20,19 @@ export function JourneyTimeline({ steps }: { steps: JourneyStep[] }) {
           <div className="flex flex-col items-center">
             <span
               aria-hidden="true"
-              className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center border-2 border-ink text-xs font-bold ${s.done ? "bg-sampaguita text-paper" : "bg-paper"}`}
+              className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-in text-xs font-bold ${s.done ? "bg-main text-white" : "bg-pale"}`}
             >
               {s.done ? "✓" : ""}
             </span>
-            {i < steps.length - 1 && <span aria-hidden="true" className="w-0.5 flex-1 bg-line" />}
+            {i < steps.length - 1 && <span aria-hidden="true" className="w-0.5 flex-1 bg-pale" />}
           </div>
-          <div className="pb-4">
-            <p className={s.done ? "font-bold" : "text-dusk"}>
+          <div className="pb-4 last:pb-0">
+            <p className={s.done ? "font-bold" : "soft"}>
               {s.step}
               <span className="sr-only">{s.done ? " (done)" : " (not yet)"}</span>
             </p>
-            {s.done && s.date && <p className="text-sm text-dusk">{niceDate(s.date)}</p>}
-            {s.done && s.note && <p className="text-sm text-dusk">{s.note}</p>}
+            {s.done && s.date && <p className="small soft">{niceDate(s.date)}</p>}
+            {s.done && s.note && <p className="small soft">{s.note}</p>}
           </div>
         </li>
       ))}

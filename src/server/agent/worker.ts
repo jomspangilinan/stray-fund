@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { syncCatForPayout } from "../catTransitions";
-import { retryPendingSightings } from "../catch";
+import { retryPendingSightings } from "../spot";
 import { db, type Tx } from "../db/client";
 import { wakeups } from "../db/schema";
 import { describeError } from "../errors";

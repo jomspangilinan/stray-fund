@@ -1,5 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
-import { insertNewCat, publishPhoto, resolveEarTip } from "../catch";
+import { insertNewCat, publishPhoto, resolveEarTip } from "../spot";
 import { IllegalTransition, MoneyAlreadyMoved, markAlreadyNeutered, transitionCat } from "../catTransitions";
 import { AssessmentSchema } from "../ai/schemas";
 import { withColonyLock, type Tx } from "../db/client";

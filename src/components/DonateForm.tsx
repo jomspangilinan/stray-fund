@@ -31,8 +31,8 @@ export function DonateForm({ clientId, username }: { clientId: string; username:
 
   if (!username) {
     return (
-      <div className="mt-8">
-        <p className="mb-4">Sign in so we can link your donation to you.</p>
+      <div className="card mt-6">
+        <p className="mb-4 font-bold">Sign in so we can link your donation to you.</p>
         <SignIn username={null} inline />
       </div>
     );
@@ -41,21 +41,21 @@ export function DonateForm({ clientId, username }: { clientId: string; username:
   if (outcome.kind === "captured") {
     const fee = outcome.gross - outcome.net;
     return (
-      <div className="mt-8" role="status">
-        <div className="ticket">
-          <h2 className="text-3xl font-extrabold">Thank you, {username}.</h2>
+      <div className="mt-6" role="status">
+        <div className="card">
+          <h2 className="title">Thank you, {username}.</h2>
           <dl className="mt-4 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
             <dt>You gave</dt>
             <dd className="text-right">{formatPeso(outcome.gross)}</dd>
             <dt>PayPal fee</dt>
             <dd className="text-right">{formatPeso(fee)}</dd>
-            <dt className="mt-2 border-t-2 border-ink pt-2 font-bold">Reached the fund</dt>
-            <dd className="mt-2 border-t-2 border-ink pt-2 text-right font-display text-2xl font-extrabold text-sampaguita">
+            <dt className="mt-3 rounded-l-in bg-pale px-3 py-2 font-bold">Reached the fund</dt>
+            <dd className="mt-3 rounded-r-in bg-pale px-3 py-2 text-right text-xl font-extrabold text-main">
               {formatPeso(outcome.net)}
             </dd>
           </dl>
         </div>
-        <button type="button" className="btn-quiet mt-6" onClick={() => setOutcome({ kind: "idle" })}>
+        <button type="button" className="btn-quiet mt-4" onClick={() => setOutcome({ kind: "idle" })}>
           Give again
         </button>
       </div>
@@ -104,9 +104,9 @@ export function DonateForm({ clientId, username }: { clientId: string; username:
   }
 
   return (
-    <div className="mt-8 grid gap-6">
+    <div className="mt-6 grid gap-5">
       <fieldset className="grid gap-3">
-        <legend className="mb-1 font-bold">How much?</legend>
+        <legend className="mb-2 h2">How much?</legend>
         <div role="radiogroup" aria-label="Amount" className="grid grid-cols-3 gap-3">
           {PRESETS.map((p) => (
             <button
@@ -114,7 +114,7 @@ export function DonateForm({ clientId, username }: { clientId: string; username:
               type="button"
               role="radio"
               aria-checked={preset === p}
-              className="chip"
+              className="chip chip-amount"
               onClick={() => setPreset(p)}
             >
               {formatPeso(p).replace(/\.00$/, "")}
@@ -125,7 +125,7 @@ export function DonateForm({ clientId, username }: { clientId: string; username:
           type="button"
           role="radio"
           aria-checked={preset === "other"}
-          className="chip text-base"
+          className="chip"
           onClick={() => setPreset("other")}
         >
           Other amount
@@ -145,7 +145,7 @@ export function DonateForm({ clientId, username }: { clientId: string; username:
               aria-describedby={`${customId}-help`}
               autoFocus
             />
-            <p id={`${customId}-help`} className={amountError ? "font-bold text-chili" : "text-sm text-dusk"}>
+            <p id={`${customId}-help`} className={amountError ? "font-bold text-danger" : "small soft"}>
               {amountError ?? `Minimum ${formatPeso(MIN_DONATION).replace(/\.00$/, "")}`}
             </p>
           </div>
@@ -198,7 +198,7 @@ export function DonateForm({ clientId, username }: { clientId: string; username:
           </p>
         )
       ) : (
-        <button className="btn" disabled>
+        <button className="btn w-full" disabled>
           {outcome.kind === "confirming" ? "Confirming" : outcome.kind === "waiting" ? "Waiting for PayPal" : "Choose an amount"}
         </button>
       )}

@@ -5,7 +5,7 @@ import { CURRENCY } from "@/lib/config";
 import { fileReview } from "./agent/review";
 import { readReceipt, verifyEarTip } from "./ai/receipt";
 import { EarTipSchema, ReceiptSchema, type EarTipCheck, type ReceiptReading } from "./ai/schemas";
-import { RateLimited } from "./catch";
+import { RateLimited } from "./spot";
 import { COMPLETED_BOOKING, transitionCat } from "./catTransitions";
 import { db, withColonyLock, type Tx } from "./db/client";
 import { allowedPayees, bookings, cats, guardrails, payouts, receipts, sightings, treatments, users } from "./db/schema";

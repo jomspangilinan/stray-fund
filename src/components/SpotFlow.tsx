@@ -28,14 +28,14 @@ const HEADINGS: Record<Done["state"], string> = {
   queued_for_ai: "Saved",
 };
 
-export function CatchFlow({ username }: { username: string | null }) {
+export function SpotFlow({ username }: { username: string | null }) {
   const [phase, setPhase] = useState<Phase>({ kind: "camera" });
   const [sex, setSex] = useState<Sex>("unknown");
 
   if (!username) {
     return (
-      <div className="mt-8">
-        <p className="mb-4">Sign in so we can link the photo to you.</p>
+      <div className="card mt-6">
+        <p className="mb-4 font-bold">Sign in so we can link the photo to you.</p>
         <SignIn username={null} inline />
       </div>
     );
@@ -51,7 +51,7 @@ export function CatchFlow({ username }: { username: string | null }) {
     }
     if (sex !== "unknown") form.set("sex", sex);
     try {
-      const res = await fetch("/api/catch", { method: "POST", body: form });
+      const res = await fetch("/api/spot", { method: "POST", body: form });
       const body = (await res.json().catch(() => ({}))) as Partial<Done> & { error?: string };
       if (!res.ok || !body.state || !body.message) {
         setPhase({ kind: "error", message: body.error ?? "Could not send the photo. Try again." });
@@ -69,12 +69,12 @@ export function CatchFlow({ username }: { username: string | null }) {
   if (phase.kind === "done") {
     const { done } = phase;
     return (
-      <div className="mt-8 grid gap-6" role="status">
+      <div className="mt-6 grid gap-5" role="status">
         <div className={`note ${done.state === "rejected" ? "note-bad" : "note-ok"}`}>
-          <h2 className="text-2xl font-extrabold">{HEADINGS[done.state]}</h2>
+          <h2 className="h2">{HEADINGS[done.state]}</h2>
           <p className="mt-2">{done.message}</p>
           {done.locationMissing && (
-            <p className="mt-2 text-dusk">
+            <p className="mt-2">
               Your location was not shared, so this photo is placed at the middle of the colony for now.
             </p>
           )}
@@ -86,7 +86,7 @@ export function CatchFlow({ username }: { username: string | null }) {
             </Link>
           )}
           <button type="button" className="btn-quiet" onClick={() => setPhase({ kind: "camera" })}>
-            {done.state === "rejected" ? "Try again" : "Catch another"}
+            {done.state === "rejected" ? "Try again" : "Spot another"}
           </button>
         </div>
       </div>
@@ -95,9 +95,9 @@ export function CatchFlow({ username }: { username: string | null }) {
 
   const sending = phase.kind === "sending";
   return (
-    <div className="mt-6 grid gap-5">
+    <div className="mt-5 grid gap-5">
       <fieldset className="grid gap-2" disabled={sending}>
-        <legend className="font-bold">Is it a girl or a boy?</legend>
+        <legend className="h2">Is it a girl or a boy?</legend>
         <div role="radiogroup" aria-label="Sex" className="flex flex-wrap gap-2">
           {SEXES.map((o) => (
             <button
@@ -105,7 +105,7 @@ export function CatchFlow({ username }: { username: string | null }) {
               type="button"
               role="radio"
               aria-checked={sex === o.value}
-              className="chip !text-base"
+              className="chip"
               onClick={() => setSex(o.value)}
             >
               {sex === o.value ? "✓ " : ""}
@@ -115,8 +115,12 @@ export function CatchFlow({ username }: { username: string | null }) {
         </div>
       </fieldset>
       <LiveCamera onCapture={upload} disabled={sending} />
+      <p className="small soft max-w-[52ch]">
+        Photos come only from the live camera, never from your gallery. That stops an old photo being reused to
+        trigger funding.
+      </p>
       {sending && (
-        <p role="status" className="font-bold">
+        <p role="status" className="note note-ok font-bold">
           Sending the photo. This can take a few seconds.
         </p>
       )}

@@ -26,8 +26,8 @@ type WakeLockApi = { request: (type: "screen") => Promise<WakeLockSentinelLike> 
 export function FeederMode({ username }: { username: string | null }) {
   if (!username) {
     return (
-      <div className="mt-8">
-        <p className="mb-4">Sign in so the photos are linked to you.</p>
+      <div className="card mt-6">
+        <p className="mb-4 font-bold">Sign in so the photos are linked to you.</p>
         <SignIn username={null} inline />
       </div>
     );
@@ -73,7 +73,7 @@ function Watching() {
         form.set("lat", String(where.lat));
         form.set("lng", String(where.lng));
       }
-      const res = await fetch("/api/catch", { method: "POST", body: form });
+      const res = await fetch("/api/spot", { method: "POST", body: form });
       const body = (await res.json().catch(() => ({}))) as { state?: State; catId?: string | null; error?: string };
       if (!alive.current) return;
       if (res.status === 429) {
@@ -166,12 +166,12 @@ function Watching() {
   }, []);
 
   return (
-    <div className="mt-6 grid gap-4">
+    <div className="mt-5 grid gap-4">
       <LiveCamera onCapture={() => {}} onVideoReady={onVideoReady} hideShutter />
-      <p role="status" className="font-bold">
+      <p role="status" className="h2">
         {status}
       </p>
-      <p className="text-dusk">
+      <p className="soft">
         {sent} sent, {skipped} skipped. One photo at most every {COOLDOWN_MS / 1000} seconds.
       </p>
       {hint && <p className="note">{hint}</p>}

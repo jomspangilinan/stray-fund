@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "./db/client";
 import { cats, sightings, treatments, users } from "./db/schema";
-import { CAPTURED, toInt } from "./ledger";
+import { CAPTURED, getPoolStatus, toInt } from "./ledger";
 import type { Session } from "./session";
 import { getStorage } from "./storage";
 
@@ -334,7 +334,7 @@ export function publicAgentAction(row: AgentActionInput): PublicAgentAction {
 const MAX_AGENT_ACTIONS = 100;
 
 /** Newest first. The cat comes from the action's payout, or for funding from its recorded id. */
-export async function listAgentActions(): Promise<PublicAgentAction[]> {
+export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promise<PublicAgentAction[]> {
   const { rows } = await db.execute(sql`
     select a.id, a.action, a.reason, a.amount, a.status, a.paypal_ref, a.created_at, c.name as cat
     from agent_actions a
@@ -344,7 +344,7 @@ export async function listAgentActions(): Promise<PublicAgentAction[]> {
       case when a.inputs->>'catId' ~* ${UUID.source} then (a.inputs->>'catId')::uuid end
     )
     order by a.created_at desc, a.id desc
-    limit ${MAX_AGENT_ACTIONS}
+    limit ${Math.min(Math.max(1, Math.trunc(limit)), MAX_AGENT_ACTIONS)}
   `);
   return (rows as {
     id: string;
@@ -495,10 +495,10 @@ export async function getCatForViewer(id: string, session: Session | null): Prom
   return catForViewer(row, session, contextFor(id, sights, treats));
 }
 
-export type CollectionEntry = { cat: PublicCat; amount: number };
+export type HelpedEntry = { cat: PublicCat; amount: number };
 
 /** Net positive allocations from this user's captured donations, per cat, summed in SQL. */
-export async function getCollectionEntries(userId: string): Promise<CollectionEntry[]> {
+export async function getHelpedEntries(userId: string): Promise<HelpedEntry[]> {
   const res = await db.execute(sql`
     select a.cat_id, sum(a.amount)::bigint as amount
     from allocations a
@@ -524,8 +524,8 @@ export async function getCollectionEntries(userId: string): Promise<CollectionEn
   });
 }
 
-export async function getCollection(userId: string): Promise<PublicCat[]> {
-  return (await getCollectionEntries(userId)).map((e) => e.cat);
+export async function getHelped(userId: string): Promise<PublicCat[]> {
+  return (await getHelpedEntries(userId)).map((e) => e.cat);
 }
 
 /** Captured net from this user's donations that no cat holds yet. */
@@ -540,4 +540,34 @@ export async function getUnallocated(userId: string): Promise<number> {
   `);
   const n = toInt((res.rows[0] as { unallocated: unknown }).unallocated);
   return Math.max(0, n);
+}
+
+/**
+ * What the home screen shows. The only pool figure is what is free to fund the next cat, and the only
+ * agent text is the newest public action. Nothing here carries a location, an email or an agent input.
+ */
+export type HomeData = {
+  /** Centavos free in the pool, never negative. */
+  poolAvailable: number;
+  latestAction: PublicAgentAction | null;
+  /** The newest cats first, capped. */
+  cats: PublicCat[];
+  /** How many cats the list holds, which may exceed the cats shown on a short list. */
+  catCount: number;
+};
+
+const HOME_CATS = 5;
+
+export async function getHomeData(): Promise<HomeData> {
+  const [pool, actions, all] = await Promise.all([
+    db.transaction((tx) => getPoolStatus(tx)),
+    listAgentActions(1),
+    listCats("all"),
+  ]);
+  return {
+    poolAvailable: Math.max(0, pool.available),
+    latestAction: actions[0] ?? null,
+    cats: all.slice(0, HOME_CATS),
+    catCount: all.length,
+  };
 }

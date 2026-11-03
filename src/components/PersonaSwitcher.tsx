@@ -28,24 +28,24 @@ export function PersonaSwitcher({ current }: { current: string | null }) {
   }
 
   return (
-    <div className="border-b-2 border-ink bg-sign">
-      <div className="mx-auto flex max-w-xl flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm">
-        <span className="font-bold">Demo view</span>
-        <div role="group" aria-label="View the app as" className="flex gap-2">
+    <div className="bg-pale">
+      <div className="mx-auto flex max-w-2xl items-center gap-x-2 px-4 py-1 text-[0.8125rem]">
+        <span className="font-semibold text-soft">Demo view</span>
+        <div role="group" aria-label="View the app as" className="flex gap-1">
           {PERSONAS.map((p) => (
             <button
               key={p.key}
               type="button"
               onClick={() => pick(p.key)}
               aria-pressed={current === p.username}
-              className="min-h-9 rounded-md border-2 border-ink px-3 font-bold aria-pressed:bg-ink aria-pressed:text-paper"
+              className="press min-h-8 rounded-in px-2.5 font-bold text-main aria-pressed:bg-main aria-pressed:text-white"
             >
               {p.label}
             </button>
           ))}
         </div>
         {error && (
-          <span role="alert" className="font-bold">
+          <span role="alert" className="font-bold text-danger">
             {error}
           </span>
         )}

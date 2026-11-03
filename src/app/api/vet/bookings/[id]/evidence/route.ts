@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { RateLimited } from "@/server/catch";
+import { RateLimited } from "@/server/spot";
 import { describeError } from "@/server/errors";
 import { BodyTooLarge, parseForm, readLimited } from "@/server/http";
 import { InvalidPhoto, MAX_BYTES } from "@/server/photos";

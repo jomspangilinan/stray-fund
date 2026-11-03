@@ -143,10 +143,7 @@ export function LiveCamera({
 
   return (
     <div className="grid gap-4">
-      <div
-        className="relative aspect-[3/4] w-full overflow-hidden rounded-[6px] border-2 border-ink bg-ink"
-        style={{ boxShadow: "3px 3px 0 var(--ink)" }}
-      >
+      <div className="relative aspect-[3/4] max-h-[60dvh] w-full overflow-hidden rounded-out bg-ink">
         <video
           ref={videoRef}
           playsInline
@@ -156,7 +153,7 @@ export function LiveCamera({
           className={`h-full w-full object-cover ${live ? "" : "invisible"}`}
         />
         {!live && (
-          <div className="absolute inset-0 grid place-items-center p-6 text-center text-paper">
+          <div className="absolute inset-0 grid place-items-center p-6 text-center text-white">
             <CameraMessage status={status} />
           </div>
         )}

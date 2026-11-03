@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import { CatDetail } from "@/components/CatDetail";
+import { BlockSkeleton } from "@/components/Loading";
 import { getCatCard } from "@/server/public";
 
 export const metadata: Metadata = { title: "Cat | Stray Fund" };
@@ -17,8 +18,8 @@ async function Card({ params }: { params: Promise<{ id: string }> }) {
 
 export default function CatPage({ params }: PageProps<"/cats/[id]">) {
   return (
-    <main className="pt-4">
-      <Suspense fallback={<p className="text-dusk">Loading</p>}>
+    <main className="pt-2">
+      <Suspense fallback={<BlockSkeleton label="Loading the cat" />}>
         <Card params={params} />
       </Suspense>
     </main>

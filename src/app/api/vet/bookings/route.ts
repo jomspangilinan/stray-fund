@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { RateLimited } from "@/server/catch";
+import { RateLimited } from "@/server/spot";
 import { describeError } from "@/server/errors";
 import { isUuid, manilaDate } from "@/server/public";
 import { AuthError, requireRole } from "@/server/session";
