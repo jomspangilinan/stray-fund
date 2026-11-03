@@ -5,6 +5,7 @@ import { useState } from "react";
 import { AnotherNameButton } from "./AnotherNameButton";
 import { CatAvatar } from "./CatAvatar";
 import { EarTipAsk } from "./EarTipAsk";
+import { SaveImage } from "./SaveImage";
 import { SexAsk } from "./SexAsk";
 import { revealCopy, type RevealState } from "@/lib/spotCopy";
 import type { SpotReveal as Reveal } from "@/server/spotReveal";
@@ -115,6 +116,7 @@ export function SpotReveal({
           <button type="button" className="btn-quiet" onClick={onAgain}>
             Keep spotting
           </button>
+          {catId && reveal.photoUrl && state !== "needs_review" && <SaveImage catId={catId} />}
         </div>
       </div>
     </div>

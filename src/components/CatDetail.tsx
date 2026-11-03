@@ -9,6 +9,7 @@ import type { EarTipAnswer } from "./EarTipChoice";
 import { Progress } from "./CatRow";
 import { JourneyTimeline, niceDate } from "./JourneyTimeline";
 import { CatNameEditor } from "./CatNameEditor";
+import { SaveImage } from "./SaveImage";
 import { SexAsk } from "./SexAsk";
 
 export function CatDetail({
@@ -154,6 +155,7 @@ export function CatDetail({
       <Link href="/donate" className="btn-pop">
         Help fund the colony
       </Link>
+      {cat.photoUrl && <SaveImage catId={cat.id} />}
     </article>
   );
 }

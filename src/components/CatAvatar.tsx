@@ -197,8 +197,8 @@ export function CatAvatar({
       {d.face === "cheek" && <ellipse cx={d.flip ? 49.5 : 30.5} cy="39" rx="4.2" ry="3.2" fill={FUR[avatar.accent]} />}
       {ribbon === true && (
         <g className={ribbonPop === true ? "avatar-ribbon avatar-ribbon-pop" : "avatar-ribbon"}>
-          <path d="M40 21.6 L35.4 18.4 Q33.9 21.6 35.4 24.8 Z M40 21.6 L44.6 18.4 Q46.1 21.6 44.6 24.8 Z" fill={RIBBON} stroke={RIBBON_EDGE} strokeWidth="0.9" strokeLinejoin="round" />
-          <circle cx="40" cy="21.6" r="1.7" fill={RIBBON} stroke={RIBBON_EDGE} strokeWidth="0.9" />
+          <path d="M40 24.2 L35.9 21.5 Q34.6 24.2 35.9 26.9 Z M40 24.2 L44.1 21.5 Q45.4 24.2 44.1 26.9 Z" fill={RIBBON} stroke={RIBBON_EDGE} strokeWidth="0.9" strokeLinejoin="round" />
+          <circle cx="40" cy="24.2" r="1.7" fill={RIBBON} stroke={RIBBON_EDGE} strokeWidth="0.9" />
         </g>
       )}
       <g className="avatar-eyes">

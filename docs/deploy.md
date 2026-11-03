@@ -34,7 +34,7 @@ Both: Object Ownership "Bucket owner enforced" (the default), default encryption
 
 Set `S3_PUBLIC_BASE_URL` to `https://YOUR-PUBLIC-BUCKET.s3.ap-southeast-1.amazonaws.com`. The app builds photo URLs as that base plus `/photos/<uuid>.jpg`. If you would rather keep this bucket fully blocked, put CloudFront in front with origin access control and use the CloudFront domain as the base URL. That is more setup and is not needed for the demo.
 
-**CORS.** None is needed. Phones send the photo to the app (`POST /api/spot`), and the app writes to S3 from the server. Photos are shown in plain `<img>` tags (`unoptimized`), with no canvas reads, so the public bucket needs no CORS rule either.
+**CORS.** None is needed. Phones send the photo to the app (`POST /api/spot`), and the app writes to S3 from the server. Photos are shown in plain `<img>` tags (`unoptimized`). Save image draws a canvas, but it never reads the bucket from the browser: the app fetches the public photo itself and serves it from its own address (`/api/cats/<id>/keepsake/photo`), so the canvas is never tainted and the public bucket still needs no CORS rule. The web service does need to reach `S3_PUBLIC_BASE_URL` over https.
 
 ## 2. IAM key
 
