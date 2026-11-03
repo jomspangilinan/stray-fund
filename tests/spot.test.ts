@@ -30,6 +30,7 @@ import { POST as spotPost } from "../src/app/api/spot/route";
 const ASSESS = {
   is_cat: true,
   cat_visible_quality: "good",
+  reject_reason: "none",
   coat_pattern: "tabby",
   colors: ["orange"],
   markings: "white socks",
@@ -277,6 +278,29 @@ describe("processSpot: rejected photos", () => {
     expect(rows.at(-1)).toMatchObject({ state: "rejected", catId: null, publicReady: false, publicKey: null });
     expect(seen.match).toBe(0);
     expect(await catRows()).toHaveLength(1);
+  });
+
+  it.each([
+    ["screen_or_picture", "That looks like a screen or picture. We need a real cat."],
+    ["no_cat", "We couldn't find a cat in that photo."],
+    ["too_dark", "It's too dark to see the cat. Try somewhere brighter."],
+    ["too_blurry", "The photo is blurry. Hold still and try again."],
+    ["too_far", "The cat is too far away. Try a little closer."],
+    ["cat_hidden", "We can't see enough of the cat. Try another angle."],
+    ["none", "We couldn't use that photo. Try another one."],
+  ])("maps reject_reason %s to its fixed message", async (reason, message) => {
+    const u = await makeUser();
+    script.assess = () => assessWith({ is_cat: false, reject_reason: reason });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect(out.state).toBe("rejected");
+    expect(out.message).toBe(message);
+  });
+
+  it("uses the reason for a poor photo of a cat, and the fallback for an unknown reason", async () => {
+    const u = await makeUser();
+    script.assess = () => assessWith({ cat_visible_quality: "poor", reject_reason: "too_dark" });
+    const a = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect(a.message).toBe("It's too dark to see the cat. Try somewhere brighter.");
   });
 });
 
@@ -702,6 +726,7 @@ describe("POST /api/spot", () => {
     await signIn();
     const res = await post(await body(), { "content-length": String(11 * 1024 * 1024) });
     expect(res.status).toBe(413);
+    expect(((await res.json()) as { error: string }).error).toBe("That photo is too large. Take it again.");
     expect(await sightingRows()).toHaveLength(0);
   });
 
@@ -733,6 +758,9 @@ describe("POST /api/spot", () => {
     const png = new Blob([new Uint8Array(await jpeg())], { type: "image/png" });
     const res = await post(await body({ photo: png }));
     expect(res.status).toBe(415);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "That photo type is not supported. Take it again with the camera.",
+    );
   });
 
   it("returns 400 for bytes that are not a real image", async () => {
@@ -740,6 +768,9 @@ describe("POST /api/spot", () => {
     const junk = new Blob(["hello"], { type: "image/jpeg" });
     const res = await post(await body({ photo: junk }));
     expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "We couldn't read that photo. Take it again with the camera.",
+    );
   });
 
   it("returns 429 past 10 sightings a minute for one user", async () => {
@@ -747,6 +778,9 @@ describe("POST /api/spot", () => {
     for (let i = 0; i < 10; i++) await pendingSighting(5, u.id);
     const res = await post(await body());
     expect(res.status).toBe(429);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "Too many photos in the last minute. Wait a moment and try again.",
+    );
     expect(seen.assess).toBe(0);
   });
 });

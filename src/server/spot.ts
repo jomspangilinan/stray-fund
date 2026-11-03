@@ -31,24 +31,39 @@ export class RateLimited extends Error {
   }
 }
 
+const REJECT_FALLBACK = "We couldn't use that photo. Try another one.";
+
 const MESSAGES: Record<SpotState, string> = {
   new_cat: "Thanks for spotting! We started a card for this cat.",
   matched: "Thanks for spotting! We added your photo to their card.",
   needs_review: "Thanks for spotting! A caretaker will take a look.",
-  rejected:
-    "Thanks for trying! We could not see a cat clearly. Try again a little closer, in good light.",
+  rejected: REJECT_FALLBACK,
   queued_for_ai: "Saved. We'll finish this soon.",
 };
 
-function result(state: SpotState, sightingId: string, catId?: string | null): SpotResult {
-  return catId ? { state, catId, sightingId, message: MESSAGES[state] } : { state, sightingId, message: MESSAGES[state] };
+const REJECT_MESSAGES: Record<string, string> = {
+  screen_or_picture: "That looks like a screen or picture. We need a real cat.",
+  no_cat: "We couldn't find a cat in that photo.",
+  too_dark: "It's too dark to see the cat. Try somewhere brighter.",
+  too_blurry: "The photo is blurry. Hold still and try again.",
+  too_far: "The cat is too far away. Try a little closer.",
+  cat_hidden: "We can't see enough of the cat. Try another angle.",
+};
+
+/** Only these fixed lines reach the visitor, never the AI's own text. A missing reason (an old row) reads as "none". */
+function rejectedMessage(a: { reject_reason?: string } | null | undefined): string {
+  return REJECT_MESSAGES[a?.reject_reason ?? "none"] ?? REJECT_FALLBACK;
+}
+
+function result(state: SpotState, sightingId: string, catId?: string | null, message = MESSAGES[state]): SpotResult {
+  return catId ? { state, catId, sightingId, message } : { state, sightingId, message };
 }
 
 type SightingRow = typeof sightings.$inferSelect;
 
 function resultOf(s: SightingRow): SpotResult {
   const state: SpotState = s.state === "pending" ? "queued_for_ai" : (s.state as SpotState);
-  return result(state, s.id, s.catId);
+  return result(state, s.id, s.catId, state === "rejected" ? rejectedMessage(s.assessment as { reject_reason?: string } | null) : undefined);
 }
 
 export type MatchOutcome = { catId: string | null; confidence: number; candidateIds: string[] };
@@ -253,7 +268,7 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
 
     if (!a.is_cat || a.cat_visible_quality === "poor") {
       await tx.update(sightings).set({ state: "rejected", assessment: a }).where(eq(sightings.id, s.id));
-      return { done: true as const, result: result("rejected", s.id), sighting: s, catId: null };
+      return { done: true as const, result: result("rejected", s.id, null, rejectedMessage(a)), sighting: s, catId: null };
     }
 
     let matchedCat: typeof cats.$inferSelect | undefined;

@@ -31,11 +31,11 @@ export async function POST(req: Request) {
     await assertUnderRateLimit(session.userId);
 
     const form = await parseForm(req, await readLimited(req, MAX_BODY));
-    if (!form) return fail("Send the photo as a form", 400);
+    if (!form) return fail("The photo did not send properly. Take it again.", 400);
 
     const photo = form.get("photo");
-    if (!(photo instanceof Blob) || photo.size === 0) return fail("A photo is required", 400);
-    if (photo.type !== "image/jpeg") return fail("The photo must be a JPEG", 415);
+    if (!(photo instanceof Blob) || photo.size === 0) return fail("No photo was received. Take it again and send it.", 400);
+    if (photo.type !== "image/jpeg") return fail("That photo type is not supported. Take it again with the camera.", 415);
 
     const lat = coordinate(form.get("lat"), -90, 90);
     const lng = coordinate(form.get("lng"), -180, 180);
@@ -69,12 +69,14 @@ export async function POST(req: Request) {
     });
   } catch (e) {
     if (e instanceof AuthError) return fail(e.message, e.status);
-    if (e instanceof BodyTooLarge) return fail("That photo is too large", 413);
+    if (e instanceof BodyTooLarge) return fail("That photo is too large. Take it again.", 413);
     if (e instanceof RateLimited) return fail(e.message, 429);
     if (e instanceof InvalidPhoto) {
-      return fail(e.reason === "too_large" ? "That photo is too large" : "That does not look like a photo", e.reason === "too_large" ? 413 : 400);
+      return e.reason === "too_large"
+        ? fail("That photo is too large. Take it again.", 413)
+        : fail("We couldn't read that photo. Take it again with the camera.", 400);
     }
     console.error("Spot failed", describeError(e));
-    return fail("Could not save that photo", 500);
+    return fail("Something went wrong on our side and the photo was not saved. Try again in a moment.", 500);
   }
 }

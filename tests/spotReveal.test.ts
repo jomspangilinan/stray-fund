@@ -121,6 +121,7 @@ describe("buildReveal", () => {
 const ASSESS = {
   is_cat: true,
   cat_visible_quality: "good",
+  reject_reason: "none",
   coat_pattern: "calico",
   colors: ["orange", "SECRET-COLOUR"],
   markings: "SECRET-MARKINGS",

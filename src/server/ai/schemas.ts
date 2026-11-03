@@ -25,9 +25,20 @@ export const COAT_PATTERNS = [
   "other",
 ] as const;
 
+export const REJECT_REASONS = [
+  "screen_or_picture",
+  "no_cat",
+  "too_dark",
+  "too_blurry",
+  "too_far",
+  "cat_hidden",
+  "none",
+] as const;
+
 export const AssessmentSchema = z.object({
   is_cat: z.boolean(),
   cat_visible_quality: z.enum(["good", "poor"]),
+  reject_reason: z.enum(REJECT_REASONS),
   coat_pattern: z.enum(COAT_PATTERNS),
   colors: z.array(z.string().max(30)).max(4),
   markings: z.string().max(200),

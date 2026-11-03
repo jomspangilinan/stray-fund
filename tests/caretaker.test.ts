@@ -553,6 +553,7 @@ describe("agent review requests", () => {
 const ASSESS = {
   is_cat: true,
   cat_visible_quality: "good",
+  reject_reason: "none",
   coat_pattern: "tabby",
   colors: ["orange"],
   markings: "white socks",
