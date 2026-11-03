@@ -132,6 +132,7 @@ export async function signInDonor(rawUsername: unknown): Promise<Session> {
 
 /** Demo only: a persona key names a seeded account. Never a role from the client. */
 export const PERSONAS = {
+  neighbour: "demo_neighbour",
   caretaker: "demo_caretaker",
   vet: "demo_vet",
 } as const;

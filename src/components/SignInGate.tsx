@@ -2,11 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { GATE_PERSONA } from "@/lib/demoRoles";
 import { SignIn } from "./SignIn";
 
 /**
  * What a signed-out visitor sees on Spot, Donate and Helped: what the page does, then one tap into the demo
- * (the existing simulated caretaker account) or a typed name. Signing in refreshes this same page, so the
+ * (a simulated demo neighbour, never staff) or a typed name. Signing in refreshes this same page, so the
  * person lands where they were headed. The one-tap button exists only in demo mode.
  */
 export function SignInGate({ demo, children }: { demo: boolean; children: React.ReactNode }) {
@@ -21,7 +22,7 @@ export function SignInGate({ demo, children }: { demo: boolean; children: React.
       const res = await fetch("/api/session", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ persona: "caretaker" }),
+        body: JSON.stringify({ persona: GATE_PERSONA }),
       });
       if (!res.ok) {
         setError("Could not start the demo. Pick a name instead.");
@@ -44,7 +45,7 @@ export function SignInGate({ demo, children }: { demo: boolean; children: React.
             <button type="button" className="btn-pop w-full" onClick={tryDemo} disabled={busy}>
               {busy ? "Starting" : "Try it now"}
             </button>
-            <p className="small soft">Uses the demo caretaker account. Simulated, not a real sign-in.</p>
+            <p className="small soft">Uses a demo neighbour account. Simulated, not a real sign-in.</p>
             {error && (
               <p role="alert" className="font-bold text-danger">
                 {error}

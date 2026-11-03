@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { closePool, db } from "../src/server/db/client";
-import { allowedPayees, donations, users } from "../src/server/db/schema";
+import { allowedPayees, cats, donations, users } from "../src/server/db/schema";
 import { truncateAll } from "./helpers/db";
 import { makeDonor, makePendingOrder } from "./helpers/donationFixtures";
 
@@ -16,6 +16,9 @@ import { POST as sessionPost, DELETE as sessionDelete } from "../src/app/api/ses
 import { POST as capturePost } from "../src/app/api/donations/[orderId]/capture/route";
 import { POST as donationPost } from "../src/app/api/donations/route";
 import { ensureDemoPersonas } from "../src/server/demoPersonas";
+import { GET as catGet } from "../src/app/api/cats/[id]/route";
+import { POST as caretakerPost } from "../src/app/api/caretaker/[action]/route";
+import { DEMO_ROLES, GATE_PERSONA } from "../src/lib/demoRoles";
 import {
   AuthError,
   getSession,
@@ -175,12 +178,53 @@ describe("persona switching", () => {
     await ensureDemoPersonas();
     await Promise.all([ensureDemoPersonas(), ensureDemoPersonas()]);
     const all = await db.select().from(users);
-    expect(all.map((u) => u.username).sort()).toEqual(["demo_caretaker", "demo_vet"]);
+    expect(all.map((u) => u.username).sort()).toEqual(["demo_caretaker", "demo_neighbour", "demo_vet"]);
     const vet = all.find((u) => u.username === "demo_vet")!;
     expect(vet).toMatchObject({ role: "vet", paypalEmail: "vet@example.test" });
     expect(all.find((u) => u.username === "demo_caretaker")!.role).toBe("caretaker");
     const payees = await db.select().from(allowedPayees);
     expect(payees).toEqual([{ userId: vet.id, kind: "vet" }]);
+  });
+});
+
+describe("demo neighbour", () => {
+  it("is not available when DEMO_MODE is off", async () => {
+    vi.stubEnv("DEMO_MODE", "false");
+    const res = await post({ persona: "neighbour" });
+    expect(res.status).toBe(403);
+    expect(cookieValue(res)).toBe("");
+    expect(await db.select().from(users)).toHaveLength(0);
+  });
+
+  it("is an ordinary donor with no desk access", async () => {
+    keepCookie(await post({ persona: "neighbour" }));
+    expect(await getSession()).toMatchObject({ role: "donor", username: "demo_neighbour" });
+    await expect(requireRole("caretaker")).rejects.toMatchObject({ status: 403 });
+    await expect(requireRole("vet")).rejects.toMatchObject({ status: 403 });
+    const res = await caretakerPost(
+      new Request("http://localhost/x", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }),
+      { params: Promise.resolve({ action: "approve-name" }) },
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("sees no exact location on a cat", async () => {
+    const [cat] = await db
+      .insert(cats)
+      .values({ name: "Mimi", areaName: "Brgy. San Antonio, near the market", exactLat: 10.987654321, exactLng: 120.123456789, fuzzedLat: 10.5, fuzzedLng: 120.6 })
+      .returning();
+    keepCookie(await post({ persona: "neighbour" }));
+    const res = await catGet(new Request("http://localhost/x"), { params: Promise.resolve({ id: cat.id }) });
+    const text = JSON.stringify(await res.json());
+    expect(text).not.toContain("10.987654321");
+    expect(text).not.toContain("120.123456789");
+  });
+
+  it("is what Try it now signs in as, and the roles strip offers it", async () => {
+    expect(GATE_PERSONA).toBe("neighbour");
+    expect(DEMO_ROLES.map((r) => r.key)).toEqual(["neighbour", "caretaker", "vet"]);
+    keepCookie(await post({ persona: GATE_PERSONA }));
+    expect((await getSession())?.role).toBe("donor");
   });
 });
 

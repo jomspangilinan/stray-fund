@@ -5,10 +5,14 @@ import { allowedPayees, users } from "./db/schema";
 /** Invented, like the demo coordinates. Printed on the demo vet's receipts. */
 export const DEMO_CLINIC_NAME = "Brgy. San Antonio Vet Clinic";
 
-/** Seeds the demo caretaker and vet. Safe to call any number of times. */
+/** Seeds the demo neighbour (an ordinary donor), caretaker and vet. Safe to call any number of times. */
 export async function ensureDemoPersonas(): Promise<void> {
   const vetEmail = process.env.PAYPAL_VET_EMAIL || null;
   await db.transaction(async (tx) => {
+    await tx
+      .insert(users)
+      .values({ username: "demo_neighbour", role: "donor" })
+      .onConflictDoNothing();
     await tx
       .insert(users)
       .values({ username: "demo_caretaker", role: "caretaker" })
