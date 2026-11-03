@@ -4,6 +4,8 @@
  * frame leaves the device for this step. Packages are pinned in package.json.
  */
 import "@tensorflow/tfjs-backend-webgl";
+// coco-ssd switches to the cpu backend while it post-processes boxes, so cpu must be registered too.
+import "@tensorflow/tfjs-backend-cpu";
 import * as tf from "@tensorflow/tfjs-core";
 import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import type { Prediction } from "./catDetect";
