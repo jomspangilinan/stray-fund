@@ -4,7 +4,8 @@ import { eq } from "drizzle-orm";
 import { closePool, db } from "../src/server/db/client";
 import { aiUsage } from "../src/server/db/schema";
 import { truncateAll } from "./helpers/db";
-import { BETA, MODEL, setAiForTests, type AiTransport } from "../src/server/ai/client";
+import { setAiForTests, type AiTransport } from "../src/server/ai/client";
+import { DEFAULT_MODEL, createBedrockClient, supportsEffort } from "../src/server/ai/bedrock";
 import { consumeAiBudget } from "../src/server/ai/budget";
 import { assessPhoto } from "../src/server/ai/assess";
 import { matchCat } from "../src/server/ai/match";
@@ -60,10 +61,8 @@ function install(impl: AiTransport) {
 type Block = { type: string; source?: unknown };
 type Sent = {
   model: string;
-  betas: string[];
-  fallbacks: string;
   system: string;
-  output_config: { effort: string; format: { type: string } };
+  output_config: { effort?: string; format: { type: string } };
   messages: { content: Block[] }[];
 };
 
@@ -74,11 +73,13 @@ function lastParams(): Sent {
 beforeEach(async () => {
   await truncateAll();
   delete process.env.AI_DAILY_CALL_CAP;
+  vi.stubEnv("AI_MODEL", "");
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
   setAiForTests(null);
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -87,19 +88,16 @@ afterAll(async () => {
 });
 
 describe("request shape", () => {
-  it("assessPhoto sends model, beta, fallbacks, effort and one base64 JPEG", async () => {
+  it("assessPhoto sends the default model, a schema format and one base64 JPEG, with no effort on Haiku 4.5", async () => {
     install(() => ok(ASSESSMENT));
     const r = await assessPhoto(JPEG);
     expect(r).toEqual({ ok: true, data: ASSESSMENT });
     const p = lastParams();
-    expect(p.model).toBe("claude-opus-5-5");
-    expect(MODEL).toBe("claude-opus-5-5");
-    expect(p.betas).toEqual(["server-side-fallback-2026-07-01"]);
-    expect(BETA).toBe("server-side-fallback-2026-07-01");
-    expect(p.fallbacks).toBe("default");
-    expect(p.output_config.effort).toBe("medium");
+    expect(p.model).toBe("global.anthropic.claude-haiku-4-5-20251001-v1:0");
+    expect(DEFAULT_MODEL).toBe(p.model);
+    expect(p.output_config.effort).toBeUndefined();
     expect(p.output_config.format.type).toBe("json_schema");
-    for (const k of ["temperature", "top_p", "top_k", "thinking", "tool_choice", "tools"]) {
+    for (const k of ["temperature", "top_p", "top_k", "thinking", "tool_choice", "tools", "betas", "fallbacks"]) {
       expect(Object.keys(p)).not.toContain(k);
     }
     const content = p.messages[0].content;
@@ -116,7 +114,27 @@ describe("request shape", () => {
     expect(p.system).toMatch(/normalized|0 to 1/i);
   });
 
-  it("uses medium for match and high for receipt and ear-tip checks", async () => {
+  it("sends effort only to models that accept it, taken from AI_MODEL", async () => {
+    const cases: [string, string | undefined][] = [
+      ["global.anthropic.claude-opus-4-6-v1", "medium"],
+      ["global.anthropic.claude-sonnet-4-6", "medium"],
+      ["anthropic.claude-opus-4-5-20251101-v1:0", "medium"],
+      ["global.anthropic.claude-sonnet-4-5-20250929-v1:0", undefined],
+      ["global.anthropic.claude-haiku-4-5-20251001-v1:0", undefined],
+    ];
+    for (const [model, effort] of cases) {
+      vi.stubEnv("AI_MODEL", model);
+      install(() => ok(ASSESSMENT));
+      await assessPhoto(JPEG);
+      expect(lastParams().model).toBe(model);
+      expect(lastParams().output_config.effort).toBe(effort);
+      expect(Object.keys(lastParams().output_config)).toEqual(effort ? ["effort", "format"] : ["format"]);
+      expect(supportsEffort(model)).toBe(effort !== undefined);
+    }
+  });
+
+  it("uses medium for match and high for receipt and ear-tip checks on an effort model", async () => {
+    vi.stubEnv("AI_MODEL", "global.anthropic.claude-opus-4-6-v1");
     install(() => ok({ match_cat_id: null, confidence: 0.2, reason: "unsure" }));
     await matchCat(JPEG, [{ catId: "a", photos: [JPEG] }]);
     expect(lastParams().output_config.effort).toBe("medium");
@@ -190,18 +208,42 @@ describe("failure mapping", () => {
     install(() => ok({ ...ASSESSMENT, ear_tip_confidence: 1.5 }));
     expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "unparseable" });
   });
+});
 
-  it("gives unavailable, not a crash, when no API key is configured", async () => {
-    const saved = { k: process.env.ANTHROPIC_API_KEY, t: process.env.ANTHROPIC_AUTH_TOKEN };
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.ANTHROPIC_AUTH_TOKEN;
-    setAiForTests(null); // also drops any cached real client
-    try {
-      expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "unavailable" });
-    } finally {
-      if (saved.k !== undefined) process.env.ANTHROPIC_API_KEY = saved.k;
-      if (saved.t !== undefined) process.env.ANTHROPIC_AUTH_TOKEN = saved.t;
-    }
+describe("bedrock credentials", () => {
+  const keys = { AccessKeyId: "AKIAFAKE", SecretAccessKey: "secret-fake", SessionToken: "token-fake" };
+
+  it("in development with AWS_PROFILE, asks the AWS CLI for short-lived keys and refreshes them after 10 minutes", () => {
+    const exportCredentials = vi.fn(() => keys);
+    let now = 1_000_000;
+    const get = createBedrockClient({ env: { NODE_ENV: "development", AWS_PROFILE: "dev" }, exportCredentials, now: () => now });
+    const a = get();
+    expect(exportCredentials).toHaveBeenCalledWith("dev");
+    expect(a.awsAccessKey).toBe("AKIAFAKE");
+    expect(a.awsRegion).toBe("ap-southeast-1");
+    expect(get()).toBe(a);
+    now += 10 * 60_000 + 1;
+    expect(get()).not.toBe(a);
+    expect(exportCredentials).toHaveBeenCalledTimes(2);
+  });
+
+  it("in production never shells out, even when AWS_PROFILE is set", () => {
+    const exportCredentials = vi.fn(() => keys);
+    const c = createBedrockClient({
+      env: { NODE_ENV: "production", AWS_PROFILE: "dev", AWS_REGION: "ap-southeast-2" },
+      exportCredentials,
+      now: () => 0,
+    })();
+    expect(exportCredentials).not.toHaveBeenCalled();
+    expect(c.awsRegion).toBe("ap-southeast-2");
+    expect(c.awsAccessKey).toBeNull();
+  });
+
+  it("without AWS_PROFILE uses the standard credential chain", () => {
+    const exportCredentials = vi.fn(() => keys);
+    const c = createBedrockClient({ env: { NODE_ENV: "development" }, exportCredentials, now: () => 0 })();
+    expect(exportCredentials).not.toHaveBeenCalled();
+    expect(c.awsAccessKey).toBeNull();
   });
 });
 

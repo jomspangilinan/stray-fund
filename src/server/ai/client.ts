@@ -1,52 +1,60 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type * as z from "zod/v4";
+import { buildBedrockParams, bedrockModel, createBedrockClient, type BedrockParams } from "./bedrock";
+import { DEFAULT_CLI_MODEL, runCli } from "./cli";
 import { consumeAiBudget } from "./budget";
+import type { AiRequest, Effort, Result } from "./types";
 
-export const MODEL = "claude-opus-5-5";
-export const BETA = "server-side-fallback-2026-07-01";
-const MAX_TOKENS = 8000;
+export type { Effort, Result };
+export { setCliExecForTests } from "./cli";
 
-export type Effort = "low" | "medium" | "high";
+export type AiProvider = "claude-cli" | "bedrock";
 
-export type Result<T> =
-  | { ok: true; data: T }
-  | { ok: false; reason: "refusal" | "budget" | "unavailable" | "unparseable" };
-
-type BetaCreateParams = Parameters<Anthropic["beta"]["messages"]["create"]>[0];
-
-/** What the rest of the code needs back from one call. */
+/** What the rest of the code needs back from one Bedrock call. */
 export type AiResponse = {
   stop_reason: string | null;
   content: { type: string; text?: string }[];
   usage?: { input_tokens: number; output_tokens: number };
 };
 
-/** The one seam to the SDK. Tests replace it with a fake. */
-export type AiTransport = (params: BetaCreateParams) => Promise<AiResponse>;
+/** The seam to Bedrock. Tests replace it with a fake, which also selects the bedrock provider. */
+export type AiTransport = (params: BedrockParams) => Promise<AiResponse>;
 
 let override: AiTransport | null = null;
-let real: AiTransport | undefined;
 let usageListener: ((u: { input_tokens: number; output_tokens: number }) => void) | null = null;
+let bedrockClient: ReturnType<typeof createBedrockClient> | undefined;
 
 export function setAiForTests(transport: AiTransport | null): void {
   override = transport;
-  real = undefined; // drop any cached real client so env changes take effect
+  bedrockClient = undefined; // drop any cached client so env changes take effect
 }
 
-/** Lets a script total token cost. Not used by the app. */
+/** Lets a script total token cost. Bedrock only. Not used by the app. */
 export function setAiUsageListener(fn: typeof usageListener): void {
   usageListener = fn;
 }
 
-function transport(): AiTransport {
-  if (override) return override;
-  if (!real) {
-    // Built on first call so a missing key never breaks import. The SDK reads its own credentials.
-    const client = new Anthropic();
-    real = async (params) => (await client.beta.messages.create({ ...params, stream: false })) as AiResponse;
+/**
+ * Production always uses bedrock and refuses anything else. Elsewhere the default is claude-cli,
+ * which runs on the developer's own subscription and must never run on a server.
+ */
+export function resolveProvider(env: Record<string, string | undefined> = process.env): AiProvider {
+  const production = env.NODE_ENV === "production";
+  const raw = env.AI_PROVIDER?.trim();
+  const provider = raw ? raw : production ? "bedrock" : "claude-cli";
+  if (provider === "bedrock") return "bedrock";
+  if (provider === "claude-cli") {
+    if (production) throw new Error("AI_PROVIDER=claude-cli is not allowed in production");
+    return "claude-cli";
   }
-  return real;
+  throw new Error("Unknown AI_PROVIDER");
+}
+
+function bedrockTransport(): AiTransport {
+  if (override) return override;
+  bedrockClient ??= createBedrockClient();
+  const get = bedrockClient;
+  return async (params) => (await get().messages.create(params)) as AiResponse;
 }
 
 function logFailure(e: unknown): void {
@@ -56,6 +64,30 @@ function logFailure(e: unknown): void {
   console.error(`[ai] call failed: ${name}${status !== undefined ? ` status=${status}` : ""}`);
 }
 
+type Outcome = { ok: true; value: unknown } | { ok: false; reason: "refusal" | "unavailable" | "unparseable" };
+
+async function viaBedrock(req: AiRequest): Promise<Outcome> {
+  let res: AiResponse;
+  try {
+    res = await bedrockTransport()(buildBedrockParams(req, bedrockModel()));
+  } catch (e) {
+    logFailure(e);
+    // HTTP, connection and missing-credential failures all mean the service cannot be used.
+    return { ok: false, reason: "unavailable" };
+  }
+  if (res.usage) usageListener?.(res.usage);
+  if (res.stop_reason === "refusal") return { ok: false, reason: "refusal" };
+  // A truncated reply is never trusted, even if the JSON happens to close.
+  if (res.stop_reason === "max_tokens") return { ok: false, reason: "unparseable" };
+  const text = res.content.find((b) => b.type === "text")?.text;
+  if (typeof text !== "string") return { ok: false, reason: "unparseable" };
+  try {
+    return { ok: true, value: JSON.parse(text) };
+  } catch {
+    return { ok: false, reason: "unparseable" };
+  }
+}
+
 export async function parseVision<T>(args: {
   system: string;
   images: Buffer[];
@@ -63,6 +95,15 @@ export async function parseVision<T>(args: {
   schema: z.ZodType<T>;
   effort: Effort;
 }): Promise<Result<T>> {
+  let provider: AiProvider;
+  try {
+    provider = override ? "bedrock" : resolveProvider();
+  } catch (e) {
+    logFailure(e);
+    return { ok: false, reason: "unavailable" };
+  }
+
+  // The CLI route spends subscription quota, so it is counted like paid calls to stop loops.
   try {
     if (!(await consumeAiBudget())) return { ok: false, reason: "budget" };
   } catch (e) {
@@ -70,47 +111,12 @@ export async function parseVision<T>(args: {
     return { ok: false, reason: "unavailable" };
   }
 
-  let res: AiResponse;
-  try {
-    res = await transport()({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      betas: [BETA],
-      fallbacks: "default",
-      system: args.system,
-      output_config: { effort: args.effort, format: zodOutputFormat(args.schema) },
-      messages: [
-        {
-          role: "user",
-          content: [
-            ...args.images.map((img) => ({
-              type: "image" as const,
-              source: { type: "base64" as const, media_type: "image/jpeg" as const, data: img.toString("base64") },
-            })),
-            { type: "text" as const, text: args.text },
-          ],
-        },
-      ],
-    });
-  } catch (e) {
-    logFailure(e);
-    // HTTP, connection and missing-credential failures all mean the service cannot be used.
-    return { ok: false, reason: "unavailable" };
-  }
-
-  if (res.usage) usageListener?.(res.usage);
-  if (res.stop_reason === "refusal") return { ok: false, reason: "refusal" };
-  // A truncated reply is never trusted, even if the JSON happens to close.
-  if (res.stop_reason === "max_tokens") return { ok: false, reason: "unparseable" };
-  const text = res.content.find((b) => b.type === "text")?.text;
-  if (typeof text !== "string") return { ok: false, reason: "unparseable" };
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    return { ok: false, reason: "unparseable" };
-  }
-  const checked = args.schema.safeParse(json);
+  const out =
+    provider === "bedrock"
+      ? await viaBedrock(args)
+      : await runCli(args, process.env.AI_CLI_MODEL?.trim() || DEFAULT_CLI_MODEL);
+  if (!out.ok) return out;
+  const checked = args.schema.safeParse(out.value);
   if (!checked.success) return { ok: false, reason: "unparseable" };
   return { ok: true, data: checked.data };
 }
