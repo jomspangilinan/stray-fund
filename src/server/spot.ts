@@ -3,13 +3,12 @@ import { COLONY } from "@/lib/config";
 import { assessPhoto, type Assessment } from "./ai/assess";
 import { AssessmentSchema } from "./ai/schemas";
 import { matchCat } from "./ai/match";
-import { db, type Tx } from "./db/client";
+import { db, lockColony, type Tx } from "./db/client";
+import { applyRequestedEarTip, type EarTipValue } from "./earTipFlags";
 import { cats, guardrails, sightings } from "./db/schema";
-import { transitionCat } from "./catTransitions";
 import { fuzzLocation } from "./location";
 import { publishScrubbed, storeOriginal, type Box } from "./photos";
 import { getStorage } from "./storage";
-import { enqueueWakeup } from "./wakeups";
 
 export type Sex = "female" | "male" | "unknown";
 export type SpotState = "new_cat" | "matched" | "needs_review" | "rejected" | "queued_for_ai";
@@ -72,6 +71,8 @@ export async function processSpot(i: {
   lng: number | null;
   userId: string;
   sex?: Sex;
+  /** What the finder said about the ear tip. Left out for Not sure. */
+  earTip?: EarTipValue;
 }): Promise<SpotResult> {
   await assertUnderRateLimit(i.userId);
   const { key } = await storeOriginal(i.jpeg);
@@ -92,6 +93,7 @@ export async function processSpot(i: {
         exactLat: hasPoint ? i.lat : null,
         exactLng: hasPoint ? i.lng : null,
         requestedSex: i.sex ?? null,
+        requestedEarTip: i.earTip ?? null,
       })
       .returning({ id: sightings.id });
     return row;
@@ -239,13 +241,14 @@ async function uniqueName(tx: Tx, base: string): Promise<string> {
  */
 export async function applyAssessment(sightingId: string, a: Assessment, m: MatchOutcome): Promise<SpotResult> {
   const outcome = await db.transaction(async (tx) => {
+    // Colony lock first, like every other path, because the finder's ear-tip answer can move a cat.
+    await lockColony(tx);
     const [s] = await tx.select().from(sightings).where(eq(sightings.id, sightingId)).for("update");
     if (!s) throw new Error(`Sighting not found: ${sightingId}`);
     if (s.state !== "pending") return { done: false as const, result: resultOf(s), sighting: s };
 
     const [limits] = await tx.select().from(guardrails).where(eq(guardrails.id, 1));
     if (!limits) throw new Error("Guardrails row is missing");
-    const earConfident = a.ear_tip !== "unknown" && a.ear_tip_confidence >= limits.earTipConfidenceMin;
 
     if (!a.is_cat || a.cat_visible_quality === "poor") {
       await tx.update(sightings).set({ state: "rejected", assessment: a }).where(eq(sightings.id, s.id));
@@ -259,23 +262,14 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
 
     if (matchedCat && m.confidence >= limits.matchConfidenceMin) {
       const cat = matchedCat;
-      let review = false;
-      if (earConfident) {
-        if (cat.status === "spotted" && cat.earTipped === null) {
-          await resolveEarTip(tx, cat.id, a.ear_tip === "present");
-        } else if (cat.status !== "spotted" && a.ear_tip === "present" && cat.earTipped !== true) {
-          // Money may be moving for this cat, so a person decides.
-          review = true;
-        }
-      }
       const flags = [...new Set([...cat.flags, ...flagsOf(a)])];
       if (flags.length !== cat.flags.length) await tx.update(cats).set({ flags }).where(eq(cats.id, cat.id));
-      const stored = review ? { ...a, review_reason: "ear_tip_changed" } : a;
       await tx
         .update(sightings)
-        .set({ catId: cat.id, state: review ? "needs_review" : "matched", matchConfidence: m.confidence, assessment: stored })
+        .set({ catId: cat.id, state: "matched", matchConfidence: m.confidence, assessment: a })
         .where(eq(sightings.id, s.id));
-      return { done: true as const, result: result(review ? "needs_review" : "matched", s.id, cat.id), sighting: s, catId: cat.id };
+      await applyRequestedEarTip(tx, s, cat.id);
+      return { done: true as const, result: result("matched", s.id, cat.id), sighting: s, catId: cat.id };
     }
 
     if (matchedCat && m.confidence >= MID_BAND_MIN) {
@@ -292,23 +286,12 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
     }
 
     const cat = await insertNewCat(tx, s, a);
-    if (earConfident) await resolveEarTip(tx, cat.id, a.ear_tip === "present");
-    const review = !earConfident;
     await tx
       .update(sightings)
-      .set({
-        catId: cat.id,
-        state: review ? "needs_review" : "new_cat",
-        matchConfidence: m.catId ? m.confidence : null,
-        assessment: review ? { ...a, review_reason: "ear_tip" } : a,
-      })
+      .set({ catId: cat.id, state: "new_cat", matchConfidence: m.catId ? m.confidence : null, assessment: a })
       .where(eq(sightings.id, s.id));
-    return {
-      done: true as const,
-      result: result(review ? "needs_review" : "new_cat", s.id, cat.id),
-      sighting: s,
-      catId: cat.id,
-    };
+    await applyRequestedEarTip(tx, s, cat.id);
+    return { done: true as const, result: result("new_cat", s.id, cat.id), sighting: s, catId: cat.id };
   });
 
   if (outcome.done && outcome.catId) {
@@ -349,18 +332,6 @@ export async function insertNewCat(tx: Tx, s: SightingRow, a: Assessment | null)
     })
     .returning({ id: cats.id });
   return cat;
-}
-
-/** Ear-tipped cats are already neutered. Clean ears mean the cat joins the queue. */
-export async function resolveEarTip(tx: Tx, catId: string, tipped: boolean): Promise<void> {
-  if (tipped) {
-    await tx.update(cats).set({ earTipped: true }).where(eq(cats.id, catId));
-    await transitionCat(tx, catId, "neutered");
-    return;
-  }
-  await tx.update(cats).set({ earTipped: false, queuedAt: new Date() }).where(eq(cats.id, catId));
-  await transitionCat(tx, catId, "queued");
-  await enqueueWakeup(tx, "cat_queued", { catId });
 }
 
 /** Only an assessment that listed its sensitive regions (even none) makes a photo public. Never fails the spot. */

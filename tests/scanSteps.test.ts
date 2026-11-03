@@ -51,19 +51,34 @@ describe("a reply that never ran the checks", () => {
     expect(out).not.toContain('data-done="true"');
     expect(out).not.toContain('data-active="true"');
   });
+
+  it("says in words for a screen reader that no step was checked", () => {
+    for (const state of ["rejected", "queued_for_ai"] as const) {
+      const out = renderToStaticMarkup(createElement(ScanChecklist, { elapsedMs: 0, responded: true, state }));
+      expect(out.match(/, not checked/g)?.length).toBe(SCAN_STEPS.length);
+    }
+  });
+
+  it("does not claim steps were skipped for a checked result", () => {
+    const out = renderToStaticMarkup(createElement(ScanChecklist, { elapsedMs: 0, responded: true, state: "new_cat" }));
+    expect(out).not.toContain("not checked");
+  });
+
+  it("never mentions an ear-tip", () => {
+    expect(SCAN_STEPS.join(" ")).not.toMatch(/ear/i);
+  });
 });
 
 describe("the checklist", () => {
   const html = (elapsedMs: number, responded: boolean) =>
     renderToStaticMarkup(createElement(ScanChecklist, { elapsedMs, responded }));
 
-  it("names the four generic steps and nothing found", () => {
+  it("names the three generic steps and nothing found", () => {
     const out = html(STEP_MS * 9, false);
     for (const s of SCAN_STEPS) expect(out).toContain(s);
     expect(SCAN_STEPS).toEqual([
       "Looking for a cat",
       "Checking the coat",
-      "Looking for an ear-tip",
       "Checking cats we know",
     ]);
     // No finding words: no coat names, no yes or no answers, no "new" or "matched" verdicts.

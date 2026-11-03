@@ -1,6 +1,6 @@
 /*
  * The on-device cat detector, loaded only by the spot camera through a dynamic import. The model files are
- * served from /models/cat-detector on this site, so nothing is requested from anywhere else, and no photo or
+ * served from /models/cat-detector-v1 on this site, so nothing is requested from anywhere else, and no photo or
  * frame leaves the device for this step. Packages are pinned in package.json.
  */
 import "@tensorflow/tfjs-backend-webgl";
@@ -13,7 +13,7 @@ export type Detector = { detect(video: HTMLVideoElement): Promise<Prediction[]>;
 export async function loadDetector(): Promise<Detector> {
   await tf.setBackend("webgl");
   await tf.ready();
-  const model = await cocoSsd.load({ base: "lite_mobilenet_v2", modelUrl: "/models/cat-detector/model.json" });
+  const model = await cocoSsd.load({ base: "lite_mobilenet_v2", modelUrl: "/models/cat-detector-v1/model.json" });
   return {
     async detect(video) {
       const out = await model.detect(video, 3, MIN_REPORT);

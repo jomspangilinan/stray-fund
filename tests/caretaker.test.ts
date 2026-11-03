@@ -134,7 +134,6 @@ const rules = (over: Record<string, unknown> = {}) => ({
   maxPerCat: "2500",
   maxPerDay: "10000",
   approvalThreshold: "2000",
-  earTipConfidenceMin: "0.8",
   matchConfidenceMin: "0.8",
   ...over,
 });
@@ -148,7 +147,7 @@ describe("guardrail edits validate", () => {
     ["a per-day cap below the per-cat cap", { maxPerDay: "2000" }],
     ["a package price above the per-cat cap", { packagePrice: "2600" }],
     ["a fractional peso amount", { maxPerCat: "2500.5" }],
-    ["a confidence above 1", { earTipConfidenceMin: "1.5" }],
+    ["a confidence above 1", { matchConfidenceMin: "1.5" }],
     ["a negative confidence", { matchConfidenceMin: "-0.1" }],
     ["text", { packagePrice: "lots" }],
     ["a missing field", { depositPct: undefined }],
@@ -164,13 +163,14 @@ describe("guardrail edits validate", () => {
   }
 
   it("stores integer pesos as centavos and writes an audit row with old and new values", async () => {
-    const r = await act("guardrails_update", rules({ maxPerCat: "3000", maxPerDay: "12000", depositPct: "40", earTipConfidenceMin: "0.9" }));
+    const r = await act("guardrails_update", rules({ maxPerCat: "3000", maxPerDay: "12000", depositPct: "40", matchConfidenceMin: "0.9" }));
     expect(r.status).toBe(200);
     const row = await limits();
     expect(row.maxPerCat).toBe(300000);
     expect(row.maxPerDay).toBe(1200000);
     expect(row.depositPct).toBe(40);
-    expect(row.earTipConfidenceMin).toBe(0.9);
+    expect(row.matchConfidenceMin).toBe(0.9);
+    expect(row).not.toHaveProperty("earTipConfidenceMin");
     const [audit] = await actionsNamed("guardrails_changed");
     expect(audit.approvedBy).toBe(caretaker.id);
     const inputs = audit.inputs as { old: Record<string, number>; new: Record<string, number> };
@@ -349,9 +349,8 @@ async function evidenceWorld(parsed: unknown = GOOD_PARSED) {
       sha256: `sha-${++seq}`,
       parsed: parsed as object,
       earTipPhotoKey: earKey,
-      earTipResult: { ear_tip: "present", confidence: 0.4, same_cat_confidence: 0.9, reference_count: 1 },
       verification: "needs_review",
-      reasons: ["ear_tip_low_confidence"],
+      reasons: ["clinic_mismatch"],
     })
     .returning();
   await db.transaction((tx) => fileReview(tx, `Evidence on booking ${booking.id} needs a person`, "A vet's evidence could not be confirmed."));
@@ -545,8 +544,6 @@ const ASSESS = {
   coat_pattern: "tabby",
   colors: ["orange"],
   markings: "white socks",
-  ear_tip: "absent",
-  ear_tip_confidence: 0.9,
   flags: { kitten: false, pregnant: true, injured: false, sick: false },
   probably_female_by_coat: true,
   suggested_name: "Muning",
@@ -596,7 +593,7 @@ describe("sighting review", () => {
     const all = await db.select().from(cats);
     expect(all).toHaveLength(1);
     const cat = all[0];
-    expect(cat).toMatchObject({ name: "Muning", sex: "female", exactLat: 10.2, exactLng: 120.6, locationApproximate: false, status: "queued", earTipped: false });
+    expect(cat).toMatchObject({ name: "Muning", sex: "female", exactLat: 10.2, exactLng: 120.6, locationApproximate: false, status: "spotted", earTipped: null });
     expect(cat.flags).toEqual(["pregnant"]);
     const meters = Math.hypot((cat.fuzzedLat! - 10.2) * 111_320, (cat.fuzzedLng! - 120.6) * 111_320 * Math.cos((10.2 * Math.PI) / 180));
     expect(meters).toBeGreaterThan(290);

@@ -22,7 +22,13 @@ async function shareCard(catId: string, name: string): Promise<"shared" | "copie
 }
 
 function nameOf(m: Mission): string {
-  return m.title.replace(/^Help (find )?/, "").replace(/ find a home$/, "") || "this cat";
+  return (
+    m.title
+      .replace(/^Help (find )?/, "")
+      .replace(/^Confirm /, "")
+      .replace(/ find a home$/, "")
+      .replace(/'s ear-tip$/, "") || "this cat"
+  );
 }
 
 export function MissionList({ missions }: { missions: Mission[] }) {
@@ -42,6 +48,10 @@ export function MissionList({ missions }: { missions: Mission[] }) {
             {m.action === "spot" ? (
               <Link href="/spot" className="btn-quiet !min-h-11 flex-none">
                 Spot
+              </Link>
+            ) : m.action === "card" ? (
+              <Link href={`/cats/${m.catId}`} className="btn-quiet !min-h-11 flex-none">
+                Open
               </Link>
             ) : (
               <button

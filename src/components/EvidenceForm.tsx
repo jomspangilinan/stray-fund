@@ -6,10 +6,15 @@ import { LiveCamera } from "./LiveCamera";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
-type Result = { verification: "verified" | "needs_review" | "rejected" | "pending"; message: string; messages: string[] };
+type Result = {
+  verification: "verified" | "needs_review" | "rejected" | "pending" | "awaiting_ear_tip_confirmation";
+  message: string;
+  messages: string[];
+};
 
 const HEADINGS: Record<Result["verification"], string> = {
   verified: "Verified",
+  awaiting_ear_tip_confirmation: "Waiting for a caretaker",
   needs_review: "A caretaker will look",
   rejected: "Not accepted",
   pending: "Saved",
@@ -107,7 +112,7 @@ export function EvidenceForm({ bookingId, catName }: { bookingId: string; catNam
 
       <div className="grid gap-2">
         <h3 className="h2">Photo of {catName} after surgery</h3>
-        <p className="small soft">Show the tipped ear and the coat, so we can tell it is the same cat.</p>
+        <p className="small soft">Show the tipped ear and the coat. A caretaker looks at this photo.</p>
         {earPhoto ? (
           <div className="flex flex-wrap items-center gap-3">
             <p className="note note-ok font-bold">Photo taken.</p>

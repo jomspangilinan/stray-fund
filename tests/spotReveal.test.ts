@@ -20,7 +20,6 @@ const cat = (patch: Partial<NonNullable<RevealInput["cat"]>> = {}): NonNullable<
   name: "Pepita",
   status: "queued",
   sex: "unknown",
-  earTipped: false,
   coatPattern: "tortoiseshell",
   flags: ["pregnant"],
   ...patch,
@@ -39,7 +38,7 @@ describe("buildReveal", () => {
     expect(r).toEqual({
       name: "Pepita",
       coat: "Tortoiseshell",
-      earTip: "No ear-tip seen",
+      yourEarTip: null,
       flags: ["Pregnant"],
       statusLabel: "Waiting for funding",
       probablyFemale: false,
@@ -78,7 +77,7 @@ describe("buildReveal", () => {
     expect(r).toEqual({
       name: null,
       coat: null,
-      earTip: null,
+      yourEarTip: null,
       flags: [],
       statusLabel: "Waiting for a caretaker",
       probablyFemale: false,
@@ -101,9 +100,12 @@ describe("buildReveal", () => {
     expect(ready?.needsFunding).toBe(false);
   });
 
-  it("labels an unclear ear and a tipped ear", () => {
-    expect(buildReveal({ state: "matched", cat: cat({ earTipped: null }), sighting: sighting() })?.earTip).toBe("Ear-tip not clear yet");
-    expect(buildReveal({ state: "matched", cat: cat({ earTipped: true, status: "neutered" }), sighting: sighting() })?.earTip).toBe("Ear-tipped");
+  it("never says No ear-tip seen, and shows only the person's own answer", () => {
+    const none = buildReveal({ state: "matched", cat: cat(), sighting: sighting() });
+    expect(none?.yourEarTip).toBeNull();
+    const mine = buildReveal({ state: "matched", cat: cat(), sighting: sighting(), yourEarTip: "no" });
+    expect(mine?.yourEarTip).toBe("no");
+    expect(JSON.stringify([none, mine])).not.toMatch(/No ear-tip seen|Ear-tipped|verified/i);
   });
 });
 
@@ -113,8 +115,6 @@ const ASSESS = {
   coat_pattern: "calico",
   colors: ["orange", "SECRET-COLOUR"],
   markings: "SECRET-MARKINGS",
-  ear_tip: "absent",
-  ear_tip_confidence: 0.95,
   flags: { kitten: false, pregnant: false, injured: false, sick: false },
   probably_female_by_coat: true,
   suggested_name: "Pepita",
@@ -137,12 +137,13 @@ describe("POST /api/spot reveal", () => {
     const [u] = await db.insert(users).values({ username: `rv_${Date.now()}`, role: "donor" }).returning();
     jar.set(SESSION_COOKIE, await signSession({ userId: u.id, role: "donor", username: u.username }));
   }
-  async function post() {
+  async function post(earTip?: string) {
     const f = new FormData();
     const jpeg = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 120, g: 90, b: 50 } } }).jpeg().toBuffer();
     f.set("photo", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }), "cat.jpg");
     f.set("lat", "10.123456");
     f.set("lng", "120.654321");
+    if (earTip) f.set("earTip", earTip);
     return spotPost(new Request("http://localhost/api/spot", { method: "POST", body: f }));
   }
 
@@ -155,20 +156,21 @@ describe("POST /api/spot reveal", () => {
     const reveal = json.reveal as Record<string, unknown>;
     expect(Object.keys(reveal).sort()).toEqual([
       "coat",
-      "earTip",
       "flags",
       "name",
       "needsFunding",
       "photoUrl",
       "probablyFemale",
       "statusLabel",
+      "yourEarTip",
     ]);
     expect(reveal).toMatchObject({
       name: "Pepita",
       coat: "Calico",
-      earTip: "No ear-tip seen",
+      yourEarTip: null,
       probablyFemale: true,
-      needsFunding: true,
+      // The AI no longer queues a cat. People's ear-tip answers do.
+      needsFunding: false,
     });
     expect(String(reveal.photoUrl)).toMatch(/photos\//);
     const text = JSON.stringify(json);
@@ -176,6 +178,21 @@ describe("POST /api/spot reveal", () => {
     const [row] = await db.select().from(sightings);
     expect(row.requestedSex).toBeNull();
     expect((await db.select().from(cats))[0].sex).toBe("female");
+  });
+
+  it("shows the finder their own ear-tip answer, labelled as theirs, and queues nothing on one answer", async () => {
+    await signIn();
+    const json = (await (await post("no")).json()) as { reveal: { yourEarTip: string; statusLabel: string; needsFunding: boolean } };
+    expect(json.reveal.yourEarTip).toBe("no");
+    expect(json.reveal.needsFunding).toBe(false);
+    expect((await db.select().from(cats))[0].status).toBe("spotted");
+    const [row] = await db.select().from(sightings);
+    expect(row.requestedEarTip).toBe("no");
+  });
+
+  it("refuses an ear-tip answer that is not yes, no or unsure", async () => {
+    await signIn();
+    expect((await post("maybe")).status).toBe(400);
   });
 
   it("gives a null reveal when the photo is saved for later", async () => {

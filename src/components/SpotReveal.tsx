@@ -23,7 +23,7 @@ export function SpotReveal({
 }) {
   const { heading, sub } = revealCopy(state, reveal.name);
   const photo = reveal.photoUrl ?? capturedUrl;
-  const tags = [reveal.coat, reveal.earTip, ...reveal.flags, reveal.probablyFemale ? "Probably female" : null].filter(
+  const tags = [reveal.coat, reveal.yourEarTip ? `Your answer: ear-tip ${reveal.yourEarTip}` : null, ...reveal.flags, reveal.probablyFemale ? "Probably female" : null].filter(
     (t): t is string => Boolean(t),
   );
   return (

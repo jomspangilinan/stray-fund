@@ -1,9 +1,11 @@
 import { and, eq, sql } from "drizzle-orm";
-import { insertNewCat, publishPhoto, resolveEarTip } from "../spot";
+import { insertNewCat, publishPhoto } from "../spot";
+import { resolveReviewBySubject } from "../agent/review";
+import { applyRequestedEarTip, disagreementSubject, lateYesSubject } from "../earTipFlags";
 import { IllegalTransition, MoneyAlreadyMoved, markAlreadyNeutered, transitionCat } from "../catTransitions";
 import { AssessmentSchema } from "../ai/schemas";
 import { withColonyLock, type Tx } from "../db/client";
-import { cats, guardrails, sightings, wakeups } from "../db/schema";
+import { cats, sightings, wakeups } from "../db/schema";
 import { publishScrubbed, type Box } from "../photos";
 import { StoredObjectMissing } from "../storage";
 import { audit, flag, reqUuid, Refusal, type Handler } from "./shared";
@@ -13,9 +15,6 @@ const SEXES = ["female", "male", "unknown"] as const;
 const FLAGS = ["pregnant", "injured", "sick", "kitten"] as const;
 
 type Sighting = typeof sightings.$inferSelect;
-
-const reasonOf = (s: Sighting): string | undefined =>
-  (s.assessment as { review_reason?: unknown } | null)?.review_reason as string | undefined;
 
 /** Locks the row and refuses anything that is not waiting for a person. */
 async function loadWaiting(tx: Tx, id: string): Promise<Sighting> {
@@ -38,20 +37,13 @@ export const sightingConfirmNew: Handler = async (caretakerId, body) => {
     const parsed = AssessmentSchema.safeParse(s.assessment);
     const assessment = parsed.success ? parsed.data : null;
 
-    let catId = s.catId;
-    if (catId) {
-      // A cat card was already started from this photo only when the ear could not be read.
-      if (reasonOf(s) !== "ear_tip") {
-        throw new Refusal(409, "This photo was matched to a cat we already know. Confirm that match, or choose another cat.");
-      }
-    } else {
-      catId = (await insertNewCat(tx, s, assessment)).id;
-      const [limits] = await tx.select().from(guardrails).where(eq(guardrails.id, 1));
-      if (assessment && assessment.ear_tip !== "unknown" && assessment.ear_tip_confidence >= limits.earTipConfidenceMin) {
-        await resolveEarTip(tx, catId, assessment.ear_tip === "present");
-      }
+    // Review reasons never start a card, so a sighting here has no cat yet.
+    if (s.catId) {
+      throw new Refusal(409, "This photo was matched to a cat we already know. Confirm that match, or choose another cat.");
     }
+    const catId = (await insertNewCat(tx, s, assessment)).id;
     await tx.update(sightings).set({ catId, state: "new_cat" }).where(and(eq(sightings.id, s.id), eq(sightings.state, "needs_review")));
+    await applyRequestedEarTip(tx, s, catId);
     await audit(tx, {
       action: "sighting_reviewed",
       caretakerId,
@@ -61,7 +53,7 @@ export const sightingConfirmNew: Handler = async (caretakerId, body) => {
     return { ...s, catId };
   });
   await publishAfter(s);
-  return "Confirmed as a new cat. Set the ear-tip below if it is not decided yet.";
+  return "Confirmed as a new cat. Neighbours can now say whether it has an ear-tip.";
 };
 
 export const sightingMerge: Handler = async (caretakerId, body) => {
@@ -69,13 +61,11 @@ export const sightingMerge: Handler = async (caretakerId, body) => {
   const catId = reqUuid(body, "catId", "The cat");
   const s = await withColonyLock(async (tx) => {
     const s = await loadWaiting(tx, sightingId);
-    if (s.catId && s.catId !== catId && reasonOf(s) === "ear_tip") {
-      throw new Refusal(409, "A new cat card was already started from this photo. Confirm it as a new cat, or reject it.");
-    }
     const [cat] = await tx.select({ id: cats.id }).from(cats).where(eq(cats.id, catId)).for("share");
     if (!cat) throw new Refusal(404, "There is no such cat.");
     // Only the sighting moves. The cat keeps its fuzzed location.
     await tx.update(sightings).set({ catId, state: "matched" }).where(and(eq(sightings.id, s.id), eq(sightings.state, "needs_review")));
+    await applyRequestedEarTip(tx, s, catId);
     await audit(tx, {
       action: "sighting_reviewed",
       caretakerId,
@@ -92,9 +82,6 @@ export const sightingReject: Handler = async (caretakerId, body) => {
   const sightingId = reqUuid(body, "sightingId", "The sighting");
   return withColonyLock(async (tx) => {
     const s = await loadWaiting(tx, sightingId);
-    if (s.catId && reasonOf(s) === "ear_tip") {
-      throw new Refusal(409, "A new cat card was already started from this photo, so it cannot be rejected. Confirm it instead.");
-    }
     await tx.update(sightings).set({ state: "rejected" }).where(and(eq(sightings.id, s.id), eq(sightings.state, "needs_review")));
     await audit(tx, {
       action: "sighting_reviewed",
@@ -142,15 +129,27 @@ export const catSetEarTip: Handler = async (caretakerId, body) => {
     const [cat] = await tx.select().from(cats).where(eq(cats.id, catId)).for("update");
     if (!cat) throw new Refusal(404, "There is no such cat.");
     const status = cat.status as CatStatus;
-    const note = (message: string, change: string) => audit(tx, {
-      action: "cat_updated",
-      caretakerId,
-      reason: "A caretaker updated a cat's card.",
-      inputs: { catId, earTip, change, from: status },
-    }).then(() => message);
+    // A caretaker's decision answers any open question about this cat's ear-tip.
+    const endReviews = async () => {
+      await resolveReviewBySubject(tx, disagreementSubject(catId), caretakerId, "Decided by a caretaker.");
+      await resolveReviewBySubject(tx, lateYesSubject(catId), caretakerId, "Decided by a caretaker.");
+    };
+    const note = async (message: string, change: string) => {
+      await audit(tx, {
+        action: "cat_updated",
+        caretakerId,
+        reason: "A caretaker updated a cat's card.",
+        inputs: { catId, earTip, change, from: status },
+      });
+      await endReviews();
+      return message;
+    };
 
     if (earTip === "present") {
-      if (cat.earTipped === true) return "Already marked as ear-tipped.";
+      if (cat.earTipped === true) {
+        await endReviews();
+        return "Already marked as ear-tipped.";
+      }
       if (status === "spotted" || status === "queued") {
         try {
           await markAlreadyNeutered(tx, catId);
@@ -167,7 +166,10 @@ export const catSetEarTip: Handler = async (caretakerId, body) => {
       throw new Refusal(409, IN_FLOW);
     }
 
-    if (status === "queued" && cat.earTipped === false) return "Already marked as not ear-tipped.";
+    if (status === "queued" && cat.earTipped === false) {
+      await endReviews();
+      return "Already marked as not ear-tipped.";
+    }
     if (status !== "spotted") throw new Refusal(409, IN_FLOW);
     await tx.update(cats).set({ earTipped: false, queuedAt: new Date() }).where(eq(cats.id, catId));
     await transitionCat(tx, catId, "queued");

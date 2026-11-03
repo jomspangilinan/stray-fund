@@ -8,13 +8,15 @@ import { CONFIRMED_BOOKING } from "../guardrails";
 import { manilaDate } from "../public";
 import { enqueueWakeup } from "../wakeups";
 import {
+  VetFlowError,
   applyVerifiedOutcome,
+  confirmEarTipPhoto,
   depositPaidOn,
   receiptDate,
   surplusToReturn,
   surplusUnavailable,
 } from "../vetFlow";
-import { audit, flag, reqText, reqUuid, Refusal, type Handler } from "./shared";
+import { audit, flag, reqText, reqUuid, requireCaretaker, Refusal, type Handler } from "./shared";
 
 const evidenceSubject = (bookingId: string) => `Evidence on booking ${bookingId} needs a person`;
 
@@ -27,6 +29,38 @@ const BLANK_READING: ReceiptReading = {
   cat_name: null,
   items: [],
   tamper_signs: [],
+};
+
+/**
+ * The one tap a caretaker gives after looking at the vet's photo: "I saw the ear-tip". Only a caretaker can,
+ * the vet cannot, and the photo has to exist. The receipt has already passed every check, which are run again
+ * here. A pass makes it verified through the same function every verified receipt uses.
+ */
+export const evidenceConfirmEarTip: Handler = async (caretakerId, body) => {
+  const receiptId = reqUuid(body, "receiptId", "The receipt");
+  return withColonyLock(async (tx) => {
+    await requireCaretaker(tx, caretakerId);
+    let out;
+    try {
+      out = await confirmEarTipPhoto(tx, receiptId);
+    } catch (e) {
+      if (e instanceof VetFlowError) throw new Refusal(e.status === 404 ? 404 : 409, e.message);
+      throw e;
+    }
+    const [r] = await tx.select({ bookingId: receipts.bookingId }).from(receipts).where(eq(receipts.id, receiptId));
+    const [booking] = await tx.select().from(bookings).where(eq(bookings.id, r.bookingId));
+    if (out.verification !== "verified") {
+      return "The checks no longer pass, so this went to review instead.";
+    }
+    await audit(tx, {
+      action: "ear_tip_confirmed",
+      caretakerId,
+      reason: "A caretaker confirmed the ear-tip in a vet's photo.",
+      inputs: { receiptId, bookingId: booking.id, catId: booking.catId },
+    });
+    await resolveReviewBySubject(tx, evidenceSubject(booking.id), caretakerId, "Confirmed by a caretaker.");
+    return "Confirmed. The cat is marked neutered and the treasurer can now release the balance.";
+  });
 };
 
 /**
@@ -66,7 +100,7 @@ export const evidenceAccept: Handler = async (caretakerId, body) => {
     const [live] = await tx
       .select({ id: receipts.id })
       .from(receipts)
-      .where(and(eq(receipts.bookingId, booking.id), inArray(receipts.verification, ["pending", "verified"])));
+      .where(and(eq(receipts.bookingId, booking.id), inArray(receipts.verification, ["pending", "verified", "awaiting_ear_tip_confirmation"])));
     if (live) throw new Refusal(409, "This booking already has a newer submission.");
 
     const surplus = surplusToReturn(booking.packagePrice, total);
@@ -110,7 +144,9 @@ export const evidenceReject: Handler = async (caretakerId, body) => {
   return withColonyLock(async (tx) => {
     const [r] = await tx.select().from(receipts).where(eq(receipts.id, receiptId)).for("update");
     if (!r) throw new Refusal(404, "There is no such receipt.");
-    if (r.verification !== "needs_review") throw new Refusal(409, "This receipt is no longer waiting for review.");
+    if (r.verification !== "needs_review" && r.verification !== "awaiting_ear_tip_confirmation") {
+      throw new Refusal(409, "This receipt is no longer waiting for review.");
+    }
     const [booking] = await tx.select().from(bookings).where(eq(bookings.id, r.bookingId));
     await tx
       .update(receipts)

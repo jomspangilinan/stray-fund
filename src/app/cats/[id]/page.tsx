@@ -4,7 +4,10 @@ import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import { CatDetail } from "@/components/CatDetail";
 import { BlockSkeleton } from "@/components/Loading";
+import { db } from "@/server/db/client";
+import { ownFlags } from "@/server/earTipFlags";
 import { getCatCard } from "@/server/public";
+import { getSession } from "@/server/session";
 import { getCatThanks } from "@/server/thanks";
 
 export const metadata: Metadata = { title: "Cat | Stray Fund" };
@@ -14,7 +17,9 @@ async function Card({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const card = await getCatCard(id);
   if (!card) notFound();
-  return <CatDetail card={card} thanks={await getCatThanks(card.cat.id)} />;
+  const session = await getSession();
+  const mine = session ? (await ownFlags(db, session.userId, [card.cat.id])).get(card.cat.id) : undefined;
+  return <CatDetail card={card} thanks={await getCatThanks(card.cat.id)} earTip={session ? (mine ?? "unsure") : undefined} />;
 }
 
 export default function CatPage({ params }: PageProps<"/cats/[id]">) {

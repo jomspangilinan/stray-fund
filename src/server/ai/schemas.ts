@@ -31,8 +31,6 @@ export const AssessmentSchema = z.object({
   coat_pattern: z.enum(COAT_PATTERNS),
   colors: z.array(z.string().max(30)).max(4),
   markings: z.string().max(200),
-  ear_tip: z.enum(["present", "absent", "unknown"]),
-  ear_tip_confidence: unit,
   flags: z.object({
     kitten: z.boolean(),
     pregnant: z.boolean(),
@@ -64,10 +62,3 @@ export const ReceiptSchema = z.object({
   tamper_signs: z.array(z.string().max(200)).max(10),
 });
 export type ReceiptReading = z.infer<typeof ReceiptSchema>;
-
-export const EarTipSchema = z.object({
-  ear_tip: z.enum(["present", "absent", "unknown"]),
-  confidence: unit,
-  same_cat_confidence: unit,
-});
-export type EarTipCheck = z.infer<typeof EarTipSchema>;

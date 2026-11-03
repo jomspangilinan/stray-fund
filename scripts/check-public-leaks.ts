@@ -23,6 +23,8 @@ const SENTINELS = [
   "Leakcheck Sentinel Clinic", "clinic_name", "clinicName", "OR-LEAK-SENTINEL", "receipt_number", "file_key", "fileKey",
   "ear_tip_photo_key", "earTipPhotoKey", "ear_tip_result", "earTipResult", "same_cat_confidence",
   "leakreceipt-sentinel-sha", "LeakItem-Sentinel", "tamper_signs",
+  // Ear-tip answers are private: no table name, no column name, and nobody's answer beyond their own.
+  "ear_tip_flags", "earTipFlags", "requested_ear_tip", "requestedEarTip", "earTipYes", "earTipNo", "answeredByMe",
 ];
 
 async function main() {
@@ -39,11 +41,23 @@ async function main() {
     "insert into users (username, role, show_name_in_thanks) values ($1,'donor',false) returning id",
     [`leakhidden_${tag}`],
   );
+  const { rows: [flagger] } = await pool.query(
+    "insert into users (username, role) values ($1,'donor') returning id",
+    [`leakflagger_${tag}`],
+  );
   const { rows: [cat] } = await pool.query(
     `insert into cats (name, sex, status, area_name, exact_lat, exact_lng, fuzzed_lat, fuzzed_lng, location_approximate, flags)
      values ($1,'female','neutered','Brgy. San Antonio, near the market',10.987654321,120.123456789,10.55555555,120.66666666,true,'{pregnant}') returning id`,
     [`LeakCat ${tag}`],
   );
+  // A spotted cat that two people have answered about, one of them the signed-in donor. Nobody is credited, so
+  // the other person's name has no reason to appear anywhere a viewer can see.
+  const { rows: [askCat] } = await pool.query(
+    `insert into cats (name, sex, status, area_name, exact_lat, exact_lng, fuzzed_lat, fuzzed_lng, location_approximate)
+     values ($1,'unknown','spotted','Brgy. San Antonio, near the market',10.987654321,120.123456789,10.55555555,120.66666666,true) returning id`,
+    [`LeakAsk ${tag}`],
+  );
+  await pool.query("insert into ear_tip_flags (cat_id, user_id, value) values ($1,$2,'no'), ($1,$3,'yes')", [askCat.id, flagger.id, donor.id]);
   await pool.query(
     "insert into sightings (cat_id, original_key, caught_by_user_id, state) values ($1,'originals/00000000-0000-4000-8000-000000000009.jpg',$2,'matched')",
     [cat.id, hidden.id],
@@ -64,12 +78,11 @@ async function main() {
     [cat.id, vet.id],
   );
   const { rows: [receipt] } = await pool.query(
-    `insert into receipts (booking_id, file_key, sha256, parsed, ear_tip_photo_key, ear_tip_result, verification, reasons)
-     values ($1,'originals/00000000-0000-4000-8000-000000000003.jpg','leakreceipt-sentinel-sha',$2,'originals/00000000-0000-4000-8000-000000000004.jpg',$3,'verified','{}') returning id`,
+    `insert into receipts (booking_id, file_key, sha256, parsed, ear_tip_photo_key, verification, reasons)
+     values ($1,'originals/00000000-0000-4000-8000-000000000003.jpg','leakreceipt-sentinel-sha',$2,'originals/00000000-0000-4000-8000-000000000004.jpg','verified','{}') returning id`,
     [
       booking.id,
       JSON.stringify({ clinic: "Leakcheck Sentinel Clinic", receipt_number: "OR-LEAK-SENTINEL", items: ["LeakItem-Sentinel"], tamper_signs: [] }),
-      JSON.stringify({ ear_tip: "present", confidence: 0.9, same_cat_confidence: 0.9 }),
     ],
   );
   await pool.query(
@@ -114,8 +127,10 @@ async function main() {
     [`leakreview-${tag}`, donor.id],
   );
 
-  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/helped", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/ledger", "/ledger?q=LEAKBATCH", "/impact", "/missions", "/api/ledger", "/api/impact", "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
+  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/helped", `/api/cats/${cat.id}`, `/cats/${askCat.id}`, `/api/cats/${askCat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/ledger", "/ledger?q=LEAKBATCH", "/impact", "/missions", "/api/ledger", "/api/impact", "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
   const viewers: [string, Record<string, string>][] = [["anon", {}], ["donor", { cookie: `sf_session=${token}` }]];
+  // Another person's name must not be found for any viewer, whatever they answered.
+  SENTINELS.push(`leakflagger_${tag}`);
   let bad = 0, checked = 0;
   try {
     // The note shows until the browser confirms it, then never again. A confirmation for a cat the donor did not help is refused.
@@ -146,6 +161,16 @@ async function main() {
     if (!html.includes("Leak check spay")) { bad++; console.log("FAIL: the seeded treatment did not render"); }
     if (!html.includes("Thanks to") || !html.includes("helped fund") || !html.includes(`leak_${tag}`)) { bad++; console.log("FAIL: the cat card did not thank the donor"); }
     if (html.includes(`leakhidden_${tag}`) || !html.includes("A neighbour")) { bad++; console.log("FAIL: an opted-out name showed, or A neighbour did not"); }
+    // The signed-in donor is asked about the spotted cat, anyone else is not, and nobody sees the other answers.
+    const askAnon = await (await fetch(`${BASE}/cats/${askCat.id}`)).text();
+    const askDonor = await (await fetch(`${BASE}/cats/${askCat.id}`, { headers: { cookie: `sf_session=${token}` } })).text();
+    if (askAnon.includes("Does this cat have a tipped ear?")) { bad++; console.log("FAIL: a signed-out visitor was asked about the ear-tip"); }
+    if (!askDonor.includes("Does this cat have a tipped ear?")) { bad++; console.log("FAIL: the signed-in donor was not asked about the ear-tip"); }
+    // The client component's props travel in the page as JSON, with quotes that may be escaped.
+    if (!/initial\\*"\s*:\s*\\*"yes/.test(askDonor)) { bad++; console.log(`FAIL: the donor's own answer did not come back to them: ${askDonor.slice(askDonor.indexOf("initial") - 20, askDonor.indexOf("initial") + 40)}`); }
+    for (const [who, text] of [["anon", askAnon], ["donor", askDonor]]) {
+      if (/No ear-tip seen/.test(text)) { bad++; console.log(`FAIL: ${who} saw the old ear-tip tag`); }
+    }
     const homeHtml = await (await fetch(`${BASE}/`)).text();
     if (homeHtml.includes(`leakhidden_${tag}`)) { bad++; console.log("FAIL: an opted-out name showed on home"); }
     const feed = await (await fetch(`${BASE}/agent`)).text();
@@ -169,6 +194,9 @@ async function main() {
     await pool.query("delete from treatments where cat_id=$1", [cat.id]);
     await pool.query("delete from receipts where booking_id=$1", [booking.id]);
     await pool.query("delete from bookings where id=$1", [booking.id]);
+    await pool.query("delete from ear_tip_flags where cat_id=$1", [askCat.id]);
+    await pool.query("delete from cats where id=$1", [askCat.id]);
+    await pool.query("delete from users where id=$1", [flagger.id]);
     await pool.query("delete from sightings where cat_id=$1", [cat.id]);
     await pool.query("delete from users where id=$1", [hidden.id]);
     await pool.query("delete from cats where id=$1", [cat.id]);

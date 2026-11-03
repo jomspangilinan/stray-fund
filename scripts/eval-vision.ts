@@ -13,10 +13,12 @@
  * against the daily AI budget, which needs DATABASE_URL. Add your own cat photos to the folder and
  * list them in the manifest. The folder is gitignored.
  *
- * Manifest entry: { "name": "...", "kind": "assess"|"receipt"|"ear"|"match", "files": ["a.jpg", ...],
+ * Manifest entry: { "name": "...", "kind": "assess"|"receipt"|"match", "files": ["a.jpg", ...],
  *   "expect": { field: value, ... } }
  * For "match", files[0] is the new photo and files[1..] are the single candidate cat's photos; use
  * "expect": { "matched": true|false }. For other kinds each expect key is compared with the result.
+ * Ear tips are not evaluated: people flag them, the AI is never asked. A manifest with an "ear" case, or an
+ * expectation on an ear_tip field, is refused with a message instead of being run.
  */
 import { config } from "dotenv";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -30,7 +32,7 @@ const MANIFEST = path.join(DIR, "manifest.json");
 
 type Case = {
   name: string;
-  kind: "assess" | "receipt" | "ear" | "match";
+  kind: "assess" | "receipt" | "match";
   files: string[];
   expect: Record<string, unknown>;
 };
@@ -77,6 +79,15 @@ async function prepare(): Promise<void> {
   }
   console.log(`Wrote synthetic receipts and a starter manifest to ${DIR}`);
   console.log("Add your own cat photos and manifest entries for the cat cases (see the header of this script).");
+}
+
+class ManifestError extends Error {}
+
+/** Old manifests may still hold ear-tip cases. Say so plainly rather than score something nobody asks the AI. */
+function refuseEarCases(cases: { name: string; kind: string; expect: Record<string, unknown> }[]): void {
+  const bad = cases.filter((c) => c.kind === "ear" || Object.keys(c.expect ?? {}).some((k) => k.startsWith("ear_tip")));
+  if (bad.length === 0) return;
+  throw new ManifestError(`The manifest has ear-tip cases (${bad.map((c) => c.name).join(", ")}). The AI no longer judges ear tips. Remove them.`);
 }
 
 function check(expect: Record<string, unknown>, data: Record<string, unknown>): string[] {
@@ -139,7 +150,7 @@ async function main(): Promise<void> {
   const { setAiUsageListener } = await import("../src/server/ai/client");
   const { assessPhoto } = await import("../src/server/ai/assess");
   const { matchCat } = await import("../src/server/ai/match");
-  const { readReceipt, verifyEarTip } = await import("../src/server/ai/receipt");
+  const { readReceipt } = await import("../src/server/ai/receipt");
   const { closePool } = await import("../src/server/db/client");
 
   let tokensIn = 0;
@@ -150,6 +161,7 @@ async function main(): Promise<void> {
   });
 
   const cases = JSON.parse(readFileSync(MANIFEST, "utf8")) as Case[];
+  refuseEarCases(cases);
   const table = new Map<string, Cell[]>();
   const totals: { passed: number; run: number; ms: number; in: number; out: number }[] = [];
 
@@ -174,7 +186,6 @@ async function main(): Promise<void> {
       let res;
       if (c.kind === "assess") res = await assessPhoto(bufs[0]);
       else if (c.kind === "receipt") res = await readReceipt(bufs[0]);
-      else if (c.kind === "ear") res = await verifyEarTip(bufs[0], bufs.slice(1));
       else res = await matchCat(bufs[0], [{ catId: "candidate", photos: bufs.slice(1) }]);
       const ms = Date.now() - t0;
       const cost = config.provider === "bedrock" ? tokensIn + tokensOut - before : null;
@@ -224,6 +235,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((e) => {
-  console.error(`eval failed: ${e instanceof Error ? e.constructor.name : "error"}`);
+  console.error(`eval failed: ${e instanceof ManifestError ? e.message : e instanceof Error ? e.constructor.name : "error"}`);
   process.exitCode = 1;
 });

@@ -4,7 +4,6 @@ import { Suspense } from "react";
 import { ActionForm } from "@/components/ActionForm";
 import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
-import { SignIn } from "@/components/SignIn";
 import { formatPeso } from "@/lib/money";
 import {
   getCaretakerQueue,
@@ -24,8 +23,6 @@ const KIND: Record<string, string> = { deposit: "Deposit", balance: "Balance" };
 const SIGHTING_REASON: Record<string, string> = {
   possible_match: "The AI thinks this may be a cat we know, but was not sure enough.",
   ai_unusable: "The AI could not give a usable answer for this photo.",
-  ear_tip_changed: "The AI matched a known cat but saw an ear-tip we have not recorded.",
-  ear_tip: "A card was started, but the AI could not tell whether the ear is tipped.",
 };
 
 function Where({ exact }: { exact: ExactSpot }) {
@@ -151,9 +148,7 @@ function Assessment({ a }: { a: NonNullable<SightingItem["assessment"]> }) {
       <p>
         Coat: {a.coat_pattern}, {a.colors.join(", ") || "no colours"}. {a.markings}
       </p>
-      <p>
-        Ear-tip: {a.ear_tip} (confidence {a.ear_tip_confidence}). Suggested name: {a.suggested_name}.
-      </p>
+      <p>Suggested name: {a.suggested_name}.</p>
       <p>Flags: {Object.entries(a.flags).filter(([, v]) => v).map(([k]) => k).join(", ") || "none"}.</p>
       <p className="break-words">Bio: {a.short_bio}</p>
     </div>
@@ -225,9 +220,6 @@ function Reading({ r }: { r: ReceiptItem }) {
       ) : (
         <p>Nothing could be read from the receipt.</p>
       )}
-      <p>
-        Ear-tip: {r.earTip ? `${r.earTip.ear_tip}, confidence ${r.earTip.confidence}, same cat ${r.earTip.same_cat_confidence}` : "no reading"}.
-      </p>
     </div>
   );
 }
@@ -281,6 +273,40 @@ function Receipts({ items }: { items: ReceiptItem[] }) {
           </li>
         );
       })}
+    </Section>
+  );
+}
+
+function EarTipConfirmations({ items }: { items: ReceiptItem[] }) {
+  return (
+    <Section
+      id="eartip-photos"
+      title="Ear-tip photos to look at"
+      count={items.length}
+      empty="No vet photo is waiting for you."
+    >
+      {items.map((r) => (
+        <li key={r.id} className="card">
+          <h3 className="text-base font-extrabold">{r.catName}</h3>
+          <p className="small">
+            Vet {r.vetName}. Sent {r.date}. The receipt passed every check. Package {formatPeso(r.packagePrice)}, deposit paid {formatPeso(r.depositPaid)}.
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {/* eslint-disable-next-line @next/next/no-img-element -- private evidence behind a signed-in route */}
+            <img src={`/api/caretaker/images/eartip/${r.id}`} alt="The vet's photo of the cat after surgery" className="max-h-72 w-full rounded-in object-contain" />
+            {/* eslint-disable-next-line @next/next/no-img-element -- private evidence behind a signed-in route */}
+            <img src={`/api/caretaker/images/receipt/${r.id}`} alt="The original receipt" className="max-h-72 w-full rounded-in object-contain" />
+          </div>
+          <Reading r={r} />
+          <ActionForm action="evidence_confirm_ear_tip" submitLabel="I saw the ear-tip in the photo">
+            <Hidden name="receiptId" value={r.id} />
+          </ActionForm>
+          <ActionForm action="evidence_reject" submitLabel="Do not accept" quiet>
+            <Hidden name="receiptId" value={r.id} />
+            <Field label="Note: why" name="note" />
+          </ActionForm>
+        </li>
+      ))}
     </Section>
   );
 }
@@ -359,6 +385,9 @@ function EarTips({ items }: { items: CaretakerQueue["earTipPending"] }) {
       {items.map((c) => (
         <li key={c.id} className="card">
           <h3 className="text-base font-extrabold">{c.name}</h3>
+          <p className="small">
+            Neighbours so far: {c.yes} said ear-tipped, {c.no} said not.
+          </p>
           <Where exact={c.exact} />
           <ActionForm action="cat_set_ear_tip" submitLabel="Ear is tipped, already neutered">
             <Hidden name="catId" value={c.id} />
@@ -450,7 +479,6 @@ function Rules({ rules }: { rules: RulesView }) {
           <Field label="Cap per cat" name="maxPerCat" type="number" defaultValue={pesos(l.maxPerCat)} />
           <Field label="Cap per day" name="maxPerDay" type="number" defaultValue={pesos(l.maxPerDay)} />
           <Field label="Approval threshold" name="approvalThreshold" type="number" defaultValue={pesos(l.approvalThreshold)} hint="Payouts above this wait for a caretaker." />
-          <Field label="Ear-tip confidence minimum (0 to 1)" name="earTipConfidenceMin" defaultValue={l.earTipConfidenceMin} />
           <Field label="Cat match confidence minimum (0 to 1)" name="matchConfidenceMin" defaultValue={l.matchConfidenceMin} />
         </ActionForm>
       </div>
@@ -495,8 +523,8 @@ async function Desk() {
   if (!session) {
     return (
       <div className="card mt-8">
-        <p className="mb-4 font-bold">Sign in with a caretaker account to see the queue.</p>
-        <SignIn username={null} inline />
+        <p className="font-bold">This page is for caretakers.</p>
+        <p className="small soft mt-1">In the demo, pick the Caretaker role in the bar at the top.</p>
       </div>
     );
   }
@@ -511,6 +539,7 @@ async function Desk() {
       <NeedsReview items={q.needsReview} />
       <LongSent items={q.longSent} />
       <Sightings items={q.sightings} cats={q.catChoices} />
+      <EarTipConfirmations items={q.earTipConfirmations} />
       <Receipts items={q.receipts} />
       <Reviews items={q.reviews} />
       <Wakeups items={q.failedWakeups} />

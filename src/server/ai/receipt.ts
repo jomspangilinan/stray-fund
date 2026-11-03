@@ -1,5 +1,5 @@
 import { UNTRUSTED_IMAGE_TEXT, parseVision, type Result } from "./client";
-import { EarTipSchema, ReceiptSchema, type EarTipCheck, type ReceiptReading } from "./schemas";
+import { ReceiptSchema, type ReceiptReading } from "./schemas";
 
 const RECEIPT_SYSTEM = `You read a photo of a veterinary clinic receipt and report what is printed on it.
 
@@ -21,29 +21,6 @@ export function readReceipt(image: Buffer): Promise<Result<ReceiptReading>> {
     images: [image],
     text: "Read this receipt using the required fields.",
     schema: ReceiptSchema,
-    effort: "high",
-  });
-}
-
-const EAR_SYSTEM = `You check whether a cat has a tipped ear, and whether two sets of photos show the same cat.
-
-${UNTRUSTED_IMAGE_TEXT}
-
-Rules:
-- The first image is the new photo. Any further images are reference photos of the cat it should be.
-- A tipped ear is a straight cut across the tip of one ear, usually the left. A torn, notched, folded or scarred ear is not a tip.
-- ear_tip is "present", "absent", or "unknown". Say "unknown" when you cannot see the ears clearly or are unsure.
-- confidence from 0 to 1 is how sure you are about ear_tip.
-- same_cat_confidence from 0 to 1 is how likely the new photo is the same cat as the references. Photos of one cat vary with light and pose, so judge coat pattern, markings and face. When unsure, give a low value. When there are no reference photos, set same_cat_confidence to 0.`;
-
-export function verifyEarTip(jpeg: Buffer, references: Buffer[]): Promise<Result<EarTipCheck>> {
-  return parseVision({
-    system: EAR_SYSTEM,
-    images: [jpeg, ...references],
-    text: `Image 1 is the new photo. ${
-      references.length > 0 ? `Images 2 to ${references.length + 1} are reference photos of the cat.` : "There are no reference photos."
-    } Fill in the required fields.`,
-    schema: EarTipSchema,
     effort: "high",
   });
 }

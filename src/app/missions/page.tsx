@@ -8,12 +8,14 @@ import { MissionList } from "@/components/MissionList";
 import { PageHead } from "@/components/PageHead";
 import { COLONY } from "@/lib/config";
 import { getGoalProgress, getMissions } from "@/server/public";
+import { getSession } from "@/server/session";
 
 export const metadata: Metadata = { title: "Missions | Stray Fund" };
 
 async function Missions() {
   await connection();
-  const [goal, missions] = await Promise.all([getGoalProgress(), getMissions()]);
+  const session = await getSession();
+  const [goal, missions] = await Promise.all([getGoalProgress(), getMissions(new Date(), session?.userId ?? null)]);
   return (
     <>
       <div className="mt-4">

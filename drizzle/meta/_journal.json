@@ -71,6 +71,13 @@
       "when": 1793700108527,
       "tag": "0009_spicy_ronan",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793702059408,
+      "tag": "0010_ear_tip_flags",
+      "breakpoints": true
     }
   ]
 }

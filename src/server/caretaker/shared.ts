@@ -1,11 +1,12 @@
+import { eq } from "drizzle-orm";
 import type { Tx } from "../db/client";
-import { agentActions } from "../db/schema";
+import { agentActions, users } from "../db/schema";
 import { isUuid } from "../public";
 
 /** A refusal the caretaker should read as it is written. Messages are written here, never taken from input. */
 export class Refusal extends Error {
   constructor(
-    readonly status: 400 | 404 | 409,
+    readonly status: 400 | 403 | 404 | 409,
     message: string,
   ) {
     super(message);
@@ -68,4 +69,13 @@ export async function audit(
     status: "done",
     approvedBy: a.caretakerId,
   });
+}
+
+/**
+ * The route checks the session role, and steps that only a caretaker may take check the account again here,
+ * so no other caller of the handler can stand in for one.
+ */
+export async function requireCaretaker(tx: Tx, userId: string): Promise<void> {
+  const [u] = await tx.select({ role: users.role }).from(users).where(eq(users.id, userId));
+  if (u?.role !== "caretaker") throw new Refusal(403, "Only a caretaker can do this.");
 }

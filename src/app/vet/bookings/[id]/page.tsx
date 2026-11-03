@@ -6,7 +6,6 @@ import { EvidenceForm } from "@/components/EvidenceForm";
 import { ExactLocation } from "@/components/ExactLocation";
 import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
-import { SignIn } from "@/components/SignIn";
 import { formatPeso } from "@/lib/money";
 import { isUuid } from "@/server/public";
 import { getSession } from "@/server/session";
@@ -26,6 +25,7 @@ const PAYOUT_STATUS: Record<string, string> = {
 };
 const VERIFICATION: Record<string, string> = {
   pending: "Being checked",
+  awaiting_ear_tip_confirmation: "Waiting for a caretaker",
   verified: "Verified",
   needs_review: "A caretaker will look",
   rejected: "Not accepted",
@@ -76,6 +76,7 @@ function EvidenceSection({ view }: { view: VetBookingView }) {
         )}
         {evidence.state === "waiting_cat" && <p className="note">The form opens once the cat is in care.</p>}
         {evidence.state === "checking" && <p className="note">Your last submission is still being checked. You do not need to send it again.</p>}
+        {evidence.state === "waiting_caretaker" && <p className="note">Waiting for a caretaker. You do not need to send anything again.</p>}
         {evidence.state === "verified" && (
           <p className="note note-ok font-bold">Verified. The treasurer releases the balance next, and it shows above once sent.</p>
         )}
@@ -90,8 +91,8 @@ async function BookingView({ params }: { params: Promise<{ id: string }> }) {
   if (!session) {
     return (
       <div className="card mt-8">
-        <p className="mb-4 font-bold">Sign in with a vet account to see this booking.</p>
-        <SignIn username={null} inline />
+        <p className="font-bold">This page is for partner vets.</p>
+        <p className="small soft mt-1">In the demo, pick the Vet role in the bar at the top.</p>
       </div>
     );
   }

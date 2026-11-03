@@ -10,6 +10,9 @@ const cat = (patch: Partial<MissionCat> = {}): MissionCat => ({
   status: "queued",
   flags: [],
   earTipped: false,
+  earTipYes: 0,
+  earTipNo: 0,
+  answeredByMe: false,
   photoUrl: null,
   lastSeenAt: daysAgo(0),
   ...patch,
@@ -49,9 +52,30 @@ describe("pickMissions", () => {
     expect(JSON.stringify(all)).not.toMatch(/missing|overdue|missed|late|lost|failed|urgent|hurry|only/i);
   });
 
-  it("asks for a clear ear photo of a spotted cat with an unknown ear-tip", () => {
+  it("asks a neighbour to confirm the ear-tip of a spotted cat, and opens its card", () => {
     const [m] = pickMissions([cat({ name: "Kuting", status: "spotted", earTipped: null })], NOW);
-    expect(m).toMatchObject({ kind: "ear", title: "Get a clear ear photo of Kuting", action: "spot" });
+    expect(m).toMatchObject({ kind: "ear", title: "Confirm Kuting's ear-tip", action: "card" });
+  });
+
+  it("still asks while there is one answer, and stops at two matching answers", () => {
+    const base = { status: "spotted", earTipped: null };
+    expect(pickMissions([cat({ ...base, earTipNo: 1 })], NOW)).toHaveLength(1);
+    expect(pickMissions([cat({ ...base, earTipYes: 1 })], NOW)).toHaveLength(1);
+    expect(pickMissions([cat({ ...base, earTipNo: 2 })], NOW)).toEqual([]);
+    expect(pickMissions([cat({ ...base, earTipYes: 2 })], NOW)).toEqual([]);
+  });
+
+  it("leaves a disagreement to a caretaker", () => {
+    expect(pickMissions([cat({ status: "spotted", earTipped: null, earTipYes: 1, earTipNo: 1 })], NOW)).toEqual([]);
+  });
+
+  it("does not ask someone who already answered for that cat", () => {
+    expect(pickMissions([cat({ status: "spotted", earTipped: null, earTipNo: 1, answeredByMe: true })], NOW)).toEqual([]);
+  });
+
+  it("does not ask about a cat that is queued or already decided", () => {
+    expect(pickMissions([cat({ status: "queued", earTipped: false })], NOW)).toEqual([]);
+    expect(pickMissions([cat({ status: "spotted", earTipped: true })], NOW)).toEqual([]);
   });
 
   it("gives a cat one mission, the find one first", () => {

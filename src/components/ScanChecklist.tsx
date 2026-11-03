@@ -1,7 +1,7 @@
-import { SCAN_STEPS, scanProgress } from "@/lib/scanSteps";
+import { noChecksRan, SCAN_STEPS, scanProgress, type ScanReplyState } from "@/lib/scanSteps";
 
 /** The generic progress list. It takes time only, never a result, so it cannot show a finding. */
-export function ScanChecklist({ elapsedMs, responded, state }: { elapsedMs: number; responded: boolean; state?: string }) {
+export function ScanChecklist({ elapsedMs, responded, state }: { elapsedMs: number; responded: boolean; state?: ScanReplyState }) {
   const { done, active } = scanProgress(elapsedMs, responded, state);
   return (
     <ol className="scan-list" aria-label="Checking the photo">
@@ -25,7 +25,7 @@ export function ScanChecklist({ elapsedMs, responded, state }: { elapsedMs: numb
               ) : null}
             </span>
             <span>{label}</span>
-            <span className="sr-only">{isDone ? ", done" : isActive ? ", working" : responded ? "" : ", waiting"}</span>
+            <span className="sr-only">{isDone ? ", done" : isActive ? ", working" : responded ? (noChecksRan(state) ? ", not checked" : "") : ", waiting"}</span>
           </li>
         );
       })}

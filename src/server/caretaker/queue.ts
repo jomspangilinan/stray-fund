@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import { AssessmentSchema, EarTipSchema, ReceiptSchema, type ReceiptReading } from "../ai/schemas";
+import { AssessmentSchema, ReceiptSchema, type ReceiptReading } from "../ai/schemas";
 import { db } from "../db/client";
-import { agentActions, allowedPayees, bookings, cats, guardrails, payouts, receipts, reviewRequests, sightings, users, wakeups } from "../db/schema";
+import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, payouts, receipts, reviewRequests, sightings, users, wakeups } from "../db/schema";
 import { depositPaidOn, reasonMessages } from "../vetFlow";
 import { manilaDate } from "../public";
 
@@ -51,7 +51,6 @@ export type ReceiptItem = {
   reasonMessages: string[];
   /** What the AI read from the image. Untrusted text. */
   parsed: ReceiptReading | null;
-  earTip: { ear_tip: string; confidence: number; same_cat_confidence: number } | null;
   depositPaid: number;
   packagePrice: number;
 };
@@ -62,11 +61,13 @@ export type CaretakerQueue = {
   longSent: PayoutItem[];
   sightings: SightingItem[];
   receipts: ReceiptItem[];
+  /** Receipts that passed every check and wait for a caretaker to look at the vet's photo. */
+  earTipConfirmations: ReceiptItem[];
   reviews: { id: string; subject: string; reason: string; date: string }[];
   failedWakeups: { id: string; kind: string; attempts: number; date: string }[];
   heldPhotos: { sightingId: string; catId: string | null; catName: string | null; state: string; hasRegions: boolean; date: string }[];
-  /** Spotted cats whose ears nobody has settled yet. */
-  earTipPending: { id: string; name: string; exact: ExactSpot }[];
+  /** Spotted cats whose ears the flags have not settled yet, with how many people said each. */
+  earTipPending: { id: string; name: string; yes: number; no: number; exact: ExactSpot }[];
   /** For the merge menu. */
   catChoices: { id: string; name: string; status: string; sex: string; flags: string[] }[];
 };
@@ -147,39 +148,42 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     };
   });
 
-  const waitingReceipts = await db
-    .select({
-      r: receipts,
-      booking: bookings,
-      catName: cats.name,
-      vetName: users.username,
-      clinicName: users.clinicName,
-    })
-    .from(receipts)
-    .innerJoin(bookings, eq(bookings.id, receipts.bookingId))
-    .innerJoin(cats, eq(cats.id, bookings.catId))
-    .innerJoin(users, eq(users.id, bookings.vetId))
-    .where(eq(receipts.verification, "needs_review"))
-    .orderBy(asc(receipts.createdAt), asc(receipts.id));
-  const receiptItems: ReceiptItem[] = [];
-  for (const { r, booking, catName, vetName, clinicName } of waitingReceipts) {
-    const parsed = ReceiptSchema.safeParse(r.parsed);
-    const ear = EarTipSchema.safeParse(r.earTipResult);
-    receiptItems.push({
-      id: r.id,
-      bookingId: booking.id,
-      catName,
-      vetName,
-      clinicName,
-      date: manilaDate(r.createdAt),
-      reasons: r.reasons,
-      reasonMessages: reasonMessages(r.reasons),
-      parsed: parsed.success ? parsed.data : null,
-      earTip: ear.success ? ear.data : null,
-      depositPaid: await depositPaidOn(db, booking.id),
-      packagePrice: booking.packagePrice,
-    });
-  }
+  const receiptItemsFor = async (verification: "needs_review" | "awaiting_ear_tip_confirmation"): Promise<ReceiptItem[]> => {
+    const rows = await db
+      .select({
+        r: receipts,
+        booking: bookings,
+        catName: cats.name,
+        vetName: users.username,
+        clinicName: users.clinicName,
+      })
+      .from(receipts)
+      .innerJoin(bookings, eq(bookings.id, receipts.bookingId))
+      .innerJoin(cats, eq(cats.id, bookings.catId))
+      .innerJoin(users, eq(users.id, bookings.vetId))
+      .where(eq(receipts.verification, verification))
+      .orderBy(asc(receipts.createdAt), asc(receipts.id));
+    const items: ReceiptItem[] = [];
+    for (const { r, booking, catName, vetName, clinicName } of rows) {
+      const parsed = ReceiptSchema.safeParse(r.parsed);
+      items.push({
+        id: r.id,
+        bookingId: booking.id,
+        catName,
+        vetName,
+        clinicName,
+        date: manilaDate(r.createdAt),
+        reasons: r.reasons,
+        reasonMessages: reasonMessages(r.reasons),
+        parsed: parsed.success ? parsed.data : null,
+        depositPaid: await depositPaidOn(db, booking.id),
+        packagePrice: booking.packagePrice,
+      });
+    }
+    return items;
+  };
+  const receiptItems = await receiptItemsFor("needs_review");
+  const earTipConfirmations = await receiptItemsFor("awaiting_ear_tip_confirmation");
 
   const reviews = await db
     .select()
@@ -201,6 +205,11 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     .from(cats)
     .where(and(eq(cats.status, "spotted"), or(isNull(cats.earTipped))))
     .orderBy(asc(cats.createdAt));
+  const flagCounts = await db
+    .select({ catId: earTipFlags.catId, value: earTipFlags.value, n: sql<number>`count(*)::int` })
+    .from(earTipFlags)
+    .groupBy(earTipFlags.catId, earTipFlags.value);
+  const countOf = (catId: string, value: string) => flagCounts.find((f) => f.catId === catId && f.value === value)?.n ?? 0;
 
   return {
     awaitingApproval,
@@ -208,6 +217,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     longSent,
     sightings: sightingItems,
     receipts: receiptItems,
+    earTipConfirmations,
     reviews: reviews.map((r) => ({ id: r.id, subject: r.subject, reason: r.reason, date: manilaDate(r.createdAt) })),
     failedWakeups: failed.map((w) => ({ id: w.id, kind: w.kind, attempts: w.attempts, date: manilaDate(w.createdAt) })),
     heldPhotos: held.map(({ s, catName }) => ({
@@ -219,7 +229,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
         ((s.assessment as { sensitive_regions: unknown[] }).sensitive_regions.length > 0),
       date: manilaDate(s.createdAt),
     })),
-    earTipPending: undecided.map((c) => ({ id: c.id, name: c.name, exact: exactOf(c.lat, c.lng, c.approx) })),
+    earTipPending: undecided.map((c) => ({ id: c.id, name: c.name, yes: countOf(c.id, "yes"), no: countOf(c.id, "no"), exact: exactOf(c.lat, c.lng, c.approx) })),
     catChoices: allCats,
   };
 }

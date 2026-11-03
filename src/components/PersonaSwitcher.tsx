@@ -8,7 +8,7 @@ const PERSONAS = [
   { key: "vet", label: "Vet", username: "demo_vet" },
 ] as const;
 
-/** Demo only. The layout renders this only when DEMO_MODE is on; the API checks it again. */
+/** Demo only, and simulated: it switches to a demo account and is not a real sign-in. The layout renders this only when DEMO_MODE is on; the API checks it again. */
 export function PersonaSwitcher({ current }: { current: string | null }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +30,7 @@ export function PersonaSwitcher({ current }: { current: string | null }) {
   return (
     <div className="bg-pale">
       <div className="mx-auto flex max-w-2xl items-center gap-x-2 px-4 py-1 text-[0.8125rem]">
-        <span className="font-semibold text-soft">Demo view</span>
+        <span className="font-semibold text-soft">Demo roles, simulated</span>
         <div role="group" aria-label="View the app as" className="flex gap-1">
           {PERSONAS.map((p) => (
             <button

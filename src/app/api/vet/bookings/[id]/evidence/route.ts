@@ -17,6 +17,7 @@ const isPng = (b: Buffer) => b.length > 4 && b[0] === 0x89 && b[1] === 0x50 && b
 
 const SUMMARY: Record<Verification, string> = {
   verified: "Verified. The balance is on its way to you, and the cat's card has been updated.",
+  awaiting_ear_tip_confirmation: "Waiting for a caretaker. Your receipt passed the checks, and a caretaker will look at the photo of the cat next. The balance waits until then.",
   needs_review: "We could not confirm this automatically, so a caretaker will look at it. The balance waits until then. You can also send a new photo.",
   rejected: "This submission was refused and nothing was paid.",
   pending: "Saved. We could not finish checking it just now, and will try again soon. You do not need to send it again.",

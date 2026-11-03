@@ -28,7 +28,6 @@ describe("schema", () => {
         maxPerCat: 250000,
         maxPerDay: 1000000,
         approvalThreshold: 200000,
-        earTipConfidenceMin: 0.8,
         matchConfidenceMin: 0.8,
       },
     ]);

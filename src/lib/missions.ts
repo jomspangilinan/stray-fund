@@ -11,6 +11,11 @@ export type MissionCat = {
   /** Public flag labels, such as "Pregnant". */
   flags: string[];
   earTipped: boolean | null;
+  /** How many different people said Yes or No to the ear tip. Counts only, never who. */
+  earTipYes: number;
+  earTipNo: number;
+  /** The signed-in person already answered for this cat. Always false when nobody is signed in. */
+  answeredByMe: boolean;
   photoUrl: string | null;
   lastSeenAt: Date;
 };
@@ -21,7 +26,7 @@ export type Mission = {
   catId: string;
   title: string;
   detail: string;
-  action: "spot" | "share";
+  action: "spot" | "share" | "card";
   photoUrl: string | null;
 };
 
@@ -37,6 +42,16 @@ function urgency(flags: string[]): { score: number; word: string | null } {
   if (flags.includes("Injured")) return { score: 30, word: "injured" };
   if (flags.includes("Pregnant")) return { score: 25, word: "pregnant" };
   return { score: 0, word: null };
+}
+
+/**
+ * A spotted cat whose ears the flags have not settled: fewer than two matching answers and no disagreement
+ * (a caretaker settles those). Someone who already answered is not asked again.
+ */
+function needsEarTipAnswer(c: MissionCat): boolean {
+  if (c.status !== "spotted" || c.earTipped !== null || c.answeredByMe) return false;
+  if (c.earTipYes > 0 && c.earTipNo > 0) return false;
+  return Math.max(c.earTipYes, c.earTipNo) < 2;
 }
 
 export function pickMissions(cats: MissionCat[], now: Date): Mission[] {
@@ -59,14 +74,14 @@ export function pickMissions(cats: MissionCat[], now: Date): Mission[] {
         name: c.name,
         id: c.id,
       });
-    } else if (c.status === "spotted" && c.earTipped === null) {
+    } else if (needsEarTipAnswer(c)) {
       scored.push({
         m: {
           ...base,
           kind: "ear",
-          title: `Get a clear ear photo of ${c.name}`,
-          detail: "Shows if they are neutered.",
-          action: "spot",
+          title: `Confirm ${c.name}'s ear-tip`,
+          detail: "Yes, no or not sure.",
+          action: "card",
         },
         score: 60,
         name: c.name,

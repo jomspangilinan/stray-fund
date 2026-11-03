@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "./db/client";
 import { cats, sightings } from "./db/schema";
+import { ownFlags, type EarTipValue } from "./earTipFlags";
 import { FLAG_LABEL, STATUS_LABEL } from "./public";
 import { getStorage } from "./storage";
 import type { SpotState } from "./spot";
@@ -14,7 +15,8 @@ import type { SpotState } from "./spot";
 export type SpotReveal = {
   name: string | null;
   coat: string | null;
-  earTip: string | null;
+  /** What this person said about the ear tip, if they said. Their own answer, never a finding. */
+  yourEarTip: EarTipValue | null;
   flags: string[];
   statusLabel: string;
   /** Only when the server's own coat rule set the sex, never when the finder chose it. */
@@ -26,11 +28,12 @@ export type SpotReveal = {
 
 export type RevealInput = {
   state: SpotState;
+  /** The finder's own flag on this cat. */
+  yourEarTip?: EarTipValue | null;
   cat: {
     name: string;
     status: string;
     sex: string;
-    earTipped: boolean | null;
     coatPattern: string | null;
     flags: string[];
   } | null;
@@ -56,19 +59,13 @@ const COAT_LABEL: Record<string, string> = {
 
 const SEXES = new Set(["female", "male", "unknown"]);
 
-function earTipLabel(tipped: boolean | null): string {
-  if (tipped === true) return "Ear-tipped";
-  if (tipped === false) return "No ear-tip seen";
-  return "Ear-tip not clear yet";
-}
-
 export function buildReveal(i: RevealInput): SpotReveal | null {
   if (i.state === "needs_review") {
     // A person decides, so nothing about the cat is stated.
     return {
       name: null,
       coat: null,
-      earTip: null,
+      yourEarTip: null,
       flags: [],
       statusLabel: "Waiting for a caretaker",
       probablyFemale: false,
@@ -82,7 +79,7 @@ export function buildReveal(i: RevealInput): SpotReveal | null {
   return {
     name: cat.name,
     coat: cat.coatPattern ? (COAT_LABEL[cat.coatPattern] ?? null) : null,
-    earTip: earTipLabel(cat.earTipped),
+    yourEarTip: i.yourEarTip ?? null,
     flags: cat.flags.map((f) => FLAG_LABEL[f]).filter((f): f is string => Boolean(f)),
     statusLabel: STATUS_LABEL[cat.status] ?? cat.status,
     probablyFemale: i.state === "new_cat" && !finderChose && sighting.coatSaysFemale && cat.sex === "female",
@@ -101,6 +98,7 @@ export async function loadReveal(sightingId: string, state: SpotState): Promise<
       publicReady: sightings.publicReady,
       requestedSex: sightings.requestedSex,
       assessment: sightings.assessment,
+      finderId: sightings.caughtByUserId,
     })
     .from(sightings)
     .where(eq(sightings.id, sightingId));
@@ -111,16 +109,17 @@ export async function loadReveal(sightingId: string, state: SpotState): Promise<
           name: cats.name,
           status: cats.status,
           sex: cats.sex,
-          earTipped: cats.earTipped,
           coatPattern: cats.coatPattern,
           flags: cats.flags,
         })
         .from(cats)
         .where(eq(cats.id, s.catId))
     : [];
+  const yourEarTip = s.catId && s.finderId ? ((await ownFlags(db, s.finderId, [s.catId])).get(s.catId) ?? null) : null;
   const a = s.assessment as { probably_female_by_coat?: unknown } | null;
   return buildReveal({
     state,
+    yourEarTip,
     cat: cat ?? null,
     sighting: {
       publicKey: s.publicKey,

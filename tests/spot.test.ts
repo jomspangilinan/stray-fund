@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { desc, eq } from "drizzle-orm";
 import sharp from "sharp";
 import { closePool, db } from "../src/server/db/client";
-import { cats, sightings, users, wakeups } from "../src/server/db/schema";
+import { cats, earTipFlags, reviewRequests, sightings, users, wakeups } from "../src/server/db/schema";
 import { truncateAll } from "./helpers/db";
 import { createTestPool } from "./helpers/db";
 import { COLONY } from "../src/lib/config";
@@ -33,8 +33,6 @@ const ASSESS = {
   coat_pattern: "tabby",
   colors: ["orange"],
   markings: "white socks",
-  ear_tip: "absent",
-  ear_tip_confidence: 0.9,
   flags: { kitten: false, pregnant: false, injured: false, sick: false },
   probably_female_by_coat: false,
   suggested_name: "Muning",
@@ -153,7 +151,7 @@ afterAll(async () => {
 });
 
 describe("processSpot: new cats", () => {
-  it("creates a queued cat with a generated name, bio and a public photo", async () => {
+  it("creates a spotted cat with a generated name, bio and a public photo", async () => {
     const u = await makeUser();
     const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("new_cat");
@@ -163,53 +161,73 @@ describe("processSpot: new cats", () => {
       name: "Muning",
       bio: "A calm orange cat.",
       coatPattern: "tabby",
-      status: "queued",
-      earTipped: false,
+      // The photo never settles the ear. People's answers do.
+      status: "spotted",
+      earTipped: null,
       sex: "unknown",
       areaName: COLONY.area_name,
       locationApproximate: false,
     });
-    expect(cat.queuedAt).not.toBeNull();
-    expect(await wakeupKinds()).toEqual(["cat_queued"]);
+    expect(cat.queuedAt).toBeNull();
+    expect(await wakeupKinds()).toEqual([]);
     const [s] = await sightingRows();
     expect(s).toMatchObject({ state: "new_cat", catId: cat.id, publicReady: true, caughtByUserId: u.id });
     expect(s.publicKey).toMatch(/^photos\//);
     expect(s.assessment).toMatchObject({ suggested_name: "Muning" });
   });
 
-  it("marks an ear-tipped cat neutered with no wakeup", async () => {
-    script.assess = () => assessWith({ ear_tip: "present", ear_tip_confidence: 0.95 });
-    const u = await makeUser();
-    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
-    const [cat] = await catRows();
-    expect(cat).toMatchObject({ status: "neutered", earTipped: true, queuedAt: null });
-    expect(await wakeupKinds()).toEqual([]);
-  });
-
-  it.each([
-    ["unknown", 0.95],
-    ["absent", 0.5],
-    ["present", 0.79],
-  ])("keeps a spotted cat for a %s ear tip at %s confidence and asks for review", async (ear, conf) => {
-    script.assess = () => assessWith({ ear_tip: ear, ear_tip_confidence: conf });
-    const u = await makeUser();
-    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
-    expect(out.state).toBe("needs_review");
-    expect(out.catId).toBeTruthy();
-    const [cat] = await catRows();
-    expect(cat).toMatchObject({ status: "spotted", earTipped: null, queuedAt: null });
-    const [s] = await sightingRows();
-    expect(s).toMatchObject({ state: "needs_review", catId: cat.id });
-    expect(await wakeupKinds()).toEqual([]);
-  });
-
-  it("uses the guardrail ear-tip threshold", async () => {
-    await db.execute((await import("drizzle-orm")).sql`update guardrails set ear_tip_confidence_min = 0.5`);
-    script.assess = () => assessWith({ ear_tip: "absent", ear_tip_confidence: 0.6 });
+  it("never judges the ear from the photo: whatever the assessment carries, the cat stays spotted", async () => {
+    script.assess = () => assessWith({ ear_tip: "present", ear_tip_confidence: 0.99 });
     const u = await makeUser();
     const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("new_cat");
-    expect((await catRows())[0].status).toBe("queued");
+    expect((await catRows())[0]).toMatchObject({ status: "spotted", earTipped: null, queuedAt: null });
+    expect(await wakeupKinds()).toEqual([]);
+    expect(JSON.stringify((await sightingRows())[0].assessment)).not.toMatch(/ear_tip/);
+  });
+
+  it("records the finder's Yes or No as a flag on the card, and Not sure as nothing", async () => {
+    const u = await makeUser();
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id, earTip: "no" });
+    const [cat] = await catRows();
+    expect((await db.select().from(earTipFlags)).map((f) => [f.catId, f.userId, f.value])).toEqual([[cat.id, u.id, "no"]]);
+    expect(cat.status).toBe("spotted");
+    const v = await makeUser();
+    script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: v.id });
+    expect(await db.select().from(earTipFlags)).toHaveLength(1);
+  });
+
+  it("two different finders saying No queue the cat, two saying Yes make it already neutered", async () => {
+    const [a, b, c, d] = [await makeUser(), await makeUser(), await makeUser(), await makeUser()];
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: a.id, earTip: "no" });
+    const [cat] = await catRows();
+    script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: b.id, earTip: "no" });
+    expect((await catRows())[0]).toMatchObject({ status: "queued", earTipped: false });
+    expect(await wakeupKinds()).toEqual(["cat_queued"]);
+
+    script.match = () => noMatch();
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: c.id, earTip: "yes" });
+    const other = (await catRows()).find((x) => x.id !== cat.id)!;
+    script.match = () => ({ match_cat_id: other.id, confidence: 0.9, reason: "same" });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: d.id, earTip: "yes" });
+    expect((await catRows()).find((x) => x.id === other.id)).toMatchObject({ status: "neutered", earTipped: true });
+  });
+
+  it("a review that a caretaker confirms as a new cat still carries the finder's answer", async () => {
+    script.assess = () => assessWith();
+    const u = await makeUser();
+    const { key } = await storeOriginal(await jpeg());
+    const [s] = await db
+      .insert(sightings)
+      .values({ originalKey: key, caughtByUserId: u.id, state: "needs_review", requestedEarTip: "no", assessment: { ...ASSESS, review_reason: "ai_unusable" } })
+      .returning();
+    const { runAction } = await import("../src/server/caretaker");
+    const care = await db.insert(users).values({ username: `care_${Date.now()}`, role: "caretaker" }).returning();
+    expect((await runAction("sighting_confirm_new", care[0].id, { sightingId: s.id })).ok).toBe(true);
+    const [flag] = await db.select().from(earTipFlags);
+    expect(flag).toMatchObject({ userId: u.id, value: "no" });
   });
 
   it("numbers a name that is already taken and falls back for a blank name", async () => {
@@ -331,7 +349,7 @@ describe("processSpot: matching", () => {
     expect(out.state).toBe("needs_review");
   });
 
-  it("never regresses status: a queued cat stays queued on a confident absent tip", async () => {
+  it("never regresses status: a queued cat stays queued when it is matched again", async () => {
     const { cat } = await seedCat({ status: "queued", earTipped: false });
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
@@ -341,19 +359,17 @@ describe("processSpot: matching", () => {
     expect(await wakeupKinds()).toEqual([]);
   });
 
-  it("sends a newly confident ear tip on a queued cat to review without changing status", async () => {
+  it("a Yes from a finder on a queued cat files a review and does not change its status", async () => {
     const { cat } = await seedCat({ status: "queued", earTipped: false });
-    script.assess = () => assessWith({ ear_tip: "present", ear_tip_confidence: 0.95 });
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
-    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
-    expect(out).toMatchObject({ state: "needs_review", catId: cat.id });
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id, earTip: "yes" });
+    expect(out).toMatchObject({ state: "matched", catId: cat.id });
     expect((await catRows())[0]).toMatchObject({ status: "queued", earTipped: false });
-    const [s] = await db.select().from(sightings).orderBy(desc(sightings.createdAt));
-    expect(s).toMatchObject({ state: "needs_review", catId: cat.id });
+    expect((await db.select().from(reviewRequests)).filter((r) => r.status === "open")).toHaveLength(1);
   });
 
-  it("leaves a neutered cat alone when a later photo says absent", async () => {
+  it("leaves a neutered cat alone when it is matched again", async () => {
     const { cat } = await seedCat({ status: "neutered", earTipped: true });
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
@@ -362,25 +378,14 @@ describe("processSpot: matching", () => {
     expect((await catRows())[0]).toMatchObject({ status: "neutered", earTipped: true });
   });
 
-  it("resolves a spotted cat with unknown ear tip through the transition and queues it", async () => {
+  it("a match with no ear-tip answer leaves a spotted cat spotted and queues nothing", async () => {
     const { cat } = await seedCat({});
-    script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
-    const u = await makeUser();
-    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
-    const [row] = await catRows();
-    expect(row).toMatchObject({ status: "queued", earTipped: false });
-    expect(row.queuedAt).not.toBeNull();
-    expect(await wakeupKinds()).toEqual(["cat_queued"]);
-  });
-
-  it("keeps a spotted cat spotted when the new photo is not confident", async () => {
-    const { cat } = await seedCat({});
-    script.assess = () => assessWith({ ear_tip: "unknown", ear_tip_confidence: 0.2 });
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
     const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("matched");
-    expect((await catRows())[0]).toMatchObject({ status: "spotted", earTipped: null });
+    expect((await catRows())[0]).toMatchObject({ status: "spotted", earTipped: null, queuedAt: null });
+    expect(await wakeupKinds()).toEqual([]);
   });
 
   it("merges flags and never removes them", async () => {
@@ -528,7 +533,7 @@ describe("one-time apply", () => {
     expect(first.state).toBe("new_cat");
     expect(second).toMatchObject({ state: "new_cat", catId: first.catId });
     expect(await catRows()).toHaveLength(1);
-    expect(await wakeupKinds()).toEqual(["cat_queued"]);
+    expect(await wakeupKinds()).toEqual([]);
   });
 
   it("two racing finishers make one cat", async () => {
@@ -537,7 +542,7 @@ describe("one-time apply", () => {
     expect(a.catId).toBeTruthy();
     expect(b.catId).toBe(a.catId);
     expect(await catRows()).toHaveLength(1);
-    expect(await wakeupKinds()).toEqual(["cat_queued"]);
+    expect(await wakeupKinds()).toEqual([]);
   });
 
   it("does not run assess again once a pending sighting has a stored assessment", async () => {

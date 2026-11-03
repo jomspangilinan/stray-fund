@@ -171,10 +171,10 @@ describe("claude-cli request", () => {
     install(async (_f, args, opts) => {
       files = readdirSync(String(opts.cwd)).sort();
       prompt = args[1];
-      return { stdout: cliOut({ ear_tip: "absent", confidence: 0.5, same_cat_confidence: 0.5 }), stderr: "" };
+      return { stdout: cliOut({ match_cat_id: null, confidence: 0.5, reason: "unsure" }), stderr: "" };
     });
-    const { verifyEarTip } = await import("../src/server/ai/receipt");
-    await verifyEarTip(JPEG, [JPEG, JPEG]);
+    const { matchCat } = await import("../src/server/ai/match");
+    await matchCat(JPEG, [{ catId: "a", photos: [JPEG, JPEG] }]);
     expect(files).toEqual(["img-1.jpg", "img-2.jpg", "img-3.jpg"]);
     expect(prompt).toMatch(/img-1\.jpg/);
     expect(prompt).toMatch(/img-3\.jpg/);

@@ -8,7 +8,9 @@ import { db } from "./db/client";
  *  - spotted: a sighting a person accepted or the AI matched (state matched or new_cat), and the first one for the cat
  *  - funded: a net positive allocation from that person's captured donation
  *  - vet care: a receipt that was verified, for the vet on the booking
- *  - caretaker: evidence accepted, or a cat marked adopted, recorded in the audit trail
+ *  - ear-tip: an ear-tip answer that matched what settled the cat (a caretaker's decision, or the vet's photo
+ *    a caretaker confirmed). An answer nobody else backed, or that was overruled, earns nothing.
+ *  - caretaker: evidence accepted, an ear-tip photo confirmed, or a cat marked adopted, recorded in the audit trail
  * Order is by when it happened. Amounts are never selected, so nothing can sort or show by them.
  * Only a username (or "A neighbour"), a short sentence and badge labels leave this file.
  */
@@ -38,7 +40,7 @@ export function badgesOf(i: { spots: number; helpedNeutered: boolean; helpedHome
   return out;
 }
 
-type Kind = "spotted_first" | "spotted" | "funded" | "vet_care" | "checked" | "adopted";
+type Kind = "spotted_first" | "spotted" | "funded" | "vet_care" | "checked" | "adopted" | "ear_yes" | "ear_no";
 type Row = { user_id: string; cat_id: string; cat: string; kind: Kind; at: Date | string; username: string; show: boolean };
 
 const CARD_TEXT: Record<Kind, string> = {
@@ -48,6 +50,8 @@ const CARD_TEXT: Record<Kind, string> = {
   vet_care: "gave vet care",
   checked: "checked vet care",
   adopted: "marked adopted",
+  ear_yes: "confirmed the ear-tip",
+  ear_no: "confirmed no ear-tip",
 };
 const HOME_TEXT: Record<Kind, (cat: string) => string> = {
   spotted_first: (c) => `spotted ${c} first`,
@@ -56,6 +60,8 @@ const HOME_TEXT: Record<Kind, (cat: string) => string> = {
   vet_care: (c) => `gave vet care to ${c}`,
   checked: (c) => `checked vet care for ${c}`,
   adopted: (c) => `marked ${c} adopted`,
+  ear_yes: (c) => `confirmed ${c}'s ear-tip`,
+  ear_no: (c) => `confirmed ${c} has no ear-tip`,
 };
 
 /** One row per person, cat and kind, newest first. No amount is ever read. */
@@ -82,12 +88,17 @@ const events = sql`
       union all
       select g.approved_by,
              (g.inputs->>'catId')::uuid,
-             case g.action when 'evidence_accepted' then 'checked' else 'adopted' end,
+             case when g.action in ('evidence_accepted', 'ear_tip_confirmed') then 'checked' else 'adopted' end,
              g.created_at
       from agent_actions g
       where g.approved_by is not null
         and g.inputs->>'catId' ~* ${UUID_RE}
-        and (g.action = 'evidence_accepted' or (g.action = 'cat_updated' and g.inputs->>'change' = 'adopted'))
+        and (g.action in ('evidence_accepted', 'ear_tip_confirmed') or (g.action = 'cat_updated' and g.inputs->>'change' = 'adopted'))
+      union all
+      -- Only an answer that agrees with how the cat settled: no answer is credited just for being given.
+      select f.user_id, f.cat_id, case f.value when 'yes' then 'ear_yes' else 'ear_no' end, f.created_at
+      from ear_tip_flags f join cats fc on fc.id = f.cat_id
+      where (f.value = 'yes' and fc.ear_tipped = true) or (f.value = 'no' and fc.ear_tipped = false)
     ) raw
     group by user_id, cat_id, kind
   ) e

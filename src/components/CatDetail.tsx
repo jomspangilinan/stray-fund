@@ -2,10 +2,21 @@ import Link from "next/link";
 import type { CatCardData } from "@/server/public";
 import type { Thanks } from "@/server/thanks";
 import { CatPhoto } from "./CatPhoto";
+import { EarTipAsk } from "./EarTipAsk";
+import type { EarTipAnswer } from "./EarTipChoice";
 import { Progress } from "./CatRow";
 import { JourneyTimeline, niceDate } from "./JourneyTimeline";
 
-export function CatDetail({ card, thanks = [] }: { card: CatCardData; thanks?: Thanks[] }) {
+export function CatDetail({
+  card,
+  thanks = [],
+  earTip,
+}: {
+  card: CatCardData;
+  thanks?: Thanks[];
+  /** Set only for a signed-in person: their own answer. Nobody else's is ever passed in. */
+  earTip?: EarTipAnswer;
+}) {
   const { cat, sightings, health } = card;
   return (
     <article className="grid gap-8">
@@ -32,6 +43,10 @@ export function CatDetail({ card, thanks = [] }: { card: CatCardData; thanks?: T
         )}
         {cat.bio && <p className="mt-4 max-w-[52ch]">{cat.bio}</p>}
       </header>
+
+      {earTip !== undefined && cat.status === "spotted" && cat.earTipped === null && (
+        <EarTipAsk catId={cat.id} initial={earTip} />
+      )}
 
       <section aria-labelledby="where">
         <h2 id="where" className="h2">

@@ -28,7 +28,6 @@ export const guardrailsUpdate: Handler = async (caretakerId, body) => {
     maxPerCat: pesosToCentavos(body.maxPerCat, "The cap per cat"),
     maxPerDay: pesosToCentavos(body.maxPerDay, "The cap per day"),
     approvalThreshold: pesosToCentavos(body.approvalThreshold, "The approval threshold"),
-    earTipConfidenceMin: confidence(body.earTipConfidenceMin, "The ear-tip confidence"),
     matchConfidenceMin: confidence(body.matchConfidenceMin, "The match confidence"),
   };
   if (next.approvalThreshold > next.maxPerCat) {

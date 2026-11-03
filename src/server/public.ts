@@ -3,7 +3,8 @@ import { COLONY } from "@/lib/config";
 import { goalPercent } from "@/lib/goal";
 import { pickMissions, type Mission, type MissionCat } from "@/lib/missions";
 import { db } from "./db/client";
-import { cats, sightings, treatments, users } from "./db/schema";
+import { cats, earTipFlags, sightings, treatments, users } from "./db/schema";
+import { ownFlags } from "./earTipFlags";
 import { CAPTURED, getPoolStatus, toInt } from "./ledger";
 import type { Session } from "./session";
 import { getStorage } from "./storage";
@@ -593,7 +594,7 @@ export async function getGoalProgress(): Promise<GoalProgress> {
 }
 
 /** Missions from public-safe data only: public columns, public flag labels, and the scrubbed photo when ready. */
-export async function getMissions(now: Date = new Date()): Promise<Mission[]> {
+export async function getMissions(now: Date = new Date(), viewerId: string | null = null): Promise<Mission[]> {
   const rows = await db
     .select(publicCatColumns)
     .from(cats)
@@ -602,6 +603,15 @@ export async function getMissions(now: Date = new Date()): Promise<Mission[]> {
     .limit(MAX_CATS);
   const ids = rows.map((r) => r.id);
   const sights = await loadSightings(ids);
+  // Counts of answers and the viewer's own answer. Never who said what.
+  const flagRows = ids.length
+    ? await db
+        .select({ catId: earTipFlags.catId, value: earTipFlags.value, n: sql<number>`count(*)::int` })
+        .from(earTipFlags)
+        .where(inArray(earTipFlags.catId, ids))
+        .groupBy(earTipFlags.catId, earTipFlags.value)
+    : [];
+  const answered = viewerId ? await ownFlags(db, viewerId, ids) : new Map();
   const input: MissionCat[] = rows.map((r) => {
     const mine = sights.filter((s) => s.catId === r.id);
     const last = mine.at(-1);
@@ -612,6 +622,9 @@ export async function getMissions(now: Date = new Date()): Promise<Mission[]> {
       status: r.status,
       flags: (r.flags ?? []).map((f) => FLAG_LABEL[f]).filter((f): f is string => Boolean(f)),
       earTipped: r.earTipped ?? null,
+      earTipYes: flagRows.find((f) => f.catId === r.id && f.value === "yes")?.n ?? 0,
+      earTipNo: flagRows.find((f) => f.catId === r.id && f.value === "no")?.n ?? 0,
+      answeredByMe: answered.has(r.id),
       photoUrl: photoUrl(photo?.publicKey ?? null),
       lastSeenAt: last ? (last.takenAt ?? last.createdAt) : r.createdAt,
     };

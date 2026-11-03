@@ -1,14 +1,13 @@
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
-import * as z from "zod/v4";
 import { CURRENCY } from "@/lib/config";
 import { fileReview } from "./agent/review";
-import { readReceipt, verifyEarTip } from "./ai/receipt";
-import { EarTipSchema, ReceiptSchema, type EarTipCheck, type ReceiptReading } from "./ai/schemas";
+import { readReceipt } from "./ai/receipt";
+import { ReceiptSchema, type ReceiptReading } from "./ai/schemas";
 import { RateLimited } from "./spot";
 import { COMPLETED_BOOKING, transitionCat } from "./catTransitions";
 import { db, withColonyLock, type Tx } from "./db/client";
-import { allowedPayees, bookings, cats, guardrails, payouts, receipts, sightings, treatments, users } from "./db/schema";
+import { allowedPayees, bookings, cats, guardrails, payouts, receipts, treatments, users } from "./db/schema";
 import { CONFIRMED_BOOKING } from "./guardrails";
 import { CAPTURED, returnSurplus, toInt, unspentForCat } from "./ledger";
 import { storeOriginal } from "./photos";
@@ -18,7 +17,7 @@ import { StoredObjectMissing, getStorage } from "./storage";
 import { enqueueWakeup } from "./wakeups";
 
 export type Booking = typeof bookings.$inferSelect;
-export type Verification = "pending" | "verified" | "rejected" | "needs_review";
+export type Verification = "pending" | "verified" | "rejected" | "needs_review" | "awaiting_ear_tip_confirmation";
 export type EvidenceResult = { verification: Verification; reasons: string[] };
 
 /** A receipt's total may differ from the package by this much, in centavos, and still count as the package. */
@@ -27,7 +26,6 @@ export const EVIDENCE_PER_MINUTE = 5;
 export const BOOKINGS_PER_MINUTE = 10;
 export const RETRY_AFTER_SECONDS = 60;
 export const RETRY_BATCH = 10;
-const MAX_REFERENCES = 3;
 const MAX_PRODUCT = 60;
 const MANILA_OFFSET = "+08:00";
 
@@ -59,11 +57,6 @@ const REASON_MESSAGES = {
   cat_name_mismatch: "The cat's name on the receipt does not match this booking.",
   tamper_signs: "The receipt shows signs of editing, or contains text that does not belong on a receipt.",
   receipt_number_unreadable: "We could not read the receipt number.",
-  ear_tip_unreadable: "We could not check the photo. Take a new one of the cat's ears.",
-  ear_tip_not_confirmed: "The photo does not confirm a tipped ear. Take a new one showing the ears clearly.",
-  ear_tip_low_confidence: "The ear tip is not clear enough in the photo. Take a new one, closer and in good light.",
-  not_same_cat: "The photo may not show the same cat as this booking.",
-  no_reference_photos: "We have no earlier photos of this cat to compare with, so a caretaker has to look at it.",
   booking_not_open: "This booking is no longer open.",
   cat_not_in_care: "This cat is not in care.",
   deposit_not_paid: "The deposit for this booking has not been paid.",
@@ -101,7 +94,7 @@ const monthOf = (name: string): number | undefined => MONTHS[name.toLowerCase().
  * The date a printed string means, or null. A numeric date is month first, as clinics here
  * print it, and day first only when the first field cannot be a month. So a stale day-first
  * receipt can pass this one check, an accepted trade-off since number, clinic, total and
- * ear-tip still apply. Never uses Date parsing, which depends on the machine's zone and locale.
+ * the caretaker's look at the ear-tip photo still apply. Never uses Date parsing, which depends on the machine's zone and locale.
  */
 export function receiptDate(raw: string | null): string | null {
   if (!raw) return null;
@@ -176,15 +169,18 @@ function currencyMatches(printed: string | null): boolean {
 
 // ---------- The decision ----------
 
-export type VerificationDecision = { verification: "verified" | "rejected" | "needs_review"; reasons: ReasonCode[] };
+/** A receipt that passes every check is not verified: a caretaker still has to see the ear-tip in the vet's photo. */
+export type VerificationDecision = {
+  verification: "awaiting_ear_tip_confirmation" | "rejected" | "needs_review";
+  reasons: ReasonCode[];
+};
 
 export type DecisionBooking = Pick<Booking, "status" | "packagePrice" | "scheduledFor"> & {
   /** Centavos of deposit that have succeeded on this booking. */
   depositPaid: number;
 };
-export type DecisionCat = { name: string; status: string; referencePhotos: number };
+export type DecisionCat = { name: string; status: string };
 export type DecisionVet = { clinicName: string | null };
-export type DecisionLimits = { earTipConfidenceMin: number; matchConfidenceMin: number };
 export type DecisionDup = { hash: boolean; receiptNumber: boolean };
 
 /**
@@ -194,11 +190,9 @@ export type DecisionDup = { hash: boolean; receiptNumber: boolean };
  */
 export function decideVerification(
   parsed: ReceiptReading | null,
-  earTip: EarTipCheck | null,
   booking: DecisionBooking,
   cat: DecisionCat,
   vet: DecisionVet,
-  limits: DecisionLimits,
   dup: DecisionDup,
   now: Date,
 ): VerificationDecision {
@@ -243,16 +237,7 @@ export function decideVerification(
     if (normalizeReceiptNumber(parsed.receipt_number) === null) reasons.push("receipt_number_unreadable");
   }
 
-  if (!earTip) {
-    reasons.push("ear_tip_unreadable");
-  } else {
-    if (earTip.ear_tip !== "present") reasons.push("ear_tip_not_confirmed");
-    else if (earTip.confidence < limits.earTipConfidenceMin) reasons.push("ear_tip_low_confidence");
-    if (cat.referencePhotos <= 0) reasons.push("no_reference_photos");
-    else if (earTip.same_cat_confidence < limits.matchConfidenceMin) reasons.push("not_same_cat");
-  }
-
-  return reasons.length > 0 ? { verification: "needs_review", reasons } : { verification: "verified", reasons: [] };
+  return reasons.length > 0 ? { verification: "needs_review", reasons } : { verification: "awaiting_ear_tip_confirmation", reasons: [] };
 }
 
 // ---------- Shared loads ----------
@@ -355,6 +340,9 @@ function refusal(vetId: string, s: BookingState): VetFlowError | null {
   if (s.depositPaid <= 0) return new VetFlowError("DEPOSIT_NOT_PAID", 409, "Evidence opens once the deposit has reached you.");
   if (s.catStatus !== "in_care") return new VetFlowError("CAT_NOT_IN_CARE", 409, "Evidence opens once the cat is in care.");
   if (s.latest === "pending") return new VetFlowError("EVIDENCE_PENDING", 409, "Your last submission is still being checked.");
+  if (s.latest === "awaiting_ear_tip_confirmation") {
+    return new VetFlowError("EVIDENCE_AWAITING", 409, "Waiting for a caretaker. Your receipt passed the checks and the ear-tip photo is next.");
+  }
   return null;
 }
 
@@ -365,11 +353,11 @@ async function loadBookingState(tx: Tx | typeof db, bookingId: string): Promise<
     .innerJoin(cats, eq(cats.id, bookings.catId))
     .where(eq(bookings.id, bookingId));
   if (!row) return null;
-  // A verified or pending row outranks any older attempts. The index allows only one of them.
+  // A verified, pending or waiting row outranks any older attempts. The index allows only one of them.
   const [live] = await tx
     .select({ verification: receipts.verification })
     .from(receipts)
-    .where(and(eq(receipts.bookingId, bookingId), inArray(receipts.verification, ["pending", "verified"])));
+    .where(and(eq(receipts.bookingId, bookingId), inArray(receipts.verification, ["pending", "verified", "awaiting_ear_tip_confirmation"])));
   return {
     booking: row.booking,
     catStatus: row.catStatus,
@@ -413,7 +401,7 @@ async function fileEvidenceReview(tx: Tx, bookingId: string, verification: "reje
   await fileReview(
     tx,
     `Evidence on booking ${bookingId} needs a person`,
-    "A vet's receipt or ear-tip photo could not be confirmed by the checks, so the balance stays unpaid. Please look at it.",
+    "A vet's receipt could not be confirmed by the checks, so the balance stays unpaid. Please look at it.",
   );
 }
 
@@ -477,38 +465,6 @@ export async function submitEvidence(i: {
 type Stop = "budget" | "unavailable";
 type Run = { result: EvidenceResult; stop?: Stop };
 
-/** What the ear-tip column holds: the model's report, and how many reference photos it actually saw. */
-const StoredEarTip = EarTipSchema.extend({ reference_count: z.number().int().min(0) });
-
-/**
- * Sightings confirmed as this cat, from before the booking. A later one could be the post-op
- * photo itself passed off as a reference, and an unconfirmed one may be another cat.
- */
-async function referencePhotos(catId: string, bookingId: string): Promise<Buffer[]> {
-  const shots = await db
-    .select({ key: sightings.originalKey })
-    .from(sightings)
-    .where(
-      and(
-        eq(sightings.catId, catId),
-        inArray(sightings.state, ["matched", "new_cat"]),
-        sql`${sightings.createdAt} < (select created_at from ${bookings} where ${bookings.id} = ${bookingId})`,
-      ),
-    )
-    .orderBy(desc(sightings.createdAt))
-    .limit(MAX_REFERENCES);
-  const storage = getStorage();
-  const photos: Buffer[] = [];
-  for (const { key } of shots) {
-    try {
-      photos.push(await storage.getPrivate(key));
-    } catch {
-      // A missing reference only makes the comparison weaker, and none at all means a person decides.
-    }
-  }
-  return photos;
-}
-
 const isStop = (reason: string): reason is Stop => reason === "budget" || reason === "unavailable";
 
 /** Runs the AI for a pending receipt with no transaction open, then applies the outcome. */
@@ -539,9 +495,11 @@ async function markEvidenceLost(receiptId: string, bookingId: string): Promise<E
 }
 
 async function checkPending(r: typeof receipts.$inferSelect): Promise<Run> {
-  const [booking] = await db.select().from(bookings).where(eq(bookings.id, r.bookingId));
   const pending: EvidenceResult = { verification: "pending", reasons: [] };
   const storage = getStorage();
+  // The post-op photo is for a caretaker's eyes, so it has to be there before anything moves on.
+  if (!r.earTipPhotoKey) throw new StoredObjectMissing();
+  await storage.getPrivate(r.earTipPhotoKey);
 
   // A stored result on a pending row means an earlier run got this far. Do not pay for it twice.
   let parsed: ReceiptReading | null;
@@ -560,28 +518,7 @@ async function checkPending(r: typeof receipts.$inferSelect): Promise<Run> {
     }
   }
 
-  let earTip: EarTipCheck | null;
-  let referenceCount: number;
-  const storedEar = StoredEarTip.safeParse(r.earTipResult);
-  if (storedEar.success) {
-    earTip = storedEar.data;
-    referenceCount = storedEar.data.reference_count;
-  } else {
-    const references = await referencePhotos(booking.catId, booking.id);
-    referenceCount = references.length;
-    if (!r.earTipPhotoKey) throw new StoredObjectMissing();
-    const check = await verifyEarTip(await storage.getPrivate(r.earTipPhotoKey), references);
-    if (!check.ok && isStop(check.reason)) return { result: pending, stop: check.reason };
-    earTip = check.ok ? check.data : null;
-    if (earTip) {
-      await db
-        .update(receipts)
-        .set({ earTipResult: { ...earTip, reference_count: referenceCount } })
-        .where(and(eq(receipts.id, r.id), eq(receipts.verification, "pending")));
-    }
-  }
-
-  return { result: await applyEvidence(r.id, parsed, earTip, referenceCount) };
+  return { result: await applyEvidence(r.id, parsed) };
 }
 
 /** Finishes a pending receipt, or returns the outcome it already has. */
@@ -594,21 +531,51 @@ async function receiptNumberUsed(tx: Tx, number: string | null, receiptId: strin
   const rows = await tx
     .select({ number: sql<unknown>`${receipts.parsed}->>'receipt_number'` })
     .from(receipts)
-    .where(and(ne(receipts.id, receiptId), inArray(receipts.verification, ["verified", "pending"]), isNotNull(receipts.parsed)));
+    .where(and(ne(receipts.id, receiptId), inArray(receipts.verification, ["verified", "pending", "awaiting_ear_tip_confirmation"]), isNotNull(receipts.parsed)));
   return rows.some((row) => normalizeReceiptNumber(row.number) === number);
 }
 
+type Decided = {
+  decision: VerificationDecision;
+  booking: Booking;
+  cat: typeof cats.$inferSelect;
+  surplus: number;
+};
+
 /**
- * Applies the outcome in one transaction, under the colony lock because it moves money
- * back to the pool. Conditional on the row being pending, so a second call changes nothing.
- * Everything the decision rests on is read here, not before the AI ran.
+ * Everything the decision rests on, read under the colony lock and not before the AI ran. Caller holds the
+ * lock. A receipt that would wait for a caretaker but whose surplus the cat no longer holds goes to a person.
  */
-async function applyEvidence(
-  receiptId: string,
-  parsed: ReceiptReading | null,
-  earTip: EarTipCheck | null,
-  referenceCount: number,
-): Promise<EvidenceResult> {
+async function decideStored(tx: Tx, r: typeof receipts.$inferSelect, parsed: ReceiptReading | null): Promise<Decided> {
+  const [booking] = await tx.select().from(bookings).where(eq(bookings.id, r.bookingId));
+  const [cat] = await tx.select().from(cats).where(eq(cats.id, booking.catId)).for("update");
+  const [vet] = await tx.select().from(users).where(eq(users.id, booking.vetId));
+  const depositPaid = await depositPaidOn(tx, booking.id);
+  const number = normalizeReceiptNumber(parsed?.receipt_number);
+
+  let decision = decideVerification(
+    parsed,
+    { status: booking.status, packagePrice: booking.packagePrice, scheduledFor: booking.scheduledFor, depositPaid },
+    { name: cat.name, status: cat.status },
+    { clinicName: vet.clinicName },
+    // The unique index holds the hash, and the row got past that check when it was inserted.
+    { hash: false, receiptNumber: await receiptNumberUsed(tx, number, r.id) },
+    new Date(),
+  );
+  const surplus = surplusToReturn(booking.packagePrice, parsed?.total_centavos ?? 0);
+  // Throwing here would leave the row pending and retried for ever, so a person looks instead.
+  if (decision.verification === "awaiting_ear_tip_confirmation" && (await surplusUnavailable(tx, cat.id, surplus))) {
+    decision = { verification: "needs_review", reasons: ["surplus_unavailable"] };
+  }
+  return { decision, booking, cat, surplus };
+}
+
+/**
+ * Applies the outcome in one transaction, under the colony lock because the decision reads money. Conditional
+ * on the row being pending, so a second call changes nothing. A receipt that passes every check is not
+ * verified: it waits for a caretaker to see the ear-tip in the vet's photo, and nothing is written but the state.
+ */
+async function applyEvidence(receiptId: string, parsed: ReceiptReading | null): Promise<EvidenceResult> {
   return withColonyLock(async (tx) => {
     const [r] = await tx.select().from(receipts).where(eq(receipts.id, receiptId)).for("update");
     if (!r) throw new Error(`Receipt not found: ${receiptId}`);
@@ -616,58 +583,57 @@ async function applyEvidence(
       return { verification: r.verification as Verification, reasons: r.reasons };
     }
 
-    const [booking] = await tx.select().from(bookings).where(eq(bookings.id, r.bookingId));
-    const [cat] = await tx.select().from(cats).where(eq(cats.id, booking.catId)).for("update");
-    const [vet] = await tx.select().from(users).where(eq(users.id, booking.vetId));
-    const limits = await loadLimits(tx);
-    const depositPaid = await depositPaidOn(tx, booking.id);
-    const number = normalizeReceiptNumber(parsed?.receipt_number);
-
-    let decision: VerificationDecision = decideVerification(
-      parsed,
-      earTip,
-      { status: booking.status, packagePrice: booking.packagePrice, scheduledFor: booking.scheduledFor, depositPaid },
-      { name: cat.name, status: cat.status, referencePhotos: referenceCount },
-      { clinicName: vet.clinicName },
-      { earTipConfidenceMin: limits.earTipConfidenceMin, matchConfidenceMin: limits.matchConfidenceMin },
-      // The unique index holds the hash, and the row got past that check when it was inserted.
-      { hash: false, receiptNumber: await receiptNumberUsed(tx, number, r.id) },
-      new Date(),
-    );
-
-    const total = parsed?.total_centavos ?? 0;
-    const surplus = surplusToReturn(booking.packagePrice, total);
-    // Throwing here would leave the row pending and retried for ever, so a person looks instead.
-    if (decision.verification === "verified" && (await surplusUnavailable(tx, cat.id, surplus))) {
-      decision = { verification: "needs_review", reasons: ["surplus_unavailable"] };
-    }
-
+    const { decision, booking } = await decideStored(tx, r, parsed);
     await tx
       .update(receipts)
-      .set({
-        verification: decision.verification,
-        reasons: decision.reasons,
-        ...(parsed ? { parsed } : {}),
-        ...(earTip ? { earTipResult: { ...earTip, reference_count: referenceCount } } : {}),
-      })
+      .set({ verification: decision.verification, reasons: decision.reasons, ...(parsed ? { parsed } : {}) })
       .where(eq(receipts.id, r.id));
 
-    if (decision.verification !== "verified") {
+    if (decision.verification === "needs_review" || decision.verification === "rejected") {
       await fileEvidenceReview(tx, booking.id, decision.verification);
-      return { verification: decision.verification, reasons: decision.reasons };
     }
-
-    // parsed and its date are non-null here, since the decision verified them.
-    await applyVerifiedOutcome(tx, {
-      receiptId: r.id,
-      booking,
-      catId: cat.id,
-      parsed: parsed!,
-      treatedOn: receiptDate(parsed!.date)!,
-      surplus,
-    });
-    return { verification: "verified", reasons: [] };
+    return { verification: decision.verification, reasons: decision.reasons };
   });
+}
+
+/**
+ * A caretaker saw the ear-tip in the vet's photo. Caller holds the colony lock and has checked the role. The
+ * checks run again on today's facts, since days may have passed, and only a receipt that still passes becomes
+ * verified. The effect is the same shared function every verified receipt uses. Returns what became of it.
+ */
+export async function confirmEarTipPhoto(tx: Tx, receiptId: string): Promise<EvidenceResult> {
+  const [r] = await tx.select().from(receipts).where(eq(receipts.id, receiptId)).for("update");
+  if (!r) throw new VetFlowError("RECEIPT_NOT_FOUND", 404, "There is no such receipt.");
+  if (r.verification !== "awaiting_ear_tip_confirmation") {
+    throw new VetFlowError("NOT_WAITING", 409, "This receipt is not waiting for an ear-tip confirmation.");
+  }
+  if (!r.earTipPhotoKey) throw new VetFlowError("PHOTO_MISSING", 409, "There is no ear-tip photo to look at.");
+  try {
+    await getStorage().getPrivate(r.earTipPhotoKey);
+  } catch (e) {
+    if (e instanceof StoredObjectMissing) throw new VetFlowError("PHOTO_MISSING", 409, "The ear-tip photo is missing, so it cannot be confirmed.");
+    throw e;
+  }
+
+  const read = ReceiptSchema.safeParse(r.parsed);
+  const parsed = read.success ? read.data : null;
+  const { decision, booking, cat, surplus } = await decideStored(tx, r, parsed);
+  if (decision.verification !== "awaiting_ear_tip_confirmation" || !parsed) {
+    await tx.update(receipts).set({ verification: "needs_review", reasons: decision.reasons }).where(eq(receipts.id, r.id));
+    await fileEvidenceReview(tx, booking.id, "needs_review");
+    return { verification: "needs_review", reasons: decision.reasons };
+  }
+
+  await tx.update(receipts).set({ verification: "verified", reasons: [] }).where(eq(receipts.id, r.id));
+  await applyVerifiedOutcome(tx, {
+    receiptId: r.id,
+    booking,
+    catId: cat.id,
+    parsed,
+    treatedOn: receiptDate(parsed.date)!,
+    surplus,
+  });
+  return { verification: "verified", reasons: [] };
 }
 
 /** What goes back to the pool when a receipt comes in under the package price. Within the tolerance, nothing. */
@@ -859,6 +825,7 @@ export type EvidenceState =
   | { state: "waiting_deposit" }
   | { state: "waiting_cat" }
   | { state: "checking" }
+  | { state: "waiting_caretaker" }
   | { state: "verified" }
   | { state: "closed" };
 export type VetBookingView = {
@@ -874,6 +841,7 @@ function evidenceStateOf(s: BookingState): EvidenceState {
   if (s.depositPaid <= 0) return { state: "waiting_deposit" };
   if (s.catStatus !== "in_care") return { state: "waiting_cat" };
   if (s.latest === "pending") return { state: "checking" };
+  if (s.latest === "awaiting_ear_tip_confirmation") return { state: "waiting_caretaker" };
   return { state: "open" };
 }
 

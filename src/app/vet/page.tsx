@@ -5,7 +5,6 @@ import { BookCatForm } from "@/components/BookCatForm";
 import { ExactLocation } from "@/components/ExactLocation";
 import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
-import { SignIn } from "@/components/SignIn";
 import { formatPeso } from "@/lib/money";
 import { manilaDate } from "@/server/public";
 import { getSession } from "@/server/session";
@@ -27,8 +26,8 @@ async function Dashboard() {
   if (!session) {
     return (
       <div className="card mt-8">
-        <p className="mb-4 font-bold">Sign in with a vet account to see bookings.</p>
-        <SignIn username={null} inline />
+        <p className="font-bold">This page is for partner vets.</p>
+        <p className="small soft mt-1">In the demo, pick the Vet role in the bar at the top.</p>
       </div>
     );
   }

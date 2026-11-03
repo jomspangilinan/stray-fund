@@ -9,7 +9,7 @@ import { DEFAULT_MODEL, createBedrockClient, supportsEffort } from "../src/serve
 import { consumeAiBudget } from "../src/server/ai/budget";
 import { assessPhoto } from "../src/server/ai/assess";
 import { matchCat } from "../src/server/ai/match";
-import { readReceipt, verifyEarTip } from "../src/server/ai/receipt";
+import { readReceipt } from "../src/server/ai/receipt";
 import { AssessmentSchema, ReceiptSchema } from "../src/server/ai/schemas";
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
@@ -20,8 +20,6 @@ const ASSESSMENT = {
   coat_pattern: "tabby",
   colors: ["orange", "white"],
   markings: "white socks",
-  ear_tip: "absent",
-  ear_tip_confidence: 0.8,
   flags: { kitten: false, pregnant: false, injured: false, sick: false },
   probably_female_by_coat: false,
   suggested_name: "Muning",
@@ -133,7 +131,7 @@ describe("request shape", () => {
     }
   });
 
-  it("uses medium for match and high for receipt and ear-tip checks on an effort model", async () => {
+  it("uses medium for match and high for receipt reads on an effort model", async () => {
     vi.stubEnv("AI_MODEL", "global.anthropic.claude-opus-4-6-v1");
     install(() => ok({ match_cat_id: null, confidence: 0.2, reason: "unsure" }));
     await matchCat(JPEG, [{ catId: "a", photos: [JPEG] }]);
@@ -144,13 +142,6 @@ describe("request shape", () => {
     expect(lastParams().output_config.effort).toBe("high");
     expect(lastParams().system).toMatch(/tamper_signs/);
     expect(lastParams().system).toMatch(/untrusted/i);
-
-    install(() => ok({ ear_tip: "present", confidence: 0.9, same_cat_confidence: 0.7 }));
-    const r = await verifyEarTip(JPEG, [JPEG, JPEG]);
-    expect(r.ok).toBe(true);
-    expect(lastParams().output_config.effort).toBe("high");
-    const images = lastParams().messages[0].content.filter((b: Block) => b.type === "image");
-    expect(images).toHaveLength(3);
   });
 });
 
@@ -205,7 +196,7 @@ describe("failure mapping", () => {
     expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "unparseable" });
     install(() => ok(null));
     expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "unparseable" });
-    install(() => ok({ ...ASSESSMENT, ear_tip_confidence: 1.5 }));
+    install(() => ok({ ...ASSESSMENT, colors: ["a", "b", "c", "d", "e"] }));
     expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "unparseable" });
   });
 });
@@ -331,12 +322,18 @@ describe("matchCat", () => {
   });
 });
 
-describe("verifyEarTip prompt", () => {
-  it("asks for same_cat_confidence 0 when no references are supplied", async () => {
-    install(() => ok({ ear_tip: "unknown", confidence: 0.3, same_cat_confidence: 0 }));
-    await verifyEarTip(JPEG, []);
-    expect(lastParams().system).toMatch(/no reference photos[^.]*same_cat_confidence[^.]*0/i);
-    expect(lastParams().messages[0].content.filter((b: Block) => b.type === "image")).toHaveLength(1);
+describe("the assessment no longer judges ear tips", () => {
+  it("asks nothing about ears and has no ear-tip field", async () => {
+    install(() => ok(ASSESSMENT));
+    await assessPhoto(JPEG);
+    expect(lastParams().system).not.toMatch(/ear[- ]?tip|tipped/i);
+    expect(Object.keys(AssessmentSchema.shape)).not.toEqual(expect.arrayContaining(["ear_tip"]));
+    expect(Object.keys(AssessmentSchema.shape).join(",")).not.toMatch(/ear/);
+  });
+
+  it("drops an ear-tip field a stored row still carries instead of reading it", () => {
+    const parsed = AssessmentSchema.parse({ ...ASSESSMENT, ear_tip: "absent", ear_tip_confidence: 0.9 });
+    expect(parsed).not.toHaveProperty("ear_tip");
   });
 });
 
@@ -350,7 +347,7 @@ describe("schemas", () => {
 
   it("rejects out-of-range assessment values", () => {
     expect(AssessmentSchema.safeParse(ASSESSMENT).success).toBe(true);
-    expect(AssessmentSchema.safeParse({ ...ASSESSMENT, ear_tip_confidence: -0.1 }).success).toBe(false);
+    expect(AssessmentSchema.safeParse({ ...ASSESSMENT, sensitive_regions: [{ x: 2, y: 0, w: 0.1, h: 0.1 }] }).success).toBe(false);
     expect(
       AssessmentSchema.safeParse({ ...ASSESSMENT, sensitive_regions: Array(50).fill(ASSESSMENT.sensitive_regions[0]) })
         .success,

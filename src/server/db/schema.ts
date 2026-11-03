@@ -97,6 +97,8 @@ export const sightings = pgTable(
     exactLat: doublePrecision("exact_lat"),
     exactLng: doublePrecision("exact_lng"),
     requestedSex: text("requested_sex"),
+    // What the finder said about the ear tip when they took the photo: yes or no. Not sure stays null.
+    requestedEarTip: text("requested_ear_tip"),
     assessment: jsonb("assessment"),
     state: text("state").notNull().default("pending"),
     createdAt: createdAt(),
@@ -106,6 +108,30 @@ export const sightings = pgTable(
       "sightings_state_check",
       sql`${t.state} in ('pending', 'matched', 'new_cat', 'needs_review', 'rejected')`,
     ),
+    check("sightings_requested_ear_tip_check", sql`${t.requestedEarTip} in ('yes', 'no')`),
+  ],
+);
+
+/**
+ * What a person said about a cat's ear tip. One row per person and cat, and the latest answer
+ * replaces the earlier one. Not sure is no row. Private: the public sees counts at most, never who said what.
+ */
+export const earTipFlags = pgTable(
+  "ear_tip_flags",
+  {
+    id: id(),
+    catId: uuid("cat_id")
+      .notNull()
+      .references(() => cats.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    value: text("value").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("ear_tip_flags_value_check", sql`${t.value} in ('yes', 'no')`),
+    uniqueIndex("ear_tip_flags_cat_user_idx").on(t.catId, t.userId),
   ],
 );
 
@@ -219,7 +245,6 @@ export const receipts = pgTable(
     sha256: text("sha256").notNull().unique(),
     parsed: jsonb("parsed"),
     earTipPhotoKey: text("ear_tip_photo_key"),
-    earTipResult: jsonb("ear_tip_result"),
     verification: text("verification").notNull().default("pending"),
     reasons: text("reasons").array().notNull().default(sql`'{}'::text[]`),
     createdAt: createdAt(),
@@ -227,12 +252,12 @@ export const receipts = pgTable(
   (t) => [
     check(
       "receipts_verification_check",
-      sql`${t.verification} in ('pending', 'verified', 'rejected', 'needs_review')`,
+      sql`${t.verification} in ('pending', 'verified', 'rejected', 'needs_review', 'awaiting_ear_tip_confirmation')`,
     ),
     // One attempt in progress or accepted per booking. Older attempts stay as history.
     uniqueIndex("receipts_booking_live_idx")
       .on(t.bookingId)
-      .where(sql`${t.verification} in ('pending', 'verified')`),
+      .where(sql`${t.verification} in ('pending', 'verified', 'awaiting_ear_tip_confirmation')`),
   ],
 );
 
@@ -289,13 +314,6 @@ export const guardrails = pgTable(
     maxPerCat: integer("max_per_cat").notNull().default(250000),
     maxPerDay: integer("max_per_day").notNull().default(1000000),
     approvalThreshold: integer("approval_threshold").notNull().default(200000),
-    earTipConfidenceMin: numeric("ear_tip_confidence_min", {
-      precision: 3,
-      scale: 2,
-      mode: "number",
-    })
-      .notNull()
-      .default(0.8),
     matchConfidenceMin: numeric("match_confidence_min", {
       precision: 3,
       scale: 2,
