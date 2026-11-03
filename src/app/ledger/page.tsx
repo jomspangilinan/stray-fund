@@ -1,24 +1,32 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
+import { connection } from "next/server";
+import { LedgerGridLoader } from "@/components/LedgerGridLoader";
+import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
+import { getLedger } from "@/server/impact";
 
 export const metadata: Metadata = { title: "Ledger | Stray Fund" };
 
-/** A stand-in so the Ledger tab never dead-ends. A later task replaces this page. */
+async function Ledger() {
+  await connection();
+  return <LedgerGridLoader initial={await getLedger()} />;
+}
+
 export default function LedgerPage() {
   return (
     <main>
-      <PageHead title="Ledger" />
-      <div className="card mt-5">
-        <p className="font-bold">The ledger is coming.</p>
-        <p className="mt-1 soft">
-          Every peso in and out of the fund will be listed here. Until then, the treasurer page shows each decision as
-          it happens.
-        </p>
-        <Link href="/agent" className="btn mt-4">
-          See the treasurer
-        </Link>
-      </div>
+      <PageHead title="Ledger">
+        Every donation in and every payout to a vet, with the reason and the PayPal sandbox reference. Search, sort or
+        filter it, and download it as a spreadsheet.
+      </PageHead>
+      <Link href="/impact" className="link">
+        How the money adds up
+      </Link>
+      <Suspense fallback={<ListSkeleton rows={4} label="Loading the ledger" />}>
+        <Ledger />
+      </Suspense>
     </main>
   );
 }

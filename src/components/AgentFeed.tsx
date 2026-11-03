@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatPeso } from "@/lib/money";
 import type { PublicAgentAction } from "@/server/public";
@@ -56,7 +57,14 @@ export function AgentFeed({ initial }: { initial: PublicAgentAction[] }) {
               <p className="small soft mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className={`tag ${a.refused ? "tag-bad" : ""}`}>{a.status}</span>
                 <span>{a.date}</span>
-                {a.paypalRef && <span className="break-all">PayPal {a.paypalRef}</span>}
+                {a.paypalRef && (
+                  <>
+                    <span className="break-all">PayPal {a.paypalRef}</span>
+                    <Link href={`/ledger?q=${encodeURIComponent(a.paypalRef)}`} className="font-bold text-main underline underline-offset-4">
+                      In the ledger
+                    </Link>
+                  </>
+                )}
               </p>
             </li>
           ))}

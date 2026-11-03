@@ -22,9 +22,14 @@ async function Home() {
         <p className="mt-1.5 text-base font-semibold">
           {poolAvailable > 0 ? "ready for the next cat" : "in the pool. The next donation funds the next cat."}
         </p>
-        <Link href="/donate" className="btn-pop mt-5 w-full sm:w-auto">
-          Donate
-        </Link>
+        <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-1">
+          <Link href="/donate" className="btn-pop w-full sm:w-auto">
+            Donate
+          </Link>
+          <Link href="/impact" className="link !text-white underline">
+            How the money adds up
+          </Link>
+        </div>
       </section>
 
       <section className="mt-8" aria-labelledby="latest-title">

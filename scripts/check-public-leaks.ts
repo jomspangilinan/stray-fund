@@ -90,12 +90,23 @@ async function main() {
       JSON.stringify({ catId: cat.id, note: "reviewnote-sentinel" }),
     ],
   );
+  // A payout whose action holds inputs and whose row holds a gateway error, both of which the ledger must not show.
+  const { rows: [payAction] } = await pool.query(
+    `insert into agent_actions (action, inputs, reason, amount, status, approved_by, paypal_ref)
+     values ('payout_deposit', $1, 'Leak check payout reason', 7000, 'failed', $2, 'LEAKBATCH') returning id`,
+    [JSON.stringify({ catId: cat.id, secret: "agentinputs-sentinel", gatewayError: "gatewayerror-sentinel" }), donor.id],
+  );
+  await pool.query(
+    `insert into payouts (cat_id, booking_id, payee_user_id, amount, kind, action_id, status, last_gateway_error, paypal_payout_batch_id)
+     values ($1,$2,$3,7000,'deposit',$4,'failed','gatewayerror-sentinel','LEAKBATCH')`,
+    [cat.id, booking.id, vet.id, payAction.id],
+  );
   await pool.query(
     "insert into review_requests (subject, reason, status, resolved_by, resolved_at, resolution) values ($1,'r','resolved',$2,now(),'resolution-sentinel')",
     [`leakreview-${tag}`, donor.id],
   );
 
-  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/helped", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
+  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/helped", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/ledger", "/ledger?q=LEAKBATCH", "/impact", "/api/ledger", "/api/impact", "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
   const viewers: [string, Record<string, string>][] = [["anon", {}], ["donor", { cookie: `sf_session=${token}` }]];
   let bad = 0, checked = 0;
   try {
@@ -116,10 +127,18 @@ async function main() {
     if (!html.includes("Leak check spay")) { bad++; console.log("FAIL: the seeded treatment did not render"); }
     const feed = await (await fetch(`${BASE}/agent`)).text();
     if (!feed.includes("Leak check reason")) { bad++; console.log("FAIL: agent feed did not render the seeded action"); }
+    const ledger = await (await fetch(`${BASE}/api/ledger`)).text();
+    for (const need of ["Leak check payout reason", "LEAKBATCH", `leak_${tag}`]) {
+      if (!ledger.includes(need)) { bad++; console.log(`FAIL: the ledger API did not carry ${need}`); }
+    }
+    const ledgerRes = await fetch(`${BASE}/api/ledger`);
+    if (ledgerRes.headers.get("cache-control") !== "no-store") { bad++; console.log("FAIL: /api/ledger is not no-store"); }
+    if (!ledger.includes('"status":"failed"')) { bad++; console.log("FAIL: the failed payout is not marked failed"); }
     const helped = await (await fetch(`${BASE}/helped`, { headers: { cookie: `sf_session=${token}` } })).text();
     if (!helped.includes(`LeakCat ${tag}`)) { bad++; console.log("FAIL: helped page did not render the seeded cat"); }
   } finally {
     await pool.query("delete from review_requests where resolved_by=$1", [donor.id]);
+    await pool.query("delete from payouts where booking_id=$1", [booking.id]);
     await pool.query("delete from agent_actions where approved_by=$1", [donor.id]);
     await pool.query("delete from allocations where donation_id=$1", [don.id]);
     await pool.query("delete from donations where id=$1", [don.id]);
