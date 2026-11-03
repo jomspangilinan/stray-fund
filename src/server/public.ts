@@ -283,6 +283,7 @@ const ACTION_LABEL: Record<string, string> = {
   caretaker_review: "Asked a caretaker",
   payout_review_resolved: "Caretaker settled a payment",
   payout_note: "Caretaker added a note to a payment",
+  payout_retry_allowed: "Caretaker allowed one more try at a payment",
   guardrails_changed: "Caretaker changed a spending rule",
   payee_added: "Caretaker allowed a vet to be paid",
   payee_removed: "Caretaker stopped payments to a vet",

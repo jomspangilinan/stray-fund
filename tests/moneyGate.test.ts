@@ -315,13 +315,17 @@ describe("money gate", () => {
       await setGuardrails({ maxPerCat: 200000 });
 
       const approved = await approvePayout(res.payoutId!, caretakerId, gw);
-      expect(approved).toMatchObject({ status: "rejected", code: "OVER_CAT_CAP" });
+      // A cap can be raised again, so a denial now must not make a permanent rejected row.
+      expect(approved).toMatchObject({ status: "awaiting_approval", code: "OVER_CAT_CAP" });
+      expect(approved.message).toBeTruthy();
       expect(gw.calls).toEqual([]);
-      expect((await payoutRow(res.payoutId!)).status).toBe("rejected");
-      const action = await actionRow(res.actionId);
-      expect(action).toMatchObject({ status: "rejected", approvedBy: caretakerId });
-      expect(action.inputs).toMatchObject({ source: "test", code: "OVER_CAT_CAP" });
-      expect(await reserved()).toBe(0);
+      expect((await payoutRow(res.payoutId!)).status).toBe("awaiting_approval");
+      expect(await actionRow(res.actionId)).toMatchObject({ status: "awaiting_approval" });
+      expect(await reserved()).toBe(200001);
+      // Raised again, the same row is approved and sent.
+      await setGuardrails({ maxPerCat: 300000 });
+      expect((await approvePayout(res.payoutId!, caretakerId, gw)).status).toBe("sent");
+      expect(gw.calls).toHaveLength(1);
     });
 
     it("a booking cancelled while awaiting approval blocks the send", async () => {
@@ -343,17 +347,18 @@ describe("money gate", () => {
 
       expect((await approvePayout(pa.id, caretakerId, gw)).status).toBe("sent");
       const second = await approvePayout(pb.id, caretakerId, gw);
-      expect(second).toMatchObject({ status: "rejected", code: "OVER_DAY_CAP" });
+      expect(second).toMatchObject({ status: "awaiting_approval", code: "OVER_DAY_CAP" });
+      expect((await payoutRow(pb.id)).status).toBe("awaiting_approval");
       expect(gw.calls).toHaveLength(1);
     });
 
-    it("an approve-time denial enqueues a wakeup carrying the code", async () => {
+    it("an approve-time denial that cannot be fixed enqueues a wakeup carrying the code", async () => {
       const gw = new FakeGateway();
       const res = await requestPayout(ask(w, 200001), gw);
-      await setGuardrails({ maxPerCat: 200000 });
+      await db.update(bookings).set({ status: "cancelled" }).where(eq(bookings.id, w.booking.id));
       await approvePayout(res.payoutId!, caretakerId, gw);
       await expectOneWakeup(res.payoutId!, "rejected", "awaiting_approval");
-      expect((await allWakeups())[0].payload).toMatchObject({ code: "OVER_CAT_CAP" });
+      expect((await allWakeups())[0].payload).toMatchObject({ code: "BOOKING_NOT_CONFIRMED" });
     });
 
     it("a caretaker's reject enqueues a wakeup, and a repeat does not", async () => {
@@ -480,8 +485,8 @@ describe("money gate", () => {
         await db.execute(sql`drop function slow_claim()`);
       }
       expect(gw.calls).toHaveLength(1);
-      expect(results.map((r) => r.status).sort()).toEqual(["rejected", "sent"]);
-      expect(results.find((r) => r.status === "rejected")?.code).toBe("OVER_DAY_CAP");
+      expect(results.map((r) => r.status).sort()).toEqual(["awaiting_approval", "sent"]);
+      expect(results.find((r) => r.status === "awaiting_approval")?.code).toBe("OVER_DAY_CAP");
     });
 
     it("the unique index alone stops a duplicate that passed the check", async () => {
@@ -1721,8 +1726,9 @@ describe("the retry block is enforced by the gate itself", () => {
     const care = await makeCaretaker();
     const gw = new FakeGateway();
     const r = await approvePayout(waiting.id, care.id, gw);
-    expect(r).toMatchObject({ status: "rejected", code: "REVIEW_REQUIRED" });
+    expect(r).toMatchObject({ status: "awaiting_approval", code: "REVIEW_REQUIRED" });
     expect(gw.calls).toHaveLength(0);
-    expect((await db.select().from(payouts).where(eq(payouts.id, waiting.id)))[0].status).toBe("rejected");
+    expect(r.message).toBeTruthy();
+    expect((await db.select().from(payouts).where(eq(payouts.id, waiting.id)))[0].status).toBe("awaiting_approval");
   });
 });

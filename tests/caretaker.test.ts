@@ -197,9 +197,10 @@ describe("lowered cap applies to pending approval on approve", () => {
     const r = await act("payout_approve", { payoutId: p.id });
     expect(r.status).toBe(409);
     expect(r.message).toMatch(/cap/i);
+    expect(r.message).toMatch(/still waiting for approval/);
     expect(gateway.calls).toHaveLength(0);
     const [row] = await db.select().from(payouts).where(eq(payouts.id, p.id));
-    expect(row.status).toBe("rejected");
+    expect(row.status).toBe("awaiting_approval");
   });
 });
 

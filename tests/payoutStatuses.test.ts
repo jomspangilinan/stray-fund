@@ -107,36 +107,29 @@ describe("a BLOCKED payout", () => {
     expect((await row(p.id)).status).toBe("succeeded");
   });
 
-  describe.each(["BLOCKED", "REVERSED"])("a caretaker rules not_paid on a %s row that has a batch id", (itemStatus) => {
-    it("is allowed with a note, frees the reservation, and a contradicting SUCCESS still flags", async () => {
+  describe.each(["BLOCKED", "REVERSED"])("a %s row that has a batch id at PayPal", (itemStatus) => {
+    it("cannot be ruled not paid by anyone: it stays in review with its money held", async () => {
       const p = await sentPayout();
       await applyPayoutStatus("B-1", { itemStatus });
+      const care = await makeCaretaker();
+      await expect(resolveNeedsReview(p.id, care.id, { outcome: "not_paid", note: "Checked at PayPal: blocked." })).rejects.toThrow(/batch/);
       expect((await row(p.id)).status).toBe("needs_review");
-      const care = await makeCaretaker();
-      expect((await resolveNeedsReview(p.id, care.id, { outcome: "not_paid", note: "Checked at PayPal: blocked, funds returned." })).status).toBe("failed");
-      expect((await pool()).reservedPayouts).toBe(0);
-      await applyPayoutStatus("B-1", { itemStatus: "SUCCESS", fee: 100 });
-      expect((await row(p.id)).status).toBe("failed");
-      expect(await asked()).toHaveLength(1);
+      expect((await pool()).reservedPayouts).toBe(45000);
     });
 
-    it("is still refused when the earlier flag says the batch exists, or the last PayPal status is not that", async () => {
-      const flagged = await sentPayout();
-      await applyPayoutStatus("B-1", { itemStatus });
-      await db.update(payouts).set({ lastGatewayError: "BATCH_EXISTS: HTTP 400" }).where(eq(payouts.id, flagged.id));
-      const care = await makeCaretaker();
-      await expect(resolveNeedsReview(flagged.id, care.id, { outcome: "not_paid", note: "x" })).rejects.toThrow(/already exists/);
-      // A PENDING status after it is not proof.
-      await db.update(payouts).set({ lastGatewayError: null, paypalItemStatus: "PENDING" }).where(eq(payouts.id, flagged.id));
-      await expect(resolveNeedsReview(flagged.id, care.id, { outcome: "not_paid", note: "x" })).rejects.toThrow(/batch/);
-    });
-
-    it("is offered on the desk only when it will work", async () => {
+    it("the desk does not offer 'not paid', and says to check PayPal and ask a developer", async () => {
       const p = await sentPayout();
       await applyPayoutStatus("B-1", { itemStatus });
-      expect((await getCaretakerQueue()).needsReview.find((i) => i.id === p.id)).toMatchObject({ canRuleNotPaid: true, itemStatus });
-      await db.update(payouts).set({ paypalItemStatus: "PENDING" }).where(eq(payouts.id, p.id));
-      expect((await getCaretakerQueue()).needsReview.find((i) => i.id === p.id)).toMatchObject({ canRuleNotPaid: false });
+      expect((await getCaretakerQueue()).needsReview.find((i) => i.id === p.id)).toMatchObject({ canRuleNotPaid: false, itemStatus });
+    });
+
+    it("the agent cannot make another payout for the booking, by the gate or by its tool", async () => {
+      const p = await sentPayout();
+      await applyPayoutStatus("B-1", { itemStatus });
+      const gw = new FakeGateway();
+      expect(await requestPayout({ ...depositRequest(w), reason: "Again.", inputs: {} }, gw)).toMatchObject({ status: "rejected", code: "DUPLICATE_PAYOUT" });
+      expect(gw.calls).toHaveLength(0);
+      expect(await db.select().from(payouts).where(eq(payouts.bookingId, p.bookingId))).toHaveLength(1);
     });
   });
 

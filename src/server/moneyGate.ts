@@ -429,6 +429,9 @@ async function loadForDecision(tx: Tx, payoutId: string, caretakerId: string): P
   return payout;
 }
 
+/** Denials at approve time that a person can fix, so they must not make a permanent rejected row. */
+const LEAVE_WAITING: ReadonlySet<GuardrailCode> = new Set(["REVIEW_REQUIRED", "OVER_DAY_CAP", "OVER_CAT_CAP"]);
+
 /**
  * Re-runs the guardrails, since limits and bookings can change while a payout
  * waits. A payout no longer awaiting approval is left alone, so a double approve
@@ -462,6 +465,10 @@ export async function approvePayout(
       { approvingPayoutId: payoutId },
     );
 
+    if (verdict.verdict === "deny" && LEAVE_WAITING.has(verdict.code)) {
+      // Fixable: a cap can be raised, a block can be cleared. The row stays waiting and the reason is shown.
+      return { ...base, status: "awaiting_approval", code: verdict.code, message: verdict.message };
+    }
     if (verdict.verdict === "deny") {
       await tx.update(payouts).set({ status: "rejected" }).where(eq(payouts.id, payoutId));
       await tx
@@ -520,15 +527,13 @@ export async function rejectPayout(
 }
 
 /**
- * With a batch id, not_paid is only open when PayPal's last word on the item was BLOCKED or REVERSED, which are
- * not proven final but are what a person can confirm at PayPal. The note is required.
+ * Once a payout has a batch id at PayPal, no one can rule it not paid from review: PayPal has not said the money
+ * did not leave or came back, and a new payout would be a second payment. BLOCKED and REVERSED stay in review with
+ * their money held until a developer closes them. Whether the desk offers "It was not paid" is this same rule.
+ * A send still in flight is checked on submit.
  */
-const NOT_PAID_PROVABLE = new Set(["BLOCKED", "REVERSED"]);
-
-/** Whether the desk should offer "It was not paid" for a payout under review. A send still in flight is checked on submit. */
-export function canRuleNotPaid(p: { paypalPayoutBatchId: string | null; paypalItemStatus: string | null; lastGatewayError: string | null }): boolean {
-  if (p.lastGatewayError?.startsWith(BATCH_EXISTS_FLAG)) return false;
-  return !p.paypalPayoutBatchId || NOT_PAID_PROVABLE.has(p.paypalItemStatus ?? "");
+export function canRuleNotPaid(p: { paypalPayoutBatchId: string | null; lastGatewayError: string | null }): boolean {
+  return !p.paypalPayoutBatchId && !p.lastGatewayError?.startsWith(BATCH_EXISTS_FLAG);
 }
 
 /** not_paid frees the reservation, so it needs every sign the money stayed put. */
@@ -536,7 +541,7 @@ async function refuseIfMoneyMayHaveLeft(tx: Tx, payout: Payout): Promise<void> {
   if (payout.lastGatewayError?.startsWith(BATCH_EXISTS_FLAG)) {
     throw new Error("Cannot rule not_paid: PayPal reports this batch already exists");
   }
-  if (payout.paypalPayoutBatchId && !NOT_PAID_PROVABLE.has(payout.paypalItemStatus ?? "")) {
+  if (payout.paypalPayoutBatchId) {
     throw new Error("Cannot rule not_paid: this payout has a PayPal batch");
   }
   const { rows } = await tx.execute(sql`
@@ -631,6 +636,54 @@ export async function resolveNeedsReview(
 }
 
 /**
+ * Why a row cannot get "Allow a new try", or undefined if it can. Only a rejected or failed row that PayPal never
+ * saw: no batch id, no BATCH_EXISTS, no late-success pointer, not already cleared.
+ */
+export function newTryRefusal(p: Pick<Payout, "status" | "paypalPayoutBatchId" | "lastGatewayError" | "lateSuccessReviewId" | "retryClearedBy">): string | undefined {
+  if (p.status !== "rejected" && p.status !== "failed") return "Only a rejected or failed payout can be given a new try";
+  if (p.paypalPayoutBatchId) return "Cannot allow a new try: this payout has a PayPal batch";
+  if (p.lastGatewayError?.startsWith(BATCH_EXISTS_FLAG)) return "Cannot allow a new try: PayPal reports this batch already exists";
+  if (p.lateSuccessReviewId) return "Cannot allow a new try: PayPal reported a success for this payout";
+  if (p.retryClearedBy) return "A new try was already allowed for this payout";
+  return undefined;
+}
+
+/**
+ * A caretaker's "Allow a new try" on a rejected or failed row PayPal never saw. The retry block then skips the row,
+ * so the agent gets one more try (if that one fails or is rejected, it blocks again). Recorded on the row and as an
+ * audit action, and the agent is woken. Moves no money.
+ */
+export async function allowNewTry(payoutId: string, caretakerId: string, note: string): Promise<GateResult> {
+  const clean = note.trim();
+  if (!clean) throw new Error("A note is required to allow a new try");
+  return withColonyLock(async (tx): Promise<GateResult> => {
+    const payout = await loadForDecision(tx, payoutId, caretakerId);
+    const [fresh] = await tx.select().from(payouts).where(eq(payouts.id, payoutId)).for("update");
+    const refusal = newTryRefusal(fresh);
+    if (refusal) throw new Error(refusal);
+    await tx.update(payouts).set({ retryClearedBy: caretakerId }).where(eq(payouts.id, payoutId));
+    await tx.insert(agentActions).values({
+      action: "payout_retry_allowed",
+      inputs: { payoutId, bookingId: payout.bookingId, kind: payout.kind, previousStatus: payout.status, note: clean },
+      reason: "Caretaker allowed one new try",
+      amount: payout.amount,
+      status: payout.status,
+      approvedBy: caretakerId,
+    });
+    await enqueueStatusChange(tx, payout, payout.status as PayoutStatus, { alert: "retry_allowed" });
+    return { payoutId, actionId: payout.actionId, status: payout.status as PayoutStatus };
+  });
+}
+
+/** PayPal's own words for money that came back after a SUCCESS. */
+const LATE_NOT_PAID = new Set(["RETURNED", "REFUNDED", "REVERSED"]);
+
+/** Which rulings a late-success payout may get, from PayPal's latest item status. The desk offers only these. */
+export function lateSuccessChoices(itemStatus: string | null): { paid: boolean; notPaid: boolean } {
+  return { paid: itemStatus === "SUCCESS", notPaid: LATE_NOT_PAID.has(itemStatus ?? "") };
+}
+
+/**
  * A caretaker's ruling on a payout PayPal said succeeded after the fund called it failed. "Paid" makes it succeeded
  * with PayPal's batch id (the books then count it, the pointer stays so it can never be asked for again, and the
  * agent is woken to move on). "Not paid" needs a note, clears the pointer and leaves it failed; a later SUCCESS
@@ -645,6 +698,14 @@ async function resolveLateSuccess(
 ): Promise<GateResult> {
   const base = { payoutId: payout.id, actionId: payout.actionId };
   const paid = r.outcome === "paid";
+  // Paid only while PayPal's latest word is SUCCESS, so a later RETURNED is never counted as money paid. Not paid
+  // only when PayPal itself says it came back.
+  if (paid && payout.paypalItemStatus !== "SUCCESS") {
+    throw new Error(`Cannot rule paid: PayPal's latest status for this payout is ${payout.paypalItemStatus ?? "unknown"}, not SUCCESS`);
+  }
+  if (!paid && !LATE_NOT_PAID.has(payout.paypalItemStatus ?? "")) {
+    throw new Error(`Cannot rule not_paid: PayPal's latest status for this payout is ${payout.paypalItemStatus ?? "unknown"}, and it has not said the money came back`);
+  }
   if (paid && payout.paypalPayoutBatchId === null && (await isBatchOnAnotherPayout(tx, evidence, payout.id))) {
     throw new Error("That PayPal reference is already on another payout");
   }
@@ -674,7 +735,8 @@ async function resolveLateSuccess(
     approvedBy: caretakerId,
     paypalRef: paid ? batchId : null,
   });
-  if (paid) await enqueueStatusChange(tx, payout, "succeeded");
+  // The agent always hears about it, whichever way it went.
+  await enqueueStatusChange(tx, payout, paid ? "succeeded" : "failed", paid ? {} : { alert: "late_success_cleared" });
   return { ...base, status: paid ? "succeeded" : "failed" };
 }
 

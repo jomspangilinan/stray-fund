@@ -2,7 +2,7 @@ import { IllegalTransition } from "../catTransitions";
 import { describeError } from "../errors";
 import { catAdoptable, catAdopted, catSetDetails, catRename, catSetEarTip, catUndoNeutered, nameApprove, nameDismiss, photoHold, photoPublish, sightingConfirmNew, sightingMerge, sightingReject, wakeupDismiss, wakeupRetry } from "./cats";
 import { evidenceAccept, evidenceConfirmEarTip, evidenceReject, reviewResolve } from "./evidence";
-import { payoutApprove, payoutNote, payoutReject, payoutResolve } from "./payouts";
+import { payoutAllowRetry, payoutApprove, payoutNote, payoutReject, payoutResolve } from "./payouts";
 import { guardrailsUpdate, payeeAdd, payeeRemove, vetUpdate } from "./rules";
 import { Refusal, type Body, type Handler, type Tone } from "./shared";
 
@@ -13,6 +13,7 @@ const HANDLERS = {
   payout_reject: payoutReject,
   payout_resolve: payoutResolve,
   payout_note: payoutNote,
+  payout_allow_retry: payoutAllowRetry,
   evidence_accept: evidenceAccept,
   evidence_confirm_ear_tip: evidenceConfirmEarTip,
   evidence_reject: evidenceReject,

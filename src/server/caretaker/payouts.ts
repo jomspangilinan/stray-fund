@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { payouts } from "../db/schema";
-import { approvePayout, rejectPayout, resolveNeedsReview, type GateResult } from "../moneyGate";
+import { allowNewTry, approvePayout, rejectPayout, resolveNeedsReview, type GateResult } from "../moneyGate";
 import { payoutGateway, type PayoutGateway } from "../paypal/payouts";
 import { audit, reqText, reqUuid, Refusal, type Handler } from "./shared";
 
@@ -28,7 +28,7 @@ async function gate(run: () => Promise<GateResult>): Promise<GateResult> {
     return await run();
   } catch (e) {
     if (e instanceof Error && /^Payout not found/.test(e.message)) throw new Refusal(404, "There is no such payout.");
-    if (e instanceof Error && /^(Cannot|That PayPal|A (paid|not_paid))/.test(e.message)) throw new Refusal(409, `${e.message}.`);
+    if (e instanceof Error && /^(Cannot|That PayPal|A (paid|not_paid)|A new try|Only a)/.test(e.message)) throw new Refusal(409, `${e.message}.`);
     throw e;
   }
 }
@@ -40,6 +40,9 @@ export const payoutApprove: Handler = async (caretakerId, body) => {
     throw new Refusal(409, `The spending rules refuse this payout now: ${r.message} Nothing was paid.`);
   }
   if (r.status === "rejected") throw new Refusal(409, "This payout was already rejected.");
+  if (r.status === "awaiting_approval" && r.code) {
+    throw new Refusal(409, `Not sent: ${r.message} It is still waiting for approval, and nothing was paid.`);
+  }
   if (r.status === "failed") return { tone: "bad", message: "Approved, but PayPal did not take the payment. The treasurer will look at it." };
   if (r.status === "needs_review") return { tone: "warn", message: "Approved, but we could not confirm the send. It is now under review." };
   return `Approved. The payment is ${words(r.status)}.`;
@@ -50,7 +53,7 @@ export const payoutReject: Handler = async (caretakerId, body) => {
   const reason = reqText(body, "reason", "A reason", 300);
   const r = await gate(() => rejectPayout(payoutId, caretakerId, reason));
   if (r.status !== "rejected") throw new Refusal(409, `This payout is ${words(r.status)}, so it cannot be rejected.`);
-  return "Rejected. Nothing was paid, and the money is free again.";
+  return "Rejected. Nothing was paid and the money is free again. The treasurer will not ask for this payout again unless a caretaker allows a new try.";
 };
 
 export const payoutResolve: Handler = async (caretakerId, body) => {
@@ -82,6 +85,14 @@ export const payoutResolve: Handler = async (caretakerId, body) => {
       : "Recorded as not paid. If PayPal says SUCCESS again, it will come back here.";
   }
   return outcome === "paid" ? "Recorded as paid." : "Recorded as not paid. The money is free again.";
+};
+
+/** A rejected or failed payout PayPal never saw gets one more try. The note is required and audited. */
+export const payoutAllowRetry: Handler = async (caretakerId, body) => {
+  const payoutId = reqUuid(body, "payoutId", "The payout");
+  const note = reqText(body, "note", "A note", 500);
+  const r = await gate(() => allowNewTry(payoutId, caretakerId, note));
+  return `Allowed. The treasurer has been told and may try this ${words(r.status)} payout once more.`;
 };
 
 /** For a payout that has been sent a long while. It moves nothing. */

@@ -379,6 +379,9 @@ export const payouts = pgTable(
     // While it is set the agent may never ask for this booking and kind again. Only a caretaker's "Not paid"
     // ruling clears it; "Paid" moves the payout to succeeded and leaves it set.
     lateSuccessReviewId: uuid("late_success_review_id").references(() => reviewRequests.id),
+    // A caretaker's "Allow a new try" on a rejected or failed row with no batch at PayPal. The retry block skips
+    // such a row, so the agent gets one more try. Never set on a row with a batch id, BATCH_EXISTS or a late SUCCESS.
+    retryClearedBy: uuid("retry_cleared_by").references(() => users.id),
     createdAt: createdAt(),
   },
   (t) => [

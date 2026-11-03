@@ -6,7 +6,8 @@ import { COLONY } from "@/lib/config";
 import { hidePrivateInDemo, maskEmail, placeForStaff } from "../demoPrivacy";
 import { bioIsSafe, nameIsSafe, safeBio } from "../placeText";
 import { needsHumanTick, regionsOf } from "../photoGate";
-import { canRuleNotPaid } from "../moneyGate";
+import { canRuleNotPaid, lateSuccessChoices, newTryRefusal } from "../moneyGate";
+import { retryBlock } from "../payoutRetry";
 import { depositPaidOn, reasonMessages } from "../vetFlow";
 import { manilaDate } from "../public";
 import { deskTotal } from "@/lib/deskSections";
@@ -37,6 +38,10 @@ export type PayoutItem = {
   lateSuccess: boolean;
   /** Whether "It was not paid" can work now. Offered only then. */
   canRuleNotPaid: boolean;
+  /** Whether "Paid" can work now. False for a late-success payout whose latest PayPal status is no longer SUCCESS. */
+  canRulePaid: boolean;
+  /** A rejected or failed payout PayPal never saw, blocking its booking: a caretaker may allow one new try. */
+  canAllowRetry: boolean;
 };
 
 /** The AI's free text reaches the open demo desk only after the public-card filters: a visitor's photo may show a sign or a shop. */
@@ -145,16 +150,40 @@ async function payoutItems(statuses: string[], olderThanMinutes?: number, lateSu
     date: manilaDate(r.createdAt),
     lateSuccess: r.status === "failed" && lateSuccessReviewId !== null,
     canRuleNotPaid:
-      r.status === "failed" ? lateSuccessReviewId !== null : canRuleNotPaid({ paypalPayoutBatchId: r.batchId, paypalItemStatus: r.itemStatus, lastGatewayError: r.lastGatewayError }),
+      r.status === "failed" ? lateSuccessReviewId !== null && lateSuccessChoices(r.itemStatus).notPaid : canRuleNotPaid({ paypalPayoutBatchId: r.batchId, lastGatewayError: r.lastGatewayError }),
+    canRulePaid: r.status === "failed" ? lateSuccessReviewId !== null && lateSuccessChoices(r.itemStatus).paid : true,
+    canAllowRetry: false,
   }));
+}
+
+/**
+ * Rejected or failed payouts PayPal never saw that are what blocks their booking, so a caretaker can allow one new
+ * try. A row with a batch id, BATCH_EXISTS or a late SUCCESS is never listed.
+ */
+async function retryCandidates(): Promise<PayoutItem[]> {
+  const rows = await payoutItems(["rejected", "failed"]);
+  if (rows.length === 0) return [];
+  const all = await db.select().from(payouts).where(inArray(payouts.bookingId, rows.map((r) => r.bookingId)));
+  const out: PayoutItem[] = [];
+  for (const item of rows) {
+    const row = all.find((p) => p.id === item.id)!;
+    if (newTryRefusal(row)) continue;
+    const siblings = all.filter((p) => p.bookingId === row.bookingId && p.kind === row.kind);
+    // Something live means the booking is not stuck; a block from other evidence is not this row's to clear.
+    if (siblings.some((p) => !["failed", "rejected"].includes(p.status))) continue;
+    if (retryBlock(siblings) === undefined) continue;
+    out.push({ ...item, canAllowRetry: true, canRuleNotPaid: false, canRulePaid: false });
+  }
+  return out;
 }
 
 /** Everything waiting for a person. Holds exact locations and private notes, so only a caretaker's page may call it. */
 export async function getCaretakerQueue(): Promise<CaretakerQueue> {
-  const [awaitingApproval, needsReviewRows, lateSuccessRows, longSent] = await Promise.all([
+  const [awaitingApproval, needsReviewRows, lateSuccessRows, retryRows, longSent] = await Promise.all([
     payoutItems(["awaiting_approval"]),
     payoutItems(["needs_review"]),
     payoutItems(["failed"], undefined, true),
+    retryCandidates(),
     payoutItems(["sent"], LONG_SENT_MINUTES),
   ]);
 
@@ -284,7 +313,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
 
   return {
     awaitingApproval,
-    needsReview: [...needsReviewRows, ...lateSuccessRows],
+    needsReview: [...needsReviewRows, ...lateSuccessRows, ...retryRows],
     longSent,
     sightings: sightingItems,
     receipts: receiptItems,

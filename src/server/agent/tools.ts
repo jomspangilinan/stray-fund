@@ -161,6 +161,7 @@ async function history(bookingId: string, kind: "deposit" | "balance") {
       status: payouts.status,
       lastGatewayError: payouts.lastGatewayError,
       lateSuccessReviewId: payouts.lateSuccessReviewId,
+      retryClearedBy: payouts.retryClearedBy,
       amount: payouts.amount,
     })
     .from(payouts)

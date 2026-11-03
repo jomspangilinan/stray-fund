@@ -11,6 +11,7 @@ import {
   payouts,
   reviewRequests,
   users,
+  wakeups,
 } from "../src/server/db/schema";
 import { applyPayoutStatus } from "../src/server/moneyGate";
 import { BATCH_EXISTS_FLAG } from "../src/server/payoutRetry";
@@ -575,6 +576,10 @@ describe("pay_vet_deposit", () => {
       const { w } = await late(false);
       const care = await makeCaretaker();
       const [row] = await db.select().from(payouts);
+      // While PayPal's latest word is SUCCESS, nobody can rule it not paid.
+      const refused = await runAction("payout_resolve", care.id, { payoutId: row.id, outcome: "not_paid", note: "Checked at PayPal." });
+      expect(refused).toMatchObject({ ok: false, status: 409 });
+      await applyPayoutStatus("B-LATE", { itemStatus: "RETURNED" });
       expect((await runAction("payout_resolve", care.id, { payoutId: row.id, outcome: "not_paid" })).status).toBe(400);
       const ok = await runAction("payout_resolve", care.id, { payoutId: row.id, outcome: "not_paid", note: "Checked at PayPal: the item was returned." });
       expect(ok).toMatchObject({ ok: true });
@@ -590,9 +595,35 @@ describe("pay_vet_deposit", () => {
       expect(await payoutRetryBlocked(w.booking.id, "deposit")).toBe(true);
     });
 
+    it("Paid is refused once PayPal's latest word is RETURNED, so it cannot be counted again; Not paid is then open and always wakes the agent", async () => {
+      await late(false);
+      const care = await makeCaretaker();
+      const [row] = await db.select().from(payouts);
+      await applyPayoutStatus("B-LATE", { itemStatus: "RETURNED" });
+      const paid = await runAction("payout_resolve", care.id, { payoutId: row.id, outcome: "paid", paypalRef: "B-LATE" });
+      expect(paid).toMatchObject({ ok: false, status: 409 });
+      expect((await db.select().from(payouts))[0].status).toBe("failed");
+      const before = (await db.select().from(wakeups)).length;
+      expect(await runAction("payout_resolve", care.id, { payoutId: row.id, outcome: "not_paid", note: "Returned at PayPal." })).toMatchObject({ ok: true });
+      expect((await db.select().from(wakeups)).length).toBe(before + 1);
+    });
+
+    it("the desk offers Paid only while the latest status is SUCCESS, and Not paid only after RETURNED, REFUNDED or REVERSED", async () => {
+      const { w } = await late(false);
+      const find = async () => (await getCaretakerQueue()).needsReview.find((p) => p.bookingId === w.booking.id)!;
+      expect(await find()).toMatchObject({ canRulePaid: true, canRuleNotPaid: false });
+      for (const itemStatus of ["RETURNED", "REFUNDED", "REVERSED"]) {
+        await applyPayoutStatus("B-LATE", { itemStatus });
+        expect(await find()).toMatchObject({ canRulePaid: false, canRuleNotPaid: true });
+      }
+      await applyPayoutStatus("B-LATE", { itemStatus: "PENDING" });
+      expect(await find()).toMatchObject({ canRulePaid: false, canRuleNotPaid: false });
+    });
+
     it("Not paid does not lift a BATCH_EXISTS block", async () => {
       await late(true);
       const care = await makeCaretaker();
+      await applyPayoutStatus("B-LATE", { itemStatus: "RETURNED" });
       const [row] = await db.select().from(payouts);
       await runAction("payout_resolve", care.id, { payoutId: row.id, outcome: "not_paid", note: "Checked at PayPal." });
       expect(await payoutRetryBlocked((await db.select().from(payouts))[0].bookingId, "deposit")).toBe(true);
