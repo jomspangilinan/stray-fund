@@ -6,7 +6,7 @@ import { careMarks, pickYard, yardStage, type YardCat, type YardGroup } from "@/
 import { pickMissions, type Mission, type MissionCat } from "@/lib/missions";
 import { db } from "./db/client";
 import { cats, earTipFlags, sightings, treatments, users } from "./db/schema";
-import { ownFlags } from "./earTipFlags";
+import { FLAG_AUDIT_ACTION, ownFlags } from "./earTipFlags";
 import { CAPTURED, getPoolStatus, toInt } from "./ledger";
 import type { Session } from "./session";
 import { getStorage } from "./storage";
@@ -279,7 +279,6 @@ const ACTION_LABEL: Record<string, string> = {
   evidence_accepted: "Caretaker accepted a vet's receipt",
   evidence_rejected: "Caretaker did not accept a vet's receipt",
   ear_tip_confirmed: "Caretaker confirmed the ear-tip in a vet's photo",
-  ear_tip_answered: "A neighbour answered about an ear-tip",
   sighting_reviewed: "Caretaker settled a sighting",
   cat_updated: "Caretaker updated a cat's card",
   photo_published: "Caretaker published a photo",
@@ -351,6 +350,8 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
       p.cat_id,
       case when a.inputs->>'catId' ~* ${UUID.source} then (a.inputs->>'catId')::uuid end
     )
+    -- A neighbour's ear-tip answer is private: it leaves an audit row for the rate limit, never a feed row.
+    where a.action <> ${FLAG_AUDIT_ACTION}
     order by a.created_at desc, a.id desc
     limit ${Math.min(Math.max(1, Math.trunc(limit)), MAX_AGENT_ACTIONS)}
   `);

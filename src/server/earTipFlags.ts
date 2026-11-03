@@ -102,8 +102,8 @@ export async function assertUnderFlagLimit(userId: string): Promise<void> {
 
 /**
  * Writes or removes one person's answer, then runs the rule. Caller holds the colony lock. Saying what the
- * person already said changes nothing. A real move leaves an audit row; the public feed prints only its fixed
- * sentence and the cat's name, and never reads inputs, which hold the person's id for the rate limit.
+ * person already said changes nothing. A real move leaves an audit row for the rate limit. It holds the person's id
+ * and is private: the public feed leaves this action out, so no answer activity is ever shown.
  */
 export async function setEarTipFlagIn(tx: Tx, catId: string, userId: string, value: EarTipValue | null): Promise<void> {
   const before = await currentAnswer(tx, catId, userId);

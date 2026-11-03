@@ -3,8 +3,9 @@ import { eq } from "drizzle-orm";
 import { closePool, db, withColonyLock } from "../src/server/db/client";
 import { agentActions, cats, earTipFlags, payouts, reviewRequests, treatments, users, wakeups } from "../src/server/db/schema";
 import { runAction } from "../src/server/caretaker";
+import { RateLimited } from "../src/server/spot";
 import { getCaretakerQueue } from "../src/server/caretaker/queue";
-import { setEarTipFlag } from "../src/server/earTipFlags";
+import { assertUnderFlagLimit, setEarTipFlag } from "../src/server/earTipFlags";
 import { getCatCard, listAgentActions, publicAgentAction } from "../src/server/public";
 import { getCatThanks, getHomeThanks } from "../src/server/thanks";
 import { earTipAskable } from "../src/lib/catState";
@@ -179,6 +180,27 @@ describe("public feed and audit of flag moves", () => {
     expect(feed).not.toContain("Audit_Visible");
     expect(feed).not.toContain(a.id);
     expect(feed).not.toMatch(/"yes"|"no"/);
+  });
+
+  it("keeps flag moves out of the public feed, so the latest money action stays on top", async () => {
+    const cat = await makeCat();
+    await fundCat(cat.id, 150000);
+    await db.insert(agentActions).values({ action: "fund_cat", reason: "Funded a cat.", status: "done", inputs: { catId: cat.id } });
+    const a = await makeUser();
+    await setEarTipFlag(cat.id, a.id, "no");
+    await setEarTipFlag(cat.id, a.id, null);
+    expect(await actionsNamed("ear_tip_answered")).toHaveLength(2);
+    const feed = await listAgentActions();
+    expect(feed.map((r) => r.action)).toEqual(["Funded a cat"]);
+    expect((await listAgentActions(1))[0].action).toBe("Funded a cat");
+  });
+
+  it("still counts flag moves for the rate limit", async () => {
+    const cat = await makeCat();
+    const a = await makeUser();
+    for (let i = 0; i < 10; i++) await setEarTipFlag(cat.id, a.id, i % 2 ? "yes" : "no");
+    await expect(assertUnderFlagLimit(a.id)).rejects.toBeInstanceOf(RateLimited);
+    await expect(assertUnderFlagLimit((await makeUser()).id)).resolves.toBeUndefined();
   });
 
   it("names the cat in a disagreement review", async () => {
