@@ -28,6 +28,36 @@ export const BACK_SLOTS: readonly { x: number; bottom: number; size: number }[] 
   { x: 190, bottom: 1470, size: 230 },
 ];
 
+/** A cat's place in its photo, as fractions of the photo from the top left. Only a position, never a location. */
+export type CatBox = Box;
+
+const FRACTION_SLACK = 1e-6;
+
+/** Reads a box a person's phone sent. Anything outside the photo, or not four finite numbers, is refused. */
+export function parseCatBox(v: unknown): CatBox | null {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
+  const { x, y, w, h } = v as Record<string, unknown>;
+  if (![x, y, w, h].every((n) => typeof n === "number" && Number.isFinite(n))) return null;
+  const [bx, by, bw, bh] = [x, y, w, h] as number[];
+  if (bx < 0 || by < 0 || bw <= 0 || bh <= 0 || bx + bw > 1 + FRACTION_SLACK || by + bh > 1 + FRACTION_SLACK) return null;
+  return { x: bx, y: by, w: bw, h: bh };
+}
+
+/** The camera's box in video pixels as fractions of the frame, kept inside it. Nothing when it is unusable. */
+export function toCatBox(box: Box, frame: { w: number; h: number }): CatBox | null {
+  if (!(frame.w > 0) || !(frame.h > 0)) return null;
+  const x0 = Math.min(1, Math.max(0, box.x / frame.w));
+  const y0 = Math.min(1, Math.max(0, box.y / frame.h));
+  const x1 = Math.min(1, Math.max(0, (box.x + box.w) / frame.w));
+  const y1 = Math.min(1, Math.max(0, (box.y + box.h) / frame.h));
+  return parseCatBox({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+}
+
+/** A stored box in the pixels of the photo the picture is cut from. */
+export function fromCatBox(box: CatBox | null, photo: { w: number; h: number }): Box | null {
+  return box ? { x: box.x * photo.w, y: box.y * photo.h, w: box.w * photo.w, h: box.h * photo.h } : null;
+}
+
 export type Rect = { x: number; y: number; w: number; h: number };
 
 const PAD = 0.22;
@@ -81,6 +111,8 @@ export type KeepsakeData = {
   name: string;
   /** Same-origin address of the public photo, served by the app so no canvas ever reads another origin. */
   photo: string;
+  /** Where the cat is in that photo, when the camera saw it. Nothing for an older cat. */
+  box: CatBox | null;
   hero: KeepsakeCat;
   others: KeepsakeCat[];
 };

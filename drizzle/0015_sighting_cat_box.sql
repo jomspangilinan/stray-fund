@@ -1,0 +1,1 @@
+ALTER TABLE "sightings" ADD COLUMN "cat_box" jsonb;

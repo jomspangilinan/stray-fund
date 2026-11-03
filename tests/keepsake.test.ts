@@ -5,7 +5,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db, closePool } from "../src/server/db/client";
 import { cats, sightings } from "../src/server/db/schema";
 import { RIBBON, type Avatar } from "../src/lib/avatar";
-import { cropRect, keepsakeFileName, otherCats, PHOTO_BOX, standaloneSvg, titleName } from "../src/lib/keepsake";
+import { cropRect, fromCatBox, keepsakeFileName, otherCats, parseCatBox, PHOTO_BOX, standaloneSvg, titleName, toCatBox } from "../src/lib/keepsake";
 import { getStorage, newPublicKey } from "../src/server/storage";
 import { getKeepsake } from "../src/server/keepsake";
 import { GET as dataGet } from "../src/app/api/cats/[id]/keepsake/route";
@@ -41,6 +41,32 @@ describe("cropRect", () => {
     const whole = cropRect({ w: 1000, h: 1000 }, { x: 0, y: 0, w: 1000, h: 1000 });
     expect(whole.w).toBeLessThanOrEqual(1000);
     expect(cropRect({ w: 1000, h: 1000 }, { x: 5, y: 5, w: 0, h: 10 })).toEqual(cropRect({ w: 1000, h: 1000 }, null));
+  });
+});
+
+describe("parseCatBox", () => {
+  it("accepts a box inside the photo and keeps only its four numbers", () => {
+    expect(parseCatBox({ x: 0.1, y: 0.2, w: 0.5, h: 0.4, extra: "no" })).toEqual({ x: 0.1, y: 0.2, w: 0.5, h: 0.4 });
+    expect(parseCatBox({ x: 0, y: 0, w: 1, h: 1 })).toEqual({ x: 0, y: 0, w: 1, h: 1 });
+  });
+  it("refuses anything out of range or not numbers", () => {
+    for (const bad of [
+      null, "x", 5, [], {}, { x: -0.1, y: 0, w: 0.5, h: 0.5 }, { x: 0, y: 0, w: 0, h: 0.5 }, { x: 0.6, y: 0, w: 0.5, h: 0.5 },
+      { x: 0, y: 0.7, w: 0.5, h: 0.5 }, { x: 0, y: 0, w: 1.5, h: 0.5 }, { x: "0", y: 0, w: 0.5, h: 0.5 },
+      { x: NaN, y: 0, w: 0.5, h: 0.5 }, { x: 0, y: 0, w: Infinity, h: 0.5 },
+    ]) expect(parseCatBox(bad)).toBeNull();
+  });
+  it("turns a box in video pixels into fractions, clamped, or nothing when it is useless", () => {
+    expect(toCatBox({ x: 100, y: 50, w: 200, h: 100 }, { w: 400, h: 200 })).toEqual({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 });
+    expect(toCatBox({ x: -20, y: 0, w: 100, h: 100 }, { w: 400, h: 200 })).toEqual({ x: 0, y: 0, w: 0.2, h: 0.5 });
+    expect(toCatBox({ x: 0, y: 0, w: 0, h: 10 }, { w: 400, h: 200 })).toBeNull();
+    expect(toCatBox({ x: 0, y: 0, w: 10, h: 10 }, { w: 0, h: 0 })).toBeNull();
+  });
+  it("lets the crop use a stored box and fall back to the centre without one", () => {
+    const photo = { w: 1600, h: 1200 };
+    const tight = cropRect(photo, fromCatBox({ x: 0.8, y: 0.7, w: 0.12, h: 0.16 }, photo));
+    expect(tight.w).toBeLessThan(700);
+    expect(cropRect(photo, fromCatBox(null, photo))).toEqual(cropRect(photo, null));
   });
 });
 
@@ -105,6 +131,14 @@ describe("keepsake data and photo", () => {
     const text = JSON.stringify(data);
     expect(text).not.toContain("Secret Lane");
     expect(text).not.toMatch(/memory-photos|originals\//);
+  });
+
+  it("carries the stored box of the photo shown, and none for an older cat", async () => {
+    const c = await cat("Boxed");
+    await db.update(sightings).set({ catBox: { x: 0.2, y: 0.3, w: 0.4, h: 0.3 } });
+    expect((await getKeepsake(c.id))!.box).toEqual({ x: 0.2, y: 0.3, w: 0.4, h: 0.3 });
+    await db.update(sightings).set({ catBox: null });
+    expect((await getKeepsake(c.id))!.box).toBeNull();
   });
 
   it("has nothing for a cat with no public photo, and a missing or malformed id", async () => {

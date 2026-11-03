@@ -1,3 +1,4 @@
+import type { CatBox } from "@/lib/keepsake";
 import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
 import { catAvatar } from "@/lib/avatar";
 import { COLONY } from "@/lib/config";
@@ -86,6 +87,8 @@ export async function processSpot(i: {
   lat: number | null;
   lng: number | null;
   userId: string;
+  /** Where the camera saw the cat, as fractions of the photo. Already validated by the caller. */
+  box?: CatBox | null;
 }): Promise<SpotResult> {
   await assertUnderRateLimit(i.userId);
   const { key } = await storeOriginal(i.jpeg);
@@ -105,6 +108,7 @@ export async function processSpot(i: {
         state: "pending",
         exactLat: hasPoint ? i.lat : null,
         exactLng: hasPoint ? i.lng : null,
+        catBox: i.box ?? null,
       })
       .returning({ id: sightings.id });
     return row;

@@ -1,5 +1,6 @@
 "use client";
 
+import type { CatBox } from "@/lib/keepsake";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type CaptureLocation = { lat: number | null; lng: number | null };
@@ -57,6 +58,7 @@ function stop(stream: MediaStream | null) {
  */
 export function LiveCamera({
   onCapture,
+  boxAtShutter,
   disabled = false,
   onVideoReady,
   hideShutter = false,
@@ -71,7 +73,9 @@ export function LiveCamera({
   scanning = false,
   onStageRect,
 }: {
-  onCapture: (blob: Blob, where: CaptureLocation) => void | Promise<void>;
+  onCapture: (blob: Blob, where: CaptureLocation, box: CatBox | null) => void | Promise<void>;
+  /** Where the cat is in the frame at the moment of the shutter, if the camera sees it. */
+  boxAtShutter?: () => CatBox | null;
   disabled?: boolean;
   /** Called with the playing video element once the camera is live, and with null when it stops. */
   onVideoReady?: (video: HTMLVideoElement | null) => void;
@@ -181,13 +185,14 @@ export function LiveCamera({
     const video = videoRef.current;
     if (!video || status !== "ready") return;
     setStatus("capturing");
+    const box = boxAtShutter?.() ?? null;
     const blob = await toJpeg(video);
     if (!blob) {
       setStatus("error");
       return;
     }
     const where: CaptureLocation = askLocation ? await locate() : { lat: null, lng: null };
-    await onCapture(blob, where);
+    await onCapture(blob, where, box);
     setStatus("ready");
   }
 

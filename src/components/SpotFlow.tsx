@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { boxToView, clampBox } from "@/lib/catDetect";
+import { toCatBox, type CatBox } from "@/lib/keepsake";
 import { COLONY } from "@/lib/config";
 import type { SpotReveal as Reveal } from "@/server/spotReveal";
 import { LiveCamera, type CaptureLocation } from "./LiveCamera";
@@ -50,6 +51,15 @@ export function SpotFlow({ username }: { username: string | null }) {
   const urlRef = useRef<string | null>(null);
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const detector = useCatDetector(video, phase.kind === "camera" && Boolean(username));
+  // The shutter reads the latest sighting of the cat, not the one from when the callback was made.
+  const latest = useRef(detector);
+  useEffect(() => {
+    latest.current = detector;
+  });
+  const boxAtShutter = () => {
+    const d = latest.current;
+    return d.state === "found" && d.box && d.video ? toCatBox(d.box, d.video) : null;
+  };
   const [stage, setStage] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const bracketBox =
     detector.state === "found" && detector.box && detector.video && typeof window !== "undefined"
@@ -111,7 +121,7 @@ export function SpotFlow({ username }: { username: string | null }) {
     );
   }
 
-  async function upload(blob: Blob, where: CaptureLocation) {
+  async function upload(blob: Blob, where: CaptureLocation, box: CatBox | null) {
     keep(blob);
     const startedAt = Date.now();
     setPhase({ kind: "sending", startedAt, responded: false });
@@ -121,6 +131,7 @@ export function SpotFlow({ username }: { username: string | null }) {
       form.set("lat", String(where.lat));
       form.set("lng", String(where.lng));
     }
+    if (box) form.set("box", JSON.stringify(box));
     try {
       const res = await fetch("/api/spot", { method: "POST", body: form });
       const body = (await res.json().catch(() => ({}))) as Partial<Done> & { error?: string };
@@ -194,6 +205,7 @@ export function SpotFlow({ username }: { username: string | null }) {
             ) : null
           }
           onCapture={upload}
+          boxAtShutter={boxAtShutter}
           disabled={sending}
           topBar={
             <>

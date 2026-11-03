@@ -4,13 +4,9 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { CatAvatar } from "@/components/CatAvatar";
-import { MIN_SCORE, pickCat, skipDetector, type Box } from "./catDetect";
 import {
-  BACK_SLOTS, cropRect, FRAME, HERO, KEEPSAKE_H, KEEPSAKE_W, NAIL, PHOTO_BOX, standaloneSvg, titleName, type KeepsakeCat, type KeepsakeData,
+  BACK_SLOTS, cropRect, FRAME, fromCatBox, HERO, KEEPSAKE_H, KEEPSAKE_W, NAIL, PHOTO_BOX, standaloneSvg, titleName, type KeepsakeCat, type KeepsakeData,
 } from "./keepsake";
-
-/** How long the cat finder may take while someone waits. Past this the photo is simply centred. */
-const FIND_LIMIT_MS = 3000;
 
 /** Draws the app's own avatar off screen and reads it back as a standalone picture. */
 function catImage(c: KeepsakeCat): Promise<HTMLImageElement> {
@@ -29,22 +25,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error("image"));
     img.src = src;
   });
-}
-
-/** Looks for the cat in the public photo on this device. Never throws: no box just means a centred crop. */
-async function findCat(img: HTMLImageElement): Promise<Box | null> {
-  const conn = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
-  if (skipDetector(conn)) return null;
-  const work = (async () => {
-    const det = await (await import("./detector")).loadDetector();
-    try {
-      return pickCat(await det.detect(img));
-    } finally {
-      det.dispose();
-    }
-  })().catch(() => null);
-  const box = await Promise.race([work, new Promise<null>((r) => setTimeout(() => r(null), FIND_LIMIT_MS))]);
-  return box && box.score >= MIN_SCORE ? box : null;
 }
 
 /** Shrinks the type until the text fits the width. */
@@ -116,7 +96,7 @@ function frame(ctx: CanvasRenderingContext2D, photo: HTMLImageElement, crop: { x
  * Draws the keepsake and returns it as a PNG. The photo arrives as bytes from this app and the drawings are SVG data
  * URLs, so the canvas is never tainted and no storage CORS rule is involved. Text uses the app's own font.
  */
-export async function composeKeepsake(data: KeepsakeData, photoBlob: Blob, opts: { detect?: boolean } = {}): Promise<Blob> {
+export async function composeKeepsake(data: KeepsakeData, photoBlob: Blob): Promise<Blob> {
   const family = getComputedStyle(document.body).fontFamily;
   await Promise.all([document.fonts.load(`800 40px ${family}`), document.fonts.load(`700 40px ${family}`)]).catch(() => undefined);
   const photoUrl = URL.createObjectURL(photoBlob);
@@ -126,8 +106,8 @@ export async function composeKeepsake(data: KeepsakeData, photoBlob: Blob, opts:
       catImage(data.hero),
       Promise.all(data.others.map(catImage)),
     ]);
-    const box = opts.detect === false ? null : await findCat(photo);
-    const crop = cropRect({ w: photo.naturalWidth, h: photo.naturalHeight }, box);
+    const dims = { w: photo.naturalWidth, h: photo.naturalHeight };
+    const crop = cropRect(dims, fromCatBox(data.box, dims));
 
     const canvas = document.createElement("canvas");
     canvas.width = KEEPSAKE_W;

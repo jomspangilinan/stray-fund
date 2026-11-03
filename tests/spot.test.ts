@@ -688,13 +688,14 @@ describe("POST /api/spot", () => {
     return u;
   }
 
-  async function body(fields: { photo?: Blob | null; lat?: string; lng?: string } = {}) {
+  async function body(fields: { photo?: Blob | null; lat?: string; lng?: string; box?: string } = {}) {
     const f = new FormData();
     if (fields.photo !== null) {
       f.set("photo", fields.photo ?? new Blob([new Uint8Array(await jpeg())], { type: "image/jpeg" }), "cat.jpg");
     }
     if (fields.lat !== undefined) f.set("lat", fields.lat);
     if (fields.lng !== undefined) f.set("lng", fields.lng);
+    if (fields.box !== undefined) f.set("box", fields.box);
     return f;
   }
   const post = (f: FormData, headers: Record<string, string> = {}) =>
@@ -734,6 +735,29 @@ describe("POST /api/spot", () => {
     const [s] = await sightingRows();
     expect(s.requestedSex).toBeNull();
     expect(s.requestedEarTip).toBeNull();
+  });
+
+  it("keeps the cat's box from the camera, as fractions of the photo", async () => {
+    await signIn();
+    const res = await post(await body({ box: JSON.stringify({ x: 0.1, y: 0.2, w: 0.5, h: 0.4 }) }));
+    expect(res.status).toBe(200);
+    const [s] = await sightingRows();
+    expect(s.catBox).toEqual({ x: 0.1, y: 0.2, w: 0.5, h: 0.4 });
+    expect(JSON.stringify(await res.json())).not.toContain("0.5");
+  });
+
+  it("stores no box when none is sent", async () => {
+    await signIn();
+    expect((await post(await body())).status).toBe(200);
+    expect((await sightingRows())[0].catBox).toBeNull();
+  });
+
+  it("refuses a box that is out of range or not a box, and saves nothing", async () => {
+    await signIn();
+    for (const box of ["not json", JSON.stringify({ x: 2, y: 0, w: 0.5, h: 0.5 }), JSON.stringify({ x: 0.5, y: 0.5, w: 0.9, h: 0.9 }), JSON.stringify([1, 2])]) {
+      expect((await post(await body({ box }))).status).toBe(400);
+    }
+    expect(await sightingRows()).toHaveLength(0);
   });
 
   it("answers queued_for_ai when AI is down", async () => {

@@ -1,8 +1,8 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { NEUTRAL_AVATAR, parseAvatar } from "@/lib/avatar";
-import { otherCats, type KeepsakeData } from "@/lib/keepsake";
+import { otherCats, parseCatBox, type KeepsakeData } from "@/lib/keepsake";
 import { db } from "./db/client";
-import { cats } from "./db/schema";
+import { cats, sightings } from "./db/schema";
 import { getCatCard, getYard } from "./public";
 import { LOCAL_DATA_DIR, readLocalPublic } from "./storage";
 
@@ -17,10 +17,18 @@ export async function getKeepsake(catId: string): Promise<KeepsakeData | null> {
   if (!card || !card.cat.photoUrl) return null;
   const [row] = await db.select({ avatar: cats.avatar, sex: cats.sex }).from(cats).where(eq(cats.id, catId)).limit(1);
   if (!row) return null;
+  // The photo on the card is the newest public one; its box, if the camera had one, goes with it.
+  const [shown] = await db
+    .select({ box: sightings.catBox })
+    .from(sightings)
+    .where(and(eq(sightings.catId, catId), inArray(sightings.state, ["matched", "new_cat"]), eq(sightings.publicReady, true), isNotNull(sightings.publicKey)))
+    .orderBy(desc(sightings.createdAt), desc(sightings.id))
+    .limit(1);
   const yard = await getYard(null);
   return {
     name: card.cat.name,
     photo: `/api/cats/${catId}/keepsake/photo`,
+    box: parseCatBox(shown?.box),
     hero: { id: catId, avatar: parseAvatar(row.avatar) ?? NEUTRAL_AVATAR, female: row.sex === "female" },
     others: otherCats(yard.cats, catId).map((c) => ({ id: c.id, avatar: c.avatar, female: c.female })),
   };

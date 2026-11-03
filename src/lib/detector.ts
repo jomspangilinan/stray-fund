@@ -10,7 +10,7 @@ import * as tf from "@tensorflow/tfjs-core";
 import * as cocoSsd from "@tensorflow-models/coco-ssd";
 import type { Prediction } from "./catDetect";
 
-export type Detector = { detect(video: HTMLVideoElement | HTMLImageElement): Promise<Prediction[]>; dispose(): void };
+export type Detector = { detect(video: HTMLVideoElement): Promise<Prediction[]>; dispose(): void };
 
 export async function loadDetector(): Promise<Detector> {
   await tf.setBackend("webgl");

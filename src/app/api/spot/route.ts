@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseCatBox } from "@/lib/keepsake";
 import { describeError } from "@/server/errors";
 import { BodyTooLarge, parseForm, readLimited } from "@/server/http";
 import { AuthError, requireRole } from "@/server/session";
@@ -19,7 +20,7 @@ function coordinate(raw: FormDataEntryValue | null, min: number, max: number): n
 }
 
 /**
- * Multipart form: photo (image/jpeg), optional lat and lng (both or neither). Questions about the cat come after the photo.
+ * Multipart form: photo (image/jpeg), optional lat and lng (both or neither), optional box (JSON fractions of the photo, where the camera saw the cat). Questions about the cat come after the photo.
  * The answer is a whitelist: state, catId, sightingId, message, and a reveal built by buildReveal. No coordinates, storage keys or assessment text.
  */
 export async function POST(req: Request) {
@@ -41,11 +42,23 @@ export async function POST(req: Request) {
       return fail("Send both a valid latitude and longitude, or neither", 400);
     }
 
+    let box = null;
+    const rawBox = form.get("box");
+    if (rawBox !== null && rawBox !== "") {
+      try {
+        box = typeof rawBox === "string" ? parseCatBox(JSON.parse(rawBox)) : null;
+      } catch {
+        box = null;
+      }
+      if (!box) return fail("The photo did not send properly. Take it again.", 400);
+    }
+
     const out = await processSpot({
       jpeg: Buffer.from(await photo.arrayBuffer()),
       lat,
       lng,
       userId: session.userId,
+      box,
     });
     return NextResponse.json({
       state: out.state,

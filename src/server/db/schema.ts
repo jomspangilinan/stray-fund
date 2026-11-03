@@ -106,6 +106,8 @@ export const sightings = pgTable(
     requestedSex: text("requested_sex"),
     // What the finder said about the ear tip when they took the photo: yes or no. Not sure stays null.
     requestedEarTip: text("requested_ear_tip"),
+    // Where the camera saw the cat, as fractions of the photo ({x, y, w, h}). A position in the picture, never a place.
+    catBox: jsonb("cat_box"),
     assessment: jsonb("assessment"),
     state: text("state").notNull().default("pending"),
     createdAt: createdAt(),
