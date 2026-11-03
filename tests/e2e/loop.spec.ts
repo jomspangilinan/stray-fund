@@ -193,6 +193,9 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     await pickRole(page, "Vet");
     await page.waitForURL("**/vet");
     await expect(page.getByRole("heading", { name: "Mocha" })).toBeVisible();
+    const mapHref = await page.getByRole("link", { name: /See area on map/ }).first().getAttribute("href");
+    expect(mapHref).toContain("https://www.google.com/maps/search/?api=1&query=");
+    expect(mapHref).not.toMatch(/\d+\.\d+/);
     await page.getByRole("button", { name: "Book Mocha" }).click();
     await page.waitForURL(/\/vet\/bookings\//);
     bookingId = page.url().split("/").pop()!;
