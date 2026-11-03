@@ -14,8 +14,9 @@ Rules:
 - Never guess sex from the photo. Set probably_female_by_coat to true only for a clear calico or tortoiseshell coat, otherwise false.
 - flags: set kitten, pregnant, injured or sick to true only when it is plainly visible.
 - sensitive_regions: boxes around human faces, number plates and street signs or house numbers, so they can be blurred. ${BOX_NOTE} Use an empty list when there are none.
+- no_sensitive_content: true only when, after the boxes in sensitive_regions are blurred, nothing else in the picture could identify a person or a place: no face, number plate, house number, street sign, shop sign, name board or other readable text, and no landmark. Say false whenever you are unsure.
 - suggested_name: one kind, simple name that comes from this cat's look or personality, such as its colour, a marking or how it carries itself. Keep it short, easy to say and Filipino-friendly. Make it fit this cat, not a stock favourite. Never use a name from the taken list in the request.
-- short_bio: one or two gentle sentences about how the cat looks. Do not invent a location or a history.
+- short_bio: one or two gentle sentences about how the cat looks and acts. Describe only the cat. Never mention signs, shops, street names, buildings, numbers or anything read from the background, and never say where the cat is or lives. Do not invent a history.
 - Keep colors to plain words.`;
 
 /** The most taken names sent along. Every name is one of ours, never text from the photo. */

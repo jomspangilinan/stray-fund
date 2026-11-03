@@ -52,6 +52,9 @@ export const AssessmentSchema = z.object({
   suggested_name: z.string().max(30),
   short_bio: z.string().max(280),
   sensitive_regions: z.array(BoxSchema).max(8),
+  // True only when, with the listed regions blurred, nothing readable or identifying is left in the picture.
+  // False when unsure. A photo is published without a person only when this is true.
+  no_sensitive_content: z.boolean(),
 });
 export type Assessment = z.infer<typeof AssessmentSchema>;
 

@@ -106,6 +106,7 @@ describe("first names", () => {
     probably_female_by_coat: false,
     suggested_name: "Muning",
     short_bio: "A calm orange cat.",
+    no_sensitive_content: true,
     sensitive_regions: [] as unknown[],
   };
   const calls: Parameters<AiTransport>[0][] = [];

@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { AssessmentSchema, ReceiptSchema, type ReceiptReading } from "../ai/schemas";
 import { db } from "../db/client";
 import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reviewRequests, sightings, users, wakeups } from "../db/schema";
+import { needsHumanTick, regionsOf } from "../photoGate";
 import { depositPaidOn, reasonMessages } from "../vetFlow";
 import { manilaDate } from "../public";
 import { deskTotal } from "@/lib/deskSections";
@@ -66,7 +67,7 @@ export type CaretakerQueue = {
   earTipConfirmations: ReceiptItem[];
   reviews: { id: string; subject: string; reason: string; date: string }[];
   failedWakeups: { id: string; kind: string; attempts: number; date: string }[];
-  heldPhotos: { sightingId: string; catId: string | null; catName: string | null; state: string; hasRegions: boolean; date: string }[];
+  heldPhotos: { sightingId: string; catId: string | null; catName: string | null; state: string; hasRegions: boolean; needsTick: boolean; date: string }[];
   /** Spotted cats whose ears the flags have not settled yet, with how many people said each. */
   earTipPending: { id: string; name: string; yes: number; no: number; exact: ExactSpot }[];
   /** Cats marked neutered with no vet record, no money and no payout, so a caretaker can put a wrong call back. */
@@ -257,8 +258,8 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
       catId: s.catId,
       catName,
       state: s.state,
-      hasRegions: Array.isArray((s.assessment as { sensitive_regions?: unknown } | null)?.sensitive_regions) &&
-        ((s.assessment as { sensitive_regions: unknown[] }).sensitive_regions.length > 0),
+      hasRegions: regionsOf(s.assessment).length > 0,
+      needsTick: needsHumanTick(s.assessment),
       date: manilaDate(s.createdAt),
     })),
     earTipPending: undecided.map((c) => ({ id: c.id, name: c.name, yes: countOf(c.id, "yes"), no: countOf(c.id, "no"), exact: exactOf(c.lat, c.lng, c.approx) })),

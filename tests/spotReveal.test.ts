@@ -146,6 +146,7 @@ const ASSESS = {
   probably_female_by_coat: true,
   suggested_name: "Pepita",
   short_bio: "SECRET-BIO",
+  no_sensitive_content: true,
   sensitive_regions: [] as unknown[],
 };
 

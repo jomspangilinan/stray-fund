@@ -25,6 +25,7 @@ const ASSESSMENT = {
   probably_female_by_coat: false,
   suggested_name: "Muning",
   short_bio: "A calm orange cat.",
+  no_sensitive_content: true,
   sensitive_regions: [{ x: 0.1, y: 0.1, w: 0.2, h: 0.2 }],
 };
 

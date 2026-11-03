@@ -561,6 +561,7 @@ const ASSESS = {
   probably_female_by_coat: true,
   suggested_name: "Muning",
   short_bio: "A calm orange cat.",
+  no_sensitive_content: true,
   sensitive_regions: [] as unknown[],
 };
 
@@ -739,6 +740,34 @@ describe("photos", () => {
     const { s } = await heldSighting({ ...ASSESS, sensitive_regions: [{ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }] });
     expect((await act("photo_publish", { sightingId: s.id })).status).toBe(200);
     expect((await sightingRow(s.id)).publicReady).toBe(true);
+  });
+
+  it("listed regions are not enough when the AI was not sure the rest is clear: the tick is needed", async () => {
+    const { s } = await heldSighting({ ...ASSESS, no_sensitive_content: false, sensitive_regions: [{ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }] });
+    const q = (await getCaretakerQueue()).heldPhotos.find((p) => p.sightingId === s.id)!;
+    expect(q).toMatchObject({ hasRegions: true, needsTick: true });
+    expect((await act("photo_publish", { sightingId: s.id })).status).toBe(400);
+    expect((await sightingRow(s.id)).publicReady).toBe(false);
+    expect((await act("photo_publish", { sightingId: s.id, noSensitive: true })).status).toBe(200);
+    expect((await sightingRow(s.id)).publicReady).toBe(true);
+  });
+
+  it("a row saved before the field existed keeps today's rule: regions without a tick, none with one", async () => {
+    const { no_sensitive_content: _gone, ...old } = ASSESS;
+    void _gone;
+    const withRegions = await heldSighting({ ...old, sensitive_regions: [{ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }] });
+    expect((await act("photo_publish", { sightingId: withRegions.s.id })).status).toBe(200);
+    const none = await heldSighting({ ...old });
+    expect((await act("photo_publish", { sightingId: none.s.id })).status).toBe(400);
+  });
+
+  it("confirming a new cat does not publish a photo the AI did not vouch for", async () => {
+    const vouched = await reviewSighting({ assessment: { ...ASSESS, review_reason: "ai_unusable", candidate_cat_ids: [] } });
+    expect((await act("sighting_confirm_new", { sightingId: vouched.id })).status).toBe(200);
+    expect((await sightingRow(vouched.id)).publicReady).toBe(true);
+    const unsure = await reviewSighting({ assessment: { ...ASSESS, no_sensitive_content: false, review_reason: "ai_unusable", candidate_cat_ids: [] } });
+    expect((await act("sighting_confirm_new", { sightingId: unsure.id })).status).toBe(200);
+    expect((await sightingRow(unsure.id)).publicReady).toBe(false);
   });
 
   it("holding removes the photo from public pages", async () => {

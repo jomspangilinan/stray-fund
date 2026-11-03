@@ -48,8 +48,9 @@ function assessment(p: Params) {
     probably_female_by_coat: false,
     suggested_name: name,
     short_bio: "A calm orange tabby who watches the street from a wall.",
-    // An empty list is an answer: it lets the photo be published after the real scrubbing step.
+    // An empty list plus no_sensitive_content lets the photo be published after the real scrubbing step.
     sensitive_regions: [],
+    no_sensitive_content: true,
   };
 }
 

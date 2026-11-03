@@ -40,6 +40,7 @@ const ASSESS = {
   probably_female_by_coat: false,
   suggested_name: "Muning",
   short_bio: "A calm orange cat.",
+  no_sensitive_content: true,
   sensitive_regions: [] as unknown[],
 };
 type Json = Record<string, unknown>;
@@ -504,6 +505,41 @@ describe("public photo", () => {
     expect(memory.readPublic(s.publicKey!).length).toBeGreaterThan(0);
   });
 
+  it("holds the photo for a caretaker when the AI does not say nothing sensitive is left, even with no regions", async () => {
+    script.assess = () => assessWith({ no_sensitive_content: false, sensitive_regions: [] });
+    const u = await makeUser();
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect(out.state).toBe("new_cat");
+    const [s] = await sightingRows();
+    expect(s).toMatchObject({ publicReady: false, publicKey: null });
+    const [cat] = await catRows();
+    expect(cat.id).toBe(out.catId);
+  });
+
+  it("holds the photo when regions are listed but the AI is not sure the rest is clear", async () => {
+    script.assess = () => assessWith({ no_sensitive_content: false, sensitive_regions: [{ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }] });
+    const u = await makeUser();
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect((await sightingRows())[0]).toMatchObject({ publicReady: false, publicKey: null });
+  });
+
+  it("publishes with an empty region list only when the AI says nothing sensitive is left", async () => {
+    script.assess = () => assessWith({ no_sensitive_content: true, sensitive_regions: [] });
+    const u = await makeUser();
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect((await sightingRows())[0].publicReady).toBe(true);
+  });
+
+  it("an answer without the field is unparseable, so it never reaches publishing", async () => {
+    const { no_sensitive_content: _drop, ...without } = ASSESS;
+    void _drop;
+    script.assess = () => without;
+    const u = await makeUser();
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect(out.state).not.toBe("new_cat");
+    expect((await sightingRows())[0].publicReady).toBe(false);
+  });
+
   it("keeps public_ready false and still creates the cat when publishing fails", async () => {
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(getStorage(), "putPublic").mockRejectedValue(new Error("disk full"));
@@ -513,6 +549,35 @@ describe("public photo", () => {
     const [s] = await sightingRows();
     expect(s).toMatchObject({ publicReady: false, publicKey: null, state: "new_cat" });
     expect(err).toHaveBeenCalled();
+  });
+});
+
+describe("public words from the photo (I3)", () => {
+  it("stores the model's bio when it only describes the cat", async () => {
+    script.assess = () => assessWith({ short_bio: "A calm orange cat with white socks." });
+    const u = await makeUser();
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect((await catRows())[0].bio).toBe("A calm orange cat with white socks.");
+  });
+
+  it("replaces a bio that repeats a shop, street, number or area with the generic line", async () => {
+    for (const bio of ["Waits outside the Mercury Drug on Rizal Ave.", "Lives at gate 12.", "Naps near the market in San Antonio."]) {
+      await db.delete(sightings);
+      await db.delete(cats);
+      script.assess = () => assessWith({ short_bio: bio });
+      const u = await makeUser();
+      await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+      expect((await catRows())[0].bio).toBe("A friendly neighbourhood cat.");
+    }
+  });
+
+  it("does not keep a place or a number as the cat's name", async () => {
+    script.assess = () => assessWith({ suggested_name: "Gate 5" });
+    const u = await makeUser();
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    const [cat] = await catRows();
+    expect(cat.name).not.toMatch(/gate|5/i);
+    expect(cat.name.length).toBeGreaterThan(0);
   });
 });
 

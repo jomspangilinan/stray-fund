@@ -12,6 +12,7 @@ import { parseCatName } from "@/lib/catNames";
 import { publishScrubbed, type Box } from "../photos";
 import { StoredObjectMissing } from "../storage";
 import { enqueueWakeup } from "../wakeups";
+import { autoPublishable, needsHumanTick, regionsOf } from "../photoGate";
 import { audit, flag, reqUuid, Refusal, type Handler } from "./shared";
 import type { CatStatus } from "@/lib/catState";
 
@@ -30,8 +31,9 @@ async function loadWaiting(tx: Tx, id: string): Promise<Sighting> {
 
 /** The photo is published after the commit, since storage is not part of the transaction. */
 async function publishAfter(s: Sighting): Promise<void> {
-  const regions = (s.assessment as { sensitive_regions?: unknown } | null)?.sensitive_regions;
-  await publishPhoto(s.id, s.originalKey, regions);
+  // Same rule as a fresh photo: a person confirming the cat has not checked the picture for signs or plates.
+  if (!autoPublishable(s.assessment)) return;
+  await publishPhoto(s.id, s.originalKey, regionsOf(s.assessment));
 }
 
 export const sightingConfirmNew: Handler = async (caretakerId, body) => {
@@ -340,9 +342,8 @@ export const photoPublish: Handler = async (caretakerId, body) => {
   if (s.state === "pending" || s.state === "rejected") throw new Refusal(409, "This sighting has no photo that can be published.");
   if (s.publicReady) throw new Refusal(409, "This photo is already public.");
 
-  const stored = (s.assessment as { sensitive_regions?: unknown } | null)?.sensitive_regions;
-  const regions: Box[] = Array.isArray(stored) ? (stored as Box[]) : [];
-  if (regions.length === 0 && !flag(body, "noSensitive")) {
+  const regions: Box[] = regionsOf(s.assessment);
+  if (needsHumanTick(s.assessment) && !flag(body, "noSensitive")) {
     throw new Refusal(400, "Tick the box to confirm no house numbers, signs or plates are visible. Without it the photo stays private.");
   }
 

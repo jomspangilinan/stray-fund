@@ -79,12 +79,11 @@ export function HeldPhotos({ items }: { items: CaretakerQueue["heldPhotos"] }) {
           <img src={`/api/caretaker/images/sighting/${p.sightingId}`} alt="The original photo" className="mt-3 max-h-72 w-full rounded-in object-contain" />
           <ActionForm action="photo_publish" submitLabel="Publish with areas blurred">
             <Hidden name="sightingId" value={p.sightingId} />
-            {p.hasRegions ? (
-              <p className="small">The AI marked areas to blur. They will be blurred.</p>
-            ) : (
+            {p.hasRegions && <p className="small">The AI marked areas to blur. They will be blurred.</p>}
+            {p.needsTick && (
               <label className="flex items-start gap-3">
                 <input type="checkbox" name="noSensitive" value="on" className="mt-1 h-5 w-5" />
-                <span>No house numbers, signs or plates visible</span>
+                <span>{p.hasRegions ? "No other house numbers, signs or plates visible" : "No house numbers, signs or plates visible"}</span>
               </label>
             )}
           </ActionForm>

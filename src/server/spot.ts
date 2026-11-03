@@ -8,6 +8,8 @@ import { matchCat } from "./ai/match";
 import { db, lockColony, type Tx } from "./db/client";
 import { cats, guardrails, sightings } from "./db/schema";
 import { catNamesInUse, uniqueName } from "./catNames";
+import { autoPublishable } from "./photoGate";
+import { nameIsSafe, safeBio } from "./placeText";
 import { fuzzLocation } from "./location";
 import { publishScrubbed, storeOriginal, type Box } from "./photos";
 import { getStorage } from "./storage";
@@ -233,7 +235,7 @@ function cleanName(raw: string): string {
     .trim()
     .slice(0, 30)
     .trim();
-  return name || FALLBACK_NAME;
+  return name && nameIsSafe(name) ? name : FALLBACK_NAME;
 }
 
 /**
@@ -293,7 +295,8 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
     return { done: true as const, result: result("new_cat", s.id, cat.id), sighting: s, catId: cat.id };
   });
 
-  if (outcome.done && outcome.catId) {
+  // Only a photo the model vouches for goes public by itself. Otherwise it waits in the caretaker's held photos.
+  if (outcome.done && outcome.catId && autoPublishable(a)) {
     await publishPhoto(outcome.sighting.id, outcome.sighting.originalKey, a.sensitive_regions);
   }
   return outcome.result;
@@ -309,10 +312,11 @@ export async function insertNewCat(tx: Tx, s: SightingRow, a: Assessment | null)
   const fuzzed = fuzzLocation(exact.lat, exact.lng);
   // Only the server's own coat rule sets a sex here. The finder answers afterwards, on the reveal or the card.
   const sex: Sex = a?.probably_female_by_coat ? "female" : "unknown";
+  const name = await uniqueName(tx, cleanName(a?.suggested_name ?? ""));
   const [cat] = await tx
     .insert(cats)
     .values({
-      name: await uniqueName(tx, cleanName(a?.suggested_name ?? "")),
+      name,
       sex,
       flags: a ? flagsOf(a) : [],
       coat: a ? { colors: a.colors, markings: a.markings } : null,
@@ -324,7 +328,7 @@ export async function insertNewCat(tx: Tx, s: SightingRow, a: Assessment | null)
       fuzzedLat: fuzzed.lat,
       fuzzedLng: fuzzed.lng,
       locationApproximate: !hasPoint,
-      bio: a?.short_bio.trim() || null,
+      bio: a ? safeBio(a.short_bio, name) : null,
     })
     .returning({ id: cats.id });
   return cat;
