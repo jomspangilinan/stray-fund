@@ -362,6 +362,47 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     await expect(page.getByRole("link", { name: /Mocha/ }).first()).toBeVisible();
   });
 
+  // ---------------------------------------------------------------- refund
+  await test.step("PayPal refunds part of the second gift: its own negative row, the pool and the Proof line follow, a replay changes nothing", async () => {
+    const REFUND = 2_000;
+    const gift = await db.one<{ paypal_capture_id: string; status: string }>("select paypal_capture_id, status from donations where gross = $1", [DONATION_2.gross]);
+    const money = (c: number) => ({ currency_code: "PHP", value: (c / 100).toFixed(2) });
+    const event = {
+      id: "E2E-EVENT-REFUND",
+      event_type: "PAYMENT.CAPTURE.REFUNDED",
+      resource: {
+        id: "E2E-REFUND-1",
+        status: "COMPLETED",
+        amount: money(REFUND),
+        seller_payable_breakdown: { gross_amount: money(REFUND), paypal_fee: money(0), net_amount: money(REFUND) },
+        links: [{ rel: "up", href: `https://e2e.invalid/v2/payments/captures/${gift.paypal_capture_id}` }],
+      },
+    };
+    const first = await page.request.post("/api/webhooks/paypal", { headers: PAYPAL_HEADERS, data: event });
+    expect(await first.json()).toEqual({ result: "processed" });
+    const replay = await page.request.post("/api/webhooks/paypal", { headers: PAYPAL_HEADERS, data: event });
+    expect(await replay.json()).toEqual({ result: "duplicate" });
+    const again = await page.request.post("/api/webhooks/paypal", { headers: PAYPAL_HEADERS, data: { ...event, id: "E2E-EVENT-REFUND-2" } });
+    expect(again.ok()).toBe(true);
+
+    // The gift itself is untouched; the refund is one row of its own.
+    expect(await db.one("select status, gross, net from donations where gross = $1", [DONATION_2.gross])).toMatchObject({ status: "captured", gross: DONATION_2.gross });
+    expect(await db.rows("select 1 from donation_reversals")).toHaveLength(1);
+
+    const grossIn = DONATION_1.gross + DONATION_2.gross - REFUND;
+    const fees = DONATION_1.fee + DONATION_2.fee;
+    const left = grossIn - fees - (PACKAGE - SURPLUS) - (DEPOSIT_FEE + BALANCE_FEE);
+    const snapshot = await (await page.request.get("/api/ledger")).json();
+    expect(snapshot.pool).toMatchObject({ grossIn, paypalFees: fees, available: left, reversedGross: REFUND });
+    expect(snapshot.rows.filter((r: { type: string }) => r.type === "refund")).toEqual([
+      expect.objectContaining({ amount: -REFUND, fee: 0, status: "refunded", paypalId: "E2E-REFUND-1" }),
+    ]);
+    await page.goto("/impact");
+    await expect(page.getByText("This adds up to the centavo, across every donation and payout.")).toBeVisible();
+    await expect(page.getByText(`Donated ${peso(grossIn)} = PayPal fees ${peso(fees)}`, { exact: false })).toBeVisible();
+    await expect(page.getByText(`${peso(REFUND)} that PayPal took back`, { exact: false })).toBeVisible();
+  });
+
   // ---------------------------------------------------------------- privacy
   await test.step("no public page or answer holds the exact place, a private key or an email", async () => {
     const sighting = await db.one<{ exact_lat: number; exact_lng: number }>("select exact_lat, exact_lng from sightings where cat_id = $1", [catId]);

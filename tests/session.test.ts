@@ -257,9 +257,19 @@ describe("donation routes", () => {
     const session = await getSession();
     for (let i = 0; i < 5; i++) await makePendingOrder(session!.userId);
     const out = await donationPost(
-      new Request("http://localhost/x", { method: "POST", body: JSON.stringify({ amount: 10_000 }) }),
+      new Request("http://localhost/x", { method: "POST", body: JSON.stringify({ amount: 10_000, attemptId: crypto.randomUUID() }) }),
     );
     expect(out.status).toBe(429);
+  });
+
+  it("create rejects a missing or malformed attempt id with 400 before calling PayPal", async () => {
+    keepCookie(await post({ username: "giver_2" }));
+    for (const attemptId of [undefined, "", "not-a-uuid", 7]) {
+      const res = await donationPost(
+        new Request("http://localhost/x", { method: "POST", body: JSON.stringify({ amount: 10_000, attemptId }) }),
+      );
+      expect(res.status).toBe(400);
+    }
   });
 
   it("create rejects a bad amount with 400 before calling PayPal", async () => {

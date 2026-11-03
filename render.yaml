@@ -29,10 +29,12 @@ services:
         value: "true"
       - key: AWS_REGION
         value: ap-southeast-1
+      # The web service's own IAM user (stray-fund-web). The worker has a different one. See docs/deploy.md step 2.
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
+      # The Bedrock policy in docs/deploy.md names this exact model in three statements. Change all of them with it.
       - key: AI_MODEL
         value: global.anthropic.claude-haiku-4-5-20251001-v1:0
       - key: AI_DAILY_CALL_CAP
@@ -43,6 +45,7 @@ services:
         sync: false
       - key: S3_PUBLIC_BASE_URL
         sync: false
+      # Never set to production here. Live money needs its own PayPal app and a hand-set value (docs/deploy.md, Before real money).
       - key: PAYPAL_ENV
         value: sandbox
       - key: PAYPAL_CLIENT_ID
@@ -77,6 +80,7 @@ services:
           property: connectionString
       - key: AWS_REGION
         value: ap-southeast-1
+      # The worker's own IAM user (stray-fund-worker), not the web service's key. See docs/deploy.md step 2.
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
@@ -91,6 +95,7 @@ services:
         sync: false
       - key: S3_PUBLIC_BASE_URL
         sync: false
+      # Never set to production here (docs/deploy.md, Before real money).
       - key: PAYPAL_ENV
         value: sandbox
       - key: PAYPAL_CLIENT_ID

@@ -4,6 +4,8 @@ Stray Fund runs as one web service, one worker and one Postgres database on Rend
 
 Do the steps in this order.
 
+Each safeguard below is marked **Demo ok** (the sandbox demo can run without it) or **Required before real money**. The list of everything marked required is in "Before real money" near the end. Nothing in this guide has been run against a real AWS account or live PayPal; it was written from the official pages named beside each step.
+
 ## 1. S3 buckets
 
 Make two buckets in the same region as the app, `ap-southeast-1`. Bucket names are global, so pick your own, for example `strayfund-private-<something>` and `strayfund-public-<something>`.
@@ -13,9 +15,20 @@ Make two buckets in the same region as the app, `ap-southeast-1`. Bucket names a
 | Private (`S3_PRIVATE_BUCKET`) | Original photos under `originals/` | All four "Block public access" boxes on. Nothing reads it except the app and worker, through the IAM key. |
 | Public (`S3_PUBLIC_BUCKET`) | Scrubbed copies under `photos/` | Readable by anyone for `photos/*` only. See below. |
 
-Both: Object Ownership "Bucket owner enforced" (the default), default encryption on. The code sends no ACLs.
+Both: Object Ownership "Bucket owner enforced" (the default) and default encryption on (SSE-S3 is the default for every bucket). The code sends no ACLs.
 
-**Public bucket.** The browser loads cat photos straight from this bucket, so `photos/*` must be readable by anyone. In the bucket's Block public access settings, turn off only "Block public access to buckets and objects granted through new public bucket or access control policies" and "Block public and cross-account access to buckets and objects through any public bucket or access control policies". Leave the two ACL boxes on. Then add this bucket policy (replace the bucket name):
+**Public bucket.** The browser loads cat photos straight from this bucket, so `photos/*` must be readable by anyone. S3 Block Public Access has four independent settings (https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html). A public bucket policy is only accepted when two are off, and the two ACL settings can stay on, because the code sends no ACLs:
+
+| Setting (API name) | On this public bucket |
+| --- | --- |
+| `BlockPublicAcls` | On |
+| `IgnorePublicAcls` | On |
+| `BlockPublicPolicy` | **Off**, or S3 rejects the policy below |
+| `RestrictPublicBuckets` | **Off**, or S3 ignores the policy for everyone outside your account |
+
+In the console these are the four checkboxes under the bucket's Block public access settings; untick only the third and fourth ("...through new public bucket or access point policies" and "Block public and cross-account access to buckets and objects through any public bucket or access point policies"). The **account-level** Block Public Access must not have those two on either: S3 applies the most restrictive of the bucket and the account, so an account-wide `BlockPublicPolicy` would reject this policy. This is the cost of the public bucket, and a reason to move to CloudFront (below) before real users upload photos. **Demo ok.**
+
+Bucket policy for the public bucket (replace the bucket name). The second statement refuses plain HTTP, as AWS recommends with `aws:SecureTransport` (https://docs.aws.amazon.com/AmazonS3/latest/userguide/security-best-practices.html). The app uses HTTPS already, so it changes nothing for it:
 
 ```json
 {
@@ -27,20 +40,60 @@ Both: Object Ownership "Bucket owner enforced" (the default), default encryption
       "Principal": "*",
       "Action": "s3:GetObject",
       "Resource": "arn:aws:s3:::YOUR-PUBLIC-BUCKET/photos/*"
+    },
+    {
+      "Sid": "DenyPlainHttp",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::YOUR-PUBLIC-BUCKET",
+        "arn:aws:s3:::YOUR-PUBLIC-BUCKET/*"
+      ],
+      "Condition": { "Bool": { "aws:SecureTransport": "false" } }
     }
   ]
 }
 ```
 
-Set `S3_PUBLIC_BASE_URL` to `https://YOUR-PUBLIC-BUCKET.s3.ap-southeast-1.amazonaws.com`. The app builds photo URLs as that base plus `/photos/<uuid>.jpg`. If you would rather keep this bucket fully blocked, put CloudFront in front with origin access control and use the CloudFront domain as the base URL. That is more setup and is not needed for the demo.
+Anyone on the internet can read `photos/*`, so only scrubbed copies may ever be written there, and the policy must never grow past that prefix. Check it after every edit (IAM Access Analyzer for S3 flags a bucket that is public). **Required before real money:** the TLS deny on both buckets, and the decision below on CloudFront.
+
+The private bucket gets the same TLS deny and nothing else (all four Block Public Access settings stay on):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyPlainHttp",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::YOUR-PRIVATE-BUCKET",
+        "arn:aws:s3:::YOUR-PRIVATE-BUCKET/*"
+      ],
+      "Condition": { "Bool": { "aws:SecureTransport": "false" } }
+    }
+  ]
+}
+```
+
+Set `S3_PUBLIC_BASE_URL` to `https://YOUR-PUBLIC-BUCKET.s3.ap-southeast-1.amazonaws.com`. The app builds photo URLs as that base plus `/photos/<uuid>.jpg`.
+
+**CloudFront, a later option (not needed for the demo, not set up by this repo).** To keep the public bucket fully blocked, put a CloudFront distribution in front of it with origin access control (OAC). AWS recommends OAC over the older origin access identity (https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html). It needs Object Ownership "Bucket owner enforced" (already set here) and a bucket policy that lets the principal `cloudfront.amazonaws.com` do `s3:GetObject` on `photos/*` only when `AWS:SourceArn` is your distribution. Then turn all four Block Public Access settings back on, delete the `PublicReadScrubbedPhotos` statement, and set `S3_PUBLIC_BASE_URL` to the CloudFront domain. Do this before real users upload photos of real places.
 
 **CORS.** None is needed. Phones send the photo to the app (`POST /api/spot`), and the app writes to S3 from the server. Photos are shown in plain `<img>` tags (`unoptimized`). Save image draws a canvas, but it never reads the bucket from the browser: the app fetches the public photo itself and serves it from its own address (`/api/cats/<id>/keepsake/photo`), so the canvas is never tainted and the public bucket still needs no CORS rule. The web service does need to reach `S3_PUBLIC_BASE_URL` over https.
 
-## 2. IAM key
+## 2. Account safety and IAM keys
 
-Make an IAM user with no console access, attach the policy below, and create one access key. Use the same key for web and worker. Do not use root keys.
+**Root account (Demo ok, but do it first).** Sign in as the root user only to set this up. Turn on MFA for root (AWS requires it for every account type; there is a 14 day grace period) and create no access keys for root (https://docs.aws.amazon.com/IAM/latest/UserGuide/root-user-best-practices.html). Use a strong unique password and an email you control. For the command line on your laptop, `aws login` gives temporary credentials, so no root key is ever stored.
 
-Replace the two bucket names. `BedrockOptional` is optional and needs your OK before you add it. Without it the photo checks and the treasurer agent cannot call the model (production only ever uses Bedrock), so the deployed app is limited without it.
+**One IAM user per service (Required before real money).** Make two IAM users with no console access, `stray-fund-web` and `stray-fund-worker`, attach the same policy to both, and create one access key for each. Put the web key on the web service and the worker key on the worker only. Why two keys with the same policy: both services run the same photo and model code, so least privilege does not differ between them today. Separate keys still let you revoke or rotate one without stopping the other, and CloudTrail then shows which service made a call. If their code paths diverge later, narrow each policy. AWS prefers temporary role credentials for workloads, and lists IAM Roles Anywhere and web identity federation for workloads outside AWS (https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html). Render's OIDC route needs a Pro workspace, so long-lived keys with a small scope are the stated compromise for now. For the demo one key is acceptable (**Demo ok**).
+
+**Rotation (Required before real money).** AWS says to update access keys when needed and to use the "last used" information to remove old ones safely. This project's own rule: rotate every 90 days, and at once if a key may have leaked or someone with access leaves. IAM allows two keys per user, so rotate without downtime: create the second key, set it on the Render service and redeploy, check the old key's "last used" date stops moving, make the old key inactive for a day, then delete it. Put the next rotation date in your calendar when you create a key.
+
+Replace the placeholders in the policy: `YOUR-PRIVATE-BUCKET`, `YOUR-PUBLIC-BUCKET`, `ACCOUNT_ID` (your 12 digit account number) and `REGION` (`ap-southeast-1`). `BedrockOptional` is optional and needs your OK before you add it. Without it the photo checks and the treasurer agent cannot call the model (production only ever uses Bedrock), so the deployed app is limited without it.
 
 ```json
 {
@@ -59,23 +112,49 @@ Replace the two bucket names. `BedrockOptional` is optional and needs your OK be
       "Resource": "arn:aws:s3:::YOUR-PUBLIC-BUCKET/photos/*"
     },
     {
-      "Sid": "BedrockOptional",
+      "Sid": "BedrockGlobalProfileInRegion",
       "Effect": "Allow",
       "Action": "bedrock:InvokeModel",
-      "Resource": [
-        "arn:aws:bedrock:*:*:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0",
-        "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
-      ]
+      "Resource": "arn:aws:bedrock:REGION:ACCOUNT_ID:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "REGION" } }
+    },
+    {
+      "Sid": "BedrockRegionalModel",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": "arn:aws:bedrock:REGION::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "REGION",
+          "bedrock:InferenceProfileArn": "arn:aws:bedrock:REGION:ACCOUNT_ID:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0"
+        }
+      }
+    },
+    {
+      "Sid": "BedrockGlobalModel",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": "arn:aws:bedrock:::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "unspecified",
+          "bedrock:InferenceProfileArn": "arn:aws:bedrock:REGION:ACCOUNT_ID:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0"
+        }
+      }
     }
   ]
 }
 ```
 
-The code only calls `PutObject` and `GetObject`. The Bedrock resource ARNs follow the AWS pattern for a global inference profile and have not been tried against a real call. If the first model call is denied, the error names the ARN it wanted. If you change `AI_MODEL`, change these two lines too.
+The three `Bedrock...` statements are the three-part policy AWS documents for a `global.` inference profile (https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html): the profile in your region, the regional model reached through that profile, and the region-less global model ARN (`arn:aws:bedrock:::foundation-model/...`, where AWS sets `aws:RequestedRegion` to `unspecified`). All three are needed; removing any one denies the call. They name one model and one profile, with no wildcards. The app calls `InvokeModel` without streaming, so nothing else is allowed. If you change `AI_MODEL`, change the model name in all three statements. If your organisation uses a Service Control Policy that blocks unused regions, it must allow `unspecified` for Bedrock (same page).
+
+The code only calls `PutObject` and `GetObject` on S3, so the policy grants nothing else (no `ListBucket`, no delete). One side effect to expect: S3 answers a missing key with 403 instead of 404 when the caller cannot list the bucket, so a missing original shows as an access error. Live check 7 below will show it.
+
+**Bedrock sends the photo to other regions.** A `global.` profile may process a request in any supported commercial region. If photos could show people, decide whether that is acceptable for your users; a geographic profile keeps processing in one geography, and its availability for this model has not been checked. **Required before real money:** decide this, and test one real model call with this exact policy (ask first: it costs money and needs your OK).
 
 ## 3. Billing alert
 
-Before anything else is running up costs, open AWS Billing, Budgets, and create a monthly cost budget (for example 20 USD) with an email alert at 80 percent of actual spend. Also turn on "Receive Billing Alerts" in Billing preferences. Bedrock is the line most likely to surprise you. `AI_DAILY_CALL_CAP` (500 by default) is the app-side limit.
+Before anything else is running up costs, open AWS Billing, Budgets, and create a monthly cost budget (for example 20 USD) with an email alert at 80 percent of actual spend. Also turn on "Receive Billing Alerts" in Billing preferences. Bedrock is the line most likely to surprise you. `AI_DAILY_CALL_CAP` (500 by default) is the app-side limit and the only hard stop: AWS updates budget data up to three times a day, so an alert can arrive hours late and does not stop spending. **Required before real money.**
 
 ## 4. Render Blueprint
 
@@ -88,7 +167,7 @@ Paid tiers are used on purpose: free Postgres expires after 30 days and workers 
 ## 5. Secrets
 
 - `SESSION_SECRET` and `FEEDER_TOKEN` are generated by Render. Read `FEEDER_TOKEN` in the web service's Environment tab; the feeder device sends it as `Authorization: Bearer <token>`.
-- Put the IAM key in `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` on both services.
+- Put the web user's key in `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` on the web service, and the worker user's key on the worker (step 2). Each service has its own entry, so the two values differ.
 - Put your PayPal sandbox app's client id and secret in `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` on both services.
 - `PAYPAL_VET_EMAIL` is the sandbox account that receives vet payouts.
 - Never paste any of these into the repo or the YAML.
@@ -106,6 +185,8 @@ In the PayPal developer dashboard, open your sandbox app, add a webhook with the
 | `PAYMENT.PAYOUTS-ITEM.SUCCEEDED`, `.FAILED`, `.BLOCKED`, `.CANCELED`, `.HELD`, `.UNCLAIMED`, `.RETURNED`, `.REFUNDED` | Keeps vet payouts in step (the `PAYMENT.PAYOUTS-ITEM.*` family). |
 
 The `CUSTOMER.DISPUTE.*` events are not needed: a dispute moves no money by itself, and the money event is `PAYMENT.CAPTURE.REVERSED`. Subscribing to them does no harm, they are acknowledged and ignored. `PAYMENT.PAYOUTSBATCH.*` is also not needed, because the worker polls each batch.
+
+If a capture webhook is lost, the worker asks PayPal about any donation still pending after 5 minutes (up to 72 hours old, ten at a time, with growing waits and a pause on a rate limit) and records a captured order through the same path as the webhook, so the money is counted once either way.
 
 A refund or reversal never edits the donation. It is a separate row on the ledger (type Refund, negative), the pool and the "where every peso went" line drop by exactly what PayPal reports, and the line says how much was taken back. If the money was already given to cats or paid out, the pool shows below zero, new funding is refused, nothing is clawed back, and a question appears on the caretaker desk under Treasurer questions. A refund the app cannot read or that is larger than its donation is not recorded; it opens a question instead. Copy the webhook id into `PAYPAL_WEBHOOK_ID` on the web service. Until it is set, every webhook is rejected on purpose. If Render will not accept an empty value at Blueprint creation, enter a placeholder and replace it here.
 
@@ -127,8 +208,8 @@ A refund or reversal never edits the donation. It is a separate row on the ledge
 | `FEEDER_TOKEN` | web | Generated by Render |
 | `DEMO_MODE` | web | Fixed to `true` in the Blueprint |
 | `AWS_REGION` | web, worker | Fixed to `ap-southeast-1` |
-| `AWS_ACCESS_KEY_ID` | web, worker | IAM access key, step 2 |
-| `AWS_SECRET_ACCESS_KEY` | web, worker | IAM access key, step 2 |
+| `AWS_ACCESS_KEY_ID` | web, worker | That service's own IAM user key, step 2 |
+| `AWS_SECRET_ACCESS_KEY` | web, worker | That service's own IAM user key, step 2 |
 | `AI_MODEL` | web, worker | Fixed Bedrock model id (the code default) |
 | `AI_DAILY_CALL_CAP` | web, worker | Fixed to `500`; change in the dashboard |
 | `S3_PRIVATE_BUCKET` | web, worker | Bucket name, step 1 |
@@ -170,3 +251,22 @@ These were postponed because they cannot run on a laptop.
 6. The feeder running for 10 minutes on a phone.
 7. Real S3: upload, scrub, public URL loads, the private bucket refuses a direct request.
 8. The cat detector on a phone (model files load from `/models/cat-detector-v1/`).
+9. A real sandbox refund of a captured donation: confirm `PAYMENT.CAPTURE.REFUNDED` arrives and that its payload matches what the app reads (`id`, `status`, `seller_payable_breakdown`, and an `up` link to the capture). The app was built from PayPal's schema, not from a recorded payload.
+10. A real chargeback or reversal cannot be staged in the sandbox from the app, so `PAYMENT.CAPTURE.REVERSED` and `PAYMENT.CAPTURE.DENIED` stay unverified until one happens. If PayPal sends no amounts, the app takes back what the donation still held in net and opens no guess about fees.
+11. Lost-webhook recovery: capture a sandbox order, stop the webhook (wrong URL), wait about 10 minutes, and watch the worker log. The donation should appear on the ledger. Also approve an order and close the page before the app captures it: the worker should capture it. Check the worker's PayPal call rate against the sandbox limit.
+12. A repeated payout `sender_batch_id` on live PayPal, with a tiny amount (see below).
+
+## Before real money
+
+Everything here is **required before real money**. None of it is needed for the sandbox demo.
+
+- Root account has MFA and no access keys (step 2).
+- A billing alert exists, and you accept that the only hard stop is `AI_DAILY_CALL_CAP` (step 3).
+- Separate web and worker IAM keys, a 90 day rotation date in your calendar, and the old key deleted after each rotation (step 2).
+- The Bedrock policy in step 2 tested with one real call, and a decision on `global.` processing in other regions.
+- TLS-only deny policy on both buckets, and the CloudFront OAC decision made for the public photo bucket (step 1).
+- A separate live PayPal app, its own live webhook id, subscribed to every event in step 6, and `PAYPAL_ENV=production` set by hand. Nothing in `render.yaml` ever sets it.
+- The refund, reversal and lost-webhook checks above (9 to 11) run in the sandbox first.
+- One live payout repeated with the same `sender_batch_id` for a tiny amount (check 12). PayPal documents only that a repeat within 30 days is rejected "with an error message that shows the duplicate sender_batch_id"; the app files any rejection it cannot read, on a retry, under review, and never pays a second time, so this check only tells you how often a person will be asked.
+- Verified sign-in accounts instead of the demo role switcher (see the README).
+- A pool that goes below zero after a refund is shown as it is and funding stops. Decide who on the caretaker desk answers that question and how the gap is covered; the app never takes money back by itself.
