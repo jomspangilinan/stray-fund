@@ -36,19 +36,19 @@ export function SpotReveal({
   const [popped, setPopped] = useState(false);
   const { heading, sub } = revealCopy(state, name);
   const photo = reveal.photoUrl ?? capturedUrl;
-  const tags = [reveal.coat, reveal.yourEarTip ? `Your answer: ear-tip ${reveal.yourEarTip}` : null, ...reveal.flags, reveal.probablyFemale ? "Probably female" : null].filter(
-    (t): t is string => Boolean(t),
-  );
+  const tipTag = reveal.yourEarTip === "yes" ? "You said: tipped ear" : reveal.yourEarTip === "no" ? "You said: not tipped" : null;
+  const tags = [reveal.coat, tipTag, ...reveal.flags, reveal.probablyFemale ? "Probably female" : null].filter((t): t is string => Boolean(t));
+  const hasMore = Boolean(catId) && (reveal.canRename || reveal.askSex || reveal.askEarTip);
   return (
     <div className="reveal on-main" role="status">
-      <div className="mx-auto grid w-full max-w-md gap-6 px-4 pb-10 pt-10">
+      <div className="mx-auto grid w-full max-w-md gap-4 px-4 pb-10 pt-6">
         <div className="text-center">
           <h1 className="reveal-title">{heading}</h1>
-          <p className="mt-2 text-base font-semibold">{sub}</p>
+          <p className="mt-1 text-base font-semibold">{sub}</p>
         </div>
 
         {reveal.avatar && (
-          <div className="arrive">
+          <div className="arrive arrive-short">
             <div className="arrive-floor" aria-hidden="true" />
             <div className="arrive-cat" aria-hidden="true">
               <CatAvatar avatar={reveal.avatar} id={reveal.catId ?? ""} ribbon={female} ribbonPop={popped} />
@@ -57,17 +57,17 @@ export function SpotReveal({
           </div>
         )}
 
-        <div className="reveal-card">
-          <div className="relative aspect-[4/3] w-full bg-pale">
+        <div className="reveal-card flex items-stretch">
+          <div className="relative w-28 flex-none rounded-l-out bg-pale">
             {photo && (
               // A device photo is a blob: URL and the public one is already scrubbed, so next/image adds nothing.
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={photo} alt="The photo you took" className="h-full w-full object-cover" />
+              <img src={photo} alt="The photo you took" className="absolute inset-0 h-full w-full rounded-l-out object-cover" />
             )}
+            {catId && reveal.photoUrl && state !== "needs_review" && <SaveImage catId={catId} />}
           </div>
-          <div className="grid gap-3 p-4">
-            {name && <p className="text-2xl font-extrabold leading-tight tracking-tight">{name}</p>}
-            {reveal.canRename && catId && <AnotherNameButton catId={catId} onNamed={setName} />}
+          <div className="grid min-w-0 flex-1 content-center gap-2 p-3">
+            {name && <p className="break-words text-xl font-extrabold leading-tight tracking-tight">{name}</p>}
             <ul className="flex flex-wrap gap-2" aria-label="What we noticed">
               {tags.map((t) => (
                 <li key={t} className="tag">
@@ -76,48 +76,59 @@ export function SpotReveal({
               ))}
               <li className={`tag ${reveal.needsFunding ? "tag-pop" : ""}`}>{reveal.statusLabel}</li>
             </ul>
-            {catId && (reveal.askSex || reveal.askEarTip) && (
-              <div className="grid gap-5 pt-2">
-                {reveal.askSex && (
-                  <SexAsk
-                    catId={catId}
-                    onSex={(sex) => {
-                      if (sex === "female" && !female) {
-                        setPopped(true);
-                        setFemale(true);
-                      }
-                    }}
-                  />
-                )}
-                {reveal.askEarTip && <EarTipAsk catId={catId} initial="unsure" bare />}
-              </div>
-            )}
           </div>
         </div>
 
-        {locationMissing && (
-          <p className="small text-center">Location not shared, so the card sits mid-colony.</p>
-        )}
-
-        <div className="grid gap-3">
-          {reveal.needsFunding && (
+        <div className="grid gap-2">
+          {reveal.needsFunding ? (
             <>
               <Link href="/donate" className="btn-pop">
-                Help fund the next kapon
+                Help fund this cat
               </Link>
-              <p className="small text-center">Donations go to one shared fund.</p>
+              <p className="small text-center">Gifts go to one shared fund.</p>
             </>
+          ) : (
+            catId &&
+            state !== "needs_review" && (
+              <Link href={`/cats/${catId}`} className="btn-quiet">
+                See the card
+              </Link>
+            )
           )}
-          {catId && state !== "needs_review" && (
-            <Link href={`/cats/${catId}`} className="btn-quiet">
-              See the card
-            </Link>
-          )}
-          <button type="button" className="btn-quiet" onClick={onAgain}>
-            Keep spotting
-          </button>
-          {catId && reveal.photoUrl && state !== "needs_review" && <SaveImage catId={catId} />}
+          <div className="flex items-center justify-center gap-2">
+            {reveal.needsFunding && catId && state !== "needs_review" && (
+              <Link href={`/cats/${catId}`} className="reveal-link">
+                See the card
+              </Link>
+            )}
+            <button type="button" className="reveal-link" onClick={onAgain}>
+              Keep spotting
+            </button>
+          </div>
         </div>
+
+        {hasMore && catId && (
+          <div className="reveal-more grid gap-4">
+            <p className="small soft font-bold">Add details. Optional.</p>
+            {reveal.canRename && <AnotherNameButton catId={catId} onNamed={setName} />}
+            {reveal.askSex && (
+              <SexAsk
+                catId={catId}
+                onSex={(sex) => {
+                  if (sex === "female" && !female) {
+                    setPopped(true);
+                    setFemale(true);
+                  }
+                }}
+              />
+            )}
+            {reveal.askEarTip && <EarTipAsk catId={catId} initial="unsure" bare />}
+          </div>
+        )}
+
+        {locationMissing && (
+          <p className="small text-center">Location not shared, so the card is placed in the middle of the area.</p>
+        )}
       </div>
     </div>
   );

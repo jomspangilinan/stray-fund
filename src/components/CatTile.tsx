@@ -15,7 +15,7 @@ export function CatTile({ cat, line }: { cat: PublicCat; line?: React.ReactNode 
         </span>
         <span className="mt-2 block px-1 text-base font-extrabold leading-tight">{cat.name}</span>
         <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 px-1">
-          <span className={`tag ${cat.statusLabel === NEEDS_FUNDING ? "tag-pop" : ""}`}>
+          <span className={`tag max-w-full !whitespace-normal ${cat.statusLabel === NEEDS_FUNDING ? "tag-pop" : ""}`}>
             {cat.statusLabel === NEEDS_FUNDING ? "Needs funding" : cat.statusLabel}
           </span>
           <span className="small soft">{line ?? `${done} of ${cat.journey.length} steps`}</span>

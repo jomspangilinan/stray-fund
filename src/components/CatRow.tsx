@@ -34,7 +34,7 @@ export function CatRow({ cat, footer }: { cat: PublicCat; footer?: React.ReactNo
         <span className="min-w-0 flex-1">
           <span className="flex items-start justify-between gap-2">
             <span className="min-w-0 truncate text-base font-bold leading-tight">{cat.name}</span>
-            <span className={`tag flex-none ${cat.statusLabel === NEEDS_FUNDING ? "tag-pop" : ""}`}>
+            <span className={`tag max-w-[55%] flex-none !whitespace-normal ${cat.statusLabel === NEEDS_FUNDING ? "tag-pop" : ""}`}>
               {cat.statusLabel === NEEDS_FUNDING ? "Needs funding" : cat.statusLabel}
             </span>
           </span>

@@ -26,7 +26,7 @@ export function EarTipChoice({
   value,
   onChange,
   disabled,
-  legend = "Ear-tip?",
+  legend = "Tipped ear?",
 }: {
   value: EarTipAnswer;
   onChange: (v: EarTipAnswer) => void;
@@ -38,9 +38,9 @@ export function EarTipChoice({
       <legend className="mb-2 font-bold">{legend}</legend>
       <div className="flex items-center gap-3">
         <EarDrawing />
-        <p className="small soft">A tip is a straight cut across the point of one ear.</p>
+        <p className="small soft">A flat cut across the point of one ear means the cat is already fixed.</p>
       </div>
-      <div role="radiogroup" aria-label="Ear-tip" className="flex flex-wrap gap-2">
+      <div role="radiogroup" aria-label="Tipped ear" className="flex flex-wrap gap-2">
         {OPTIONS.map((o) => (
           <button
             key={o.value}

@@ -605,7 +605,6 @@ input[type="checkbox"] {
   letter-spacing: -0.03em;
 }
 .reveal-card {
-  overflow: hidden;
   border-radius: var(--r-out);
   background: var(--surface);
   color: var(--ink);
@@ -623,9 +622,31 @@ input[type="checkbox"] {
   }
 }
 .reveal .btn-quiet:disabled { background: var(--pale); }
-/* The questions sit on the white card, where the default chip would vanish. */
-.reveal-card .chip { background: var(--pale); }
-.reveal-card .chip[aria-checked="true"] { background: var(--ink); }
+/* The questions sit on a white block, where the default chip would vanish. */
+.reveal-card .chip,
+.reveal-more .chip { background: var(--pale); }
+.reveal-card .chip[aria-checked="true"],
+.reveal-more .chip[aria-checked="true"] { background: var(--ink); }
+/* Optional questions: a flat white block under the next step, quieter than the card. */
+.reveal-more {
+  border-radius: var(--r-out);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 1rem;
+}
+/* A plain text control on the green ground, still a 44px target. */
+.reveal-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0 1rem;
+  font-weight: 700;
+  color: #ffffff;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .scan-line {
@@ -974,6 +995,15 @@ input[type="checkbox"] {
   inset: 55% 0 0;
   background: #e9dec9;
 }
+.arrive-short {
+  height: 7rem;
+}
+.arrive-short .arrive-cat {
+  bottom: 22%;
+  width: 5rem;
+  height: 5rem;
+  margin-left: -2.5rem;
+}
 .arrive-note {
   position: absolute;
   inset: auto 0.75rem 0.5rem;
@@ -1074,4 +1104,29 @@ input[type="checkbox"] {
   .seg a:hover:not([aria-current="page"]) {
     color: var(--ink);
   }
+}
+
+/* Save image: a small icon over the top right of a photo, on a solid soft backing so it reads on any picture. */
+.save-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: none;
+  border-radius: 9999px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 120ms var(--ease-out);
+}
+.save-icon:active:not(:disabled) { transform: scale(0.97); }
+.save-icon:disabled { color: var(--soft); cursor: not-allowed; }
+.save-line {
+  max-width: 14rem;
+  border-radius: var(--r-in);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0.5rem 0.75rem;
+  line-height: 1.3;
 }

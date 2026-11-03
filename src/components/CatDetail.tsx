@@ -32,20 +32,31 @@ export function CatDetail({
   caretaker?: boolean;
 }) {
   const { cat, sightings, health } = card;
+  // Only a cat waiting for the shared fund can be helped. A spotted cat is not asked for yet; later cats are paid for.
+  const needsFunding = cat.status === "queued";
   return (
     <article className="grid gap-8">
       <header>
         <Link href="/cats" className="link -ml-1 px-1">
           All cats
         </Link>
-        <div className="relative mt-1 aspect-[4/5] overflow-hidden rounded-out">
+        <div className="relative mt-1 aspect-[4/3] max-h-[32dvh] w-full overflow-hidden rounded-out">
           <CatPhoto url={cat.photoUrl} name={cat.name} sizes="(min-width: 576px) 36rem, 100vw" caption />
+          {cat.photoUrl && <SaveImage catId={cat.id} />}
         </div>
         <CatNameEditor catId={cat.id} name={cat.name} names={names} caretaker={caretaker} />
         <p className="mt-1 soft">
           {cat.sex}, {cat.statusLabel.toLowerCase()}
         </p>
         <Progress cat={cat} />
+        {needsFunding && (
+          <div className="mt-3 grid gap-1">
+            <Link href="/donate" className="btn-pop">
+              Help fund this cat
+            </Link>
+            <p className="small soft text-center">Gifts go to one shared fund.</p>
+          </div>
+        )}
         {cat.flags.length > 0 && (
           <ul className="mt-3 flex flex-wrap gap-2">
             {cat.flags.map((f) => (
@@ -155,10 +166,6 @@ export function CatDetail({
         </section>
       )}
 
-      <Link href="/donate" className="btn-pop">
-        Help fund the colony
-      </Link>
-      {cat.photoUrl && <SaveImage catId={cat.id} />}
     </article>
   );
 }

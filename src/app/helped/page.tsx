@@ -8,13 +8,13 @@ import { PageSwitch } from "@/components/PageSwitch";
 import { HELPED_PAGES } from "@/lib/nav";
 import { SignInGate } from "@/components/SignInGate";
 import { isDemoMode } from "@/lib/config";
-import { formatPeso } from "@/lib/money";
+import { helpedLine } from "@/lib/helpedLine";
 import { CelebrationNote } from "@/components/CelebrationNote";
 import { streakLabel } from "@/lib/streak";
 import { getStreak } from "@/server/streak";
 import { getBadgesFor } from "@/server/thanks";
 import { celebrationText, findCelebration } from "@/server/milestones";
-import { getHelpedEntries, getUnallocated } from "@/server/public";
+import { getHelpedCats, getHelpedEntries, getUnallocated } from "@/server/public";
 import { getSession } from "@/server/session";
 
 export const metadata: Metadata = { title: "Cats I've helped | Stray Fund" };
@@ -29,8 +29,9 @@ async function Helped() {
       </SignInGate>
     );
   }
-  const [entries, unallocated] = await Promise.all([
+  const [entries, mine, unallocated] = await Promise.all([
     getHelpedEntries(session.userId),
+    getHelpedCats(session.userId),
     getUnallocated(session.userId),
   ]);
   // One moment at a time, and only for a cat this donor helped. The browser marks it seen after showing it.
@@ -57,25 +58,21 @@ async function Helped() {
           <strong>Your gift is in the shared fund.</strong> It reaches a cat soon.
         </p>
       )}
-      {entries.length === 0 ? (
+      {mine.length === 0 ? (
         <div className="card mt-6">
           <p className="font-bold">Your first cat shows up here.</p>
-          <Link href="/donate" className="btn-pop mt-4">
-            Help a cat
+          <p className="mt-1 soft">Spot a cat, or give to the fund, and it lands on this page.</p>
+          <Link href="/spot" className="btn mt-4">
+            Spot a cat
+          </Link>
+          <Link href="/donate" className="link mt-2">
+            Give to the fund
           </Link>
         </div>
       ) : (
         <ul className="tiles mt-6">
-          {entries.map((e) => (
-            <CatTile
-              key={e.cat.id}
-              cat={e.cat}
-              line={
-                <>
-                  You gave <strong>{formatPeso(e.amount)}</strong>
-                </>
-              }
-            />
+          {mine.map((e) => (
+            <CatTile key={e.cat.id} cat={e.cat} line={helpedLine(e)} />
           ))}
         </ul>
       )}

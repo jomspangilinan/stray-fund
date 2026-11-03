@@ -119,6 +119,15 @@ describe("cat thanks", () => {
     expect(JSON.stringify(t)).not.toMatch(/10\.98|originals|exact|@/);
   });
 
+  it("shows A neighbour for a seeded demo account, never its username", async () => {
+    const demo = await mkUser({ username: "demo_caretaker", role: "caretaker", showNameInThanks: true });
+    const c = await mkCat();
+    await spot(demo.id, c.id, "new_cat", 5);
+    const card = await getCatThanks(c.id);
+    expect(card[0].name).toBe("A neighbour");
+    expect(JSON.stringify([card, await getHomeThanks()])).not.toContain("demo_caretaker");
+  });
+
   it("shows A neighbour, and no badges, when someone opts out, everywhere", async () => {
     const hidden = await mkUser({ showNameInThanks: false });
     const c = await mkCat();

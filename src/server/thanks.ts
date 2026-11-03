@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { CAPTURED } from "./ledger";
 import { db } from "./db/client";
+import { PERSONAS } from "./session";
 
 /*
  * Thanks and badges. Everything here comes from verified actions in the database, never from what a person
@@ -154,7 +155,9 @@ async function badgesFor(userIds: string[]): Promise<Map<string, string[]>> {
 /** An ear-tip answer is private, so it is never credited by name, whatever the person chose for their other thanks. */
 const isEarTipKind = (k: Kind) => k === "ear_yes" || k === "ear_no";
 const named = (r: Row) => r.show && !isEarTipKind(r.kind);
-const nameOf = (r: Row) => (named(r) ? r.username : "A neighbour");
+/** The seeded demo accounts are roles, not people, so public pages never print their usernames. */
+const DEMO_USERNAMES: readonly string[] = Object.values(PERSONAS);
+const nameOf = (r: Row) => (named(r) && !DEMO_USERNAMES.includes(r.username) ? r.username : "A neighbour");
 
 /** Up to six people who helped this cat, newest first. */
 export async function getCatThanks(catId: string): Promise<Thanks[]> {

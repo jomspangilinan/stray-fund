@@ -72,22 +72,29 @@ export function SaveImage({ catId }: { catId: string }) {
 
   const saving = state === "building" && waiting;
   const label = saving ? "Saving" : state === "ready" && waiting ? "Tap to save" : "Save image";
+  // The short line sits beside the button only while there is something to say.
+  const line =
+    waiting && state === "failed"
+      ? "Could not make the image. Check your connection and tap save again."
+      : again
+        ? "Tap save once more."
+        : saving || (state === "ready" && waiting)
+          ? `${label}. Check the background before you share.`
+          : null;
   return (
-    <div ref={box} className="grid justify-items-center gap-1">
-      <button type="button" className="btn-quiet" disabled={saving} aria-busy={saving} onClick={tap}>
-        {label}
+    <div ref={box} className="absolute right-2 top-2 z-10 flex items-start justify-end gap-2">
+      {line && (
+        <p className="save-line small" role={waiting && state === "failed" ? "alert" : "status"}>
+          {line}
+        </p>
+      )}
+      <button type="button" className="save-icon" aria-label={label} aria-busy={saving} disabled={saving} onClick={tap}>
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M12 4v11" />
+          <path d="m7 10 5 5 5-5" />
+          <path d="M5 19h14" />
+        </svg>
       </button>
-      {waiting && state === "failed" && (
-        <p className="small text-center" role="alert">
-          Could not make the image. Check your connection and tap Save image again.
-        </p>
-      )}
-      {again && (
-        <p className="small text-center" role="status">
-          Tap Save image once more.
-        </p>
-      )}
-      <p className="small soft text-center">Check the background before you share.</p>
     </div>
   );
 }
