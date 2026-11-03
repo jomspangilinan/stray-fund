@@ -142,6 +142,11 @@ export function ActionForm({
         </button>
       )}
       {reply && <ToneNote tone={reply.tone} message={reply.message} />}
+      {reply && reply.tone !== "ok" && (
+        <button type="button" className="btn-quiet w-full" onClick={() => setReply(null)}>
+          Dismiss
+        </button>
+      )}
     </form>
   );
 }
