@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { closePool, db } from "../src/server/db/client";
@@ -20,7 +20,6 @@ import {
 import { CatRow } from "../src/components/CatRow";
 import { CatDetail } from "../src/components/CatDetail";
 import { GET as catGet } from "../src/app/api/cats/[id]/route";
-import { vi } from "vitest";
 
 const jar = vi.hoisted(() => new Map<string, string>());
 vi.mock("next/headers", () => ({
@@ -172,6 +171,8 @@ describe("serializers", () => {
 });
 
 describe("viewer access to exact location", () => {
+  beforeEach(() => vi.stubEnv("DEMO_MODE", "false")); // staff see exact places only outside the demo
+  afterEach(() => vi.unstubAllEnvs());
   async function viewers() {
     const { cat } = await seed();
     const [donor] = await db.insert(users).values({ username: "donor_a", role: "donor" }).returning();
@@ -214,6 +215,7 @@ describe("viewer access to exact location", () => {
 });
 
 describe("GET /api/cats/[id]", () => {
+  afterEach(() => vi.unstubAllEnvs());
   const call = (id: string) => catGet(new Request(`http://localhost/api/cats/${id}`), { params: Promise.resolve({ id }) });
 
   it("public payload is clean and cacheable-safe", async () => {
@@ -231,6 +233,7 @@ describe("GET /api/cats/[id]", () => {
   });
 
   it("caretaker gets exact and no-store", async () => {
+    vi.stubEnv("DEMO_MODE", "false"); // staff see exact places only outside the demo
     const { cat } = await seed();
     const [u] = await db.insert(users).values({ username: "care_b", role: "caretaker" }).returning();
     jar.set(SESSION_COOKIE, await signSession({ userId: u.id, role: "caretaker", username: u.username }));

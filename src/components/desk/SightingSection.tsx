@@ -33,7 +33,7 @@ export function Sightings({ items, cats }: { items: SightingItem[]; cats: Careta
           <h3 className="text-base font-extrabold">Photo from {s.date}</h3>
           <p className="small">{(s.reason && SIGHTING_REASON[s.reason]) ?? "A caretaker needs to decide."}</p>
           {s.catName && <p className="small">Linked to: {s.catName}</p>}
-          <Where exact={s.exact} />
+          <Where exact={s.exact} area={s.area} exactHidden={s.exactHidden} />
           {/* eslint-disable-next-line @next/next/no-img-element -- a private photo behind a signed-in route */}
           <img src={`/api/caretaker/images/sighting/${s.id}`} alt="The original photo" className="mt-3 max-h-72 w-full rounded-in object-contain" />
           {s.assessment && <Assessment a={s.assessment} />}

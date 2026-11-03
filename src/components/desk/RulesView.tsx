@@ -43,7 +43,13 @@ export function Rules({ rules }: { rules: RulesView }) {
             <ActionForm action="vet_update" submitLabel="Save vet details">
               <Hidden name="userId" value={v.id} />
               <Field label="Clinic name on receipts" name="clinicName" defaultValue={v.clinicName ?? ""} />
-              <Field label="PayPal email" name="paypalEmail" type="email" defaultValue={v.paypalEmail ?? ""} />
+              <Field
+                label="PayPal email"
+                name="paypalEmail"
+                type="email"
+                defaultValue={v.emailHidden ? "" : (v.paypalEmail ?? "")}
+                hint={v.emailHidden ? `Hidden in the demo (${v.paypalEmail ?? "none"}). Type a new address to change it.` : undefined}
+              />
             </ActionForm>
           </li>
         ))}

@@ -2,6 +2,9 @@ import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { AssessmentSchema, ReceiptSchema, type ReceiptReading } from "../ai/schemas";
 import { db } from "../db/client";
 import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reviewRequests, sightings, users, wakeups } from "../db/schema";
+import { COLONY } from "@/lib/config";
+import { hidePrivateInDemo, maskEmail, placeForStaff } from "../demoPrivacy";
+import { safeBio } from "../placeText";
 import { needsHumanTick, regionsOf } from "../photoGate";
 import { depositPaidOn, reasonMessages } from "../vetFlow";
 import { manilaDate } from "../public";
@@ -36,6 +39,10 @@ export type SightingItem = {
   catId: string | null;
   catName: string | null;
   exact: ExactSpot;
+  /** The place by name. Always set; it is all a demo screen shows. */
+  area: string;
+  /** True while the demo hides exact places. */
+  exactHidden: boolean;
   /** What the AI wrote. Untrusted text. */
   assessment: ReturnType<typeof AssessmentSchema.parse> | null;
   candidates: { id: string; name: string }[];
@@ -69,7 +76,7 @@ export type CaretakerQueue = {
   failedWakeups: { id: string; kind: string; attempts: number; date: string }[];
   heldPhotos: { sightingId: string; catId: string | null; catName: string | null; state: string; hasRegions: boolean; needsTick: boolean; date: string }[];
   /** Spotted cats whose ears the flags have not settled yet, with how many people said each. */
-  earTipPending: { id: string; name: string; yes: number; no: number; exact: ExactSpot }[];
+  earTipPending: { id: string; name: string; yes: number; no: number; exact: ExactSpot; area: string; exactHidden: boolean }[];
   /** Cats marked neutered with no vet record, no money and no payout, so a caretaker can put a wrong call back. */
   neuteredWithoutRecord: { id: string; name: string }[];
   /** Ideas for a cat's real name, oldest first. Who sent each is not kept here. */
@@ -148,8 +155,9 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
       reason: typeof extra.review_reason === "string" ? extra.review_reason : null,
       catId: s.catId,
       catName,
-      exact: exactOf(s.exactLat, s.exactLng),
-      assessment: parsed.success ? parsed.data : null,
+      ...placeForStaff(exactOf(s.exactLat, s.exactLng)),
+      area: COLONY.area_name,
+      assessment: parsed.success ? (hidePrivateInDemo() ? { ...parsed.data, short_bio: safeBio(parsed.data.short_bio, parsed.data.suggested_name) } : parsed.data) : null,
       candidates: ids.flatMap((id) => (nameOf.has(id) ? [{ id, name: nameOf.get(id)! }] : [])),
     };
   });
@@ -207,7 +215,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     .limit(50);
 
   const undecided = await db
-    .select({ id: cats.id, name: cats.name, lat: cats.exactLat, lng: cats.exactLng, approx: cats.locationApproximate })
+    .select({ id: cats.id, name: cats.name, area: cats.areaName, lat: cats.exactLat, lng: cats.exactLng, approx: cats.locationApproximate })
     .from(cats)
     .where(and(eq(cats.status, "spotted"), or(isNull(cats.earTipped))))
     .orderBy(asc(cats.createdAt));
@@ -262,7 +270,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
       needsTick: needsHumanTick(s.assessment),
       date: manilaDate(s.createdAt),
     })),
-    earTipPending: undecided.map((c) => ({ id: c.id, name: c.name, yes: countOf(c.id, "yes"), no: countOf(c.id, "no"), exact: exactOf(c.lat, c.lng, c.approx) })),
+    earTipPending: undecided.map((c) => ({ id: c.id, name: c.name, yes: countOf(c.id, "yes"), no: countOf(c.id, "no"), ...placeForStaff(exactOf(c.lat, c.lng, c.approx)), area: c.area })),
     neuteredWithoutRecord: noRecord,
     nameSuggestions: suggested.map((n) => ({ id: n.id, catId: n.catId, catName: n.catName, name: n.name, photoSightingId: n.photoSightingId, date: manilaDate(n.createdAt) })),
     catChoices: allCats,
@@ -276,7 +284,7 @@ export async function caretakerWaiting(): Promise<number> {
 
 export type RulesView = {
   limits: typeof guardrails.$inferSelect;
-  vets: { id: string; username: string; clinicName: string | null; paypalEmail: string | null; allowed: boolean }[];
+  vets: { id: string; username: string; clinicName: string | null; paypalEmail: string | null; emailHidden: boolean; allowed: boolean }[];
 };
 
 /** The spending rules and the vets, with their private details. Caretakers only. */
@@ -294,5 +302,5 @@ export async function getRulesView(): Promise<RulesView> {
     .leftJoin(allowedPayees, and(eq(allowedPayees.userId, users.id), eq(allowedPayees.kind, "vet")))
     .where(eq(users.role, "vet"))
     .orderBy(asc(users.username));
-  return { limits, vets: vets.map((v) => ({ id: v.id, username: v.username, clinicName: v.clinicName, paypalEmail: v.paypalEmail, allowed: v.allowedId !== null })) };
+  return { limits, vets: vets.map((v) => ({ id: v.id, username: v.username, clinicName: v.clinicName, paypalEmail: hidePrivateInDemo() ? maskEmail(v.paypalEmail) : v.paypalEmail, emailHidden: hidePrivateInDemo(), allowed: v.allowedId !== null })) };
 }

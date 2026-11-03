@@ -11,6 +11,7 @@ import { allowedPayees, bookings, cats, guardrails, payouts, receipts, treatment
 import { CONFIRMED_BOOKING } from "./guardrails";
 import { CAPTURED, returnSurplus, toInt, unspentForCat } from "./ledger";
 import { storeOriginal } from "./photos";
+import { placeForStaff } from "./demoPrivacy";
 import { isPlainText } from "./plainText";
 import { effectiveSex } from "./agent/rank";
 import { manilaDate } from "./public";
@@ -745,7 +746,7 @@ export async function retryPendingEvidence(): Promise<EvidenceRetrySummary> {
 // ---------- What a vet sees ----------
 
 export type ExactPlace = { lat: number; lng: number; approximate: boolean } | null;
-export type VetCat = { id: string; name: string; sex: string; area: string; exact: ExactPlace };
+export type VetCat = { id: string; name: string; sex: string; area: string; exact: ExactPlace; exactHidden: boolean };
 export type VetBookingRow = {
   id: string;
   catId: string;
@@ -755,15 +756,19 @@ export type VetBookingRow = {
   scheduledFor: string | null;
   packagePrice: number;
   exact: ExactPlace;
+  area: string;
+  exactHidden: boolean;
   /** Where the booking stands for the vet. "open" means the vet has evidence to send. */
   evidence: EvidenceState["state"];
 };
 export type VetDashboard = { fundedCats: VetCat[]; bookings: VetBookingRow[] };
 
-function exactOf(row: { exactLat: number | null; exactLng: number | null; locationApproximate: boolean }): ExactPlace {
-  return row.exactLat !== null && row.exactLng !== null
-    ? { lat: row.exactLat, lng: row.exactLng, approximate: row.locationApproximate }
-    : null;
+function exactOf(row: { exactLat: number | null; exactLng: number | null; locationApproximate: boolean }): { exact: ExactPlace; exactHidden: boolean } {
+  return placeForStaff(
+    row.exactLat !== null && row.exactLng !== null
+      ? { lat: row.exactLat, lng: row.exactLng, approximate: row.locationApproximate }
+      : null,
+  );
 }
 
 const vetBookingColumns = {
@@ -774,6 +779,7 @@ const vetBookingColumns = {
   status: bookings.status,
   scheduledFor: bookings.scheduledFor,
   packagePrice: bookings.packagePrice,
+  areaName: cats.areaName,
   exactLat: cats.exactLat,
   exactLng: cats.exactLng,
   locationApproximate: cats.locationApproximate,
@@ -787,6 +793,7 @@ type VetBookingColumns = {
   status: string;
   scheduledFor: Date | null;
   packagePrice: number;
+  areaName: string;
   exactLat: number | null;
   exactLng: number | null;
   locationApproximate: boolean;
@@ -800,7 +807,8 @@ const toVetBooking = (b: VetBookingColumns, evidence: EvidenceState["state"]): V
   status: b.status,
   scheduledFor: b.scheduledFor ? manilaDate(b.scheduledFor) : null,
   packagePrice: b.packagePrice,
-  exact: exactOf(b),
+  ...exactOf(b),
+  area: b.areaName,
   evidence,
 });
 
@@ -827,7 +835,7 @@ export async function listVetDashboard(vetId: string): Promise<VetDashboard> {
     .where(eq(bookings.vetId, vetId))
     .orderBy(desc(bookings.createdAt));
   return {
-    fundedCats: funded.map((c) => ({ id: c.id, name: c.name, sex: effectiveSex(c), area: c.areaName, exact: exactOf(c) })),
+    fundedCats: funded.map((c) => ({ id: c.id, name: c.name, sex: effectiveSex(c), area: c.areaName, ...exactOf(c) })),
     bookings: await Promise.all(
       mine.map(async (b) => {
         const state = await loadBookingState(db, b.id);

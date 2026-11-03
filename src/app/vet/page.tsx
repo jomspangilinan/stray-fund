@@ -33,7 +33,7 @@ function BookingCard({ b }: { b: VetBookingRow }) {
       </p>
       <p className="mt-1 font-bold">{NEXT_STEP[b.evidence]}</p>
       <div className="mt-2">
-        <ExactLocation exact={b.exact} />
+        <ExactLocation exact={b.exact} area={b.area} exactHidden={b.exactHidden} />
       </div>
       <Link href={`/vet/bookings/${b.id}`} className={`${b.evidence === "open" ? "btn" : "btn-quiet"} mt-4 inline-flex items-center`}>
         {b.evidence === "open" ? `Send for ${b.catName}` : `See ${b.catName}`}
@@ -94,7 +94,7 @@ async function Dashboard() {
                   {c.sex === "unknown" ? "Sex unknown" : c.sex === "female" ? "Female" : "Male"}, {c.area}
                 </p>
                 <div className="mt-2">
-                  <ExactLocation exact={c.exact} />
+                  <ExactLocation exact={c.exact} area={c.area} exactHidden={c.exactHidden} />
                 </div>
                 <BookCatForm catId={c.id} catName={c.name} today={today} />
               </li>

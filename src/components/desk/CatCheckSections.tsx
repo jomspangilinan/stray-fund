@@ -13,7 +13,7 @@ export function EarTips({ items }: { items: CaretakerQueue["earTipPending"] }) {
           <p className="small">
             Neighbours so far: {c.yes} said ear-tipped, {c.no} said not.
           </p>
-          <Where exact={c.exact} />
+          <Where exact={c.exact} area={c.area} exactHidden={c.exactHidden} />
           <ActionForm action="cat_set_ear_tip" submitLabel="Ear is tipped, already neutered">
             <Hidden name="catId" value={c.id} />
             <Hidden name="earTip" value="present" />

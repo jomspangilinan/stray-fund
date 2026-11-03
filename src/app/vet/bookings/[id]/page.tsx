@@ -111,7 +111,7 @@ async function BookingView({ params }: { params: Promise<{ id: string }> }) {
         Visit on {booking.scheduledFor ?? "a date to be set"}. Package {formatPeso(booking.packagePrice)}.
       </PageHead>
       <div className="mt-3">
-        <ExactLocation exact={booking.exact} />
+        <ExactLocation exact={booking.exact} area={booking.area} exactHidden={booking.exactHidden} />
       </div>
       <section className="card mt-8" aria-labelledby="payments">
         <h2 id="payments" className="h2">

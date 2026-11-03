@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { HIDDEN_IN_DEMO_SVG, hidePrivateInDemo } from "@/server/demoPrivacy";
 import { db } from "@/server/db/client";
 import { bookings, receipts, sightings } from "@/server/db/schema";
 import { isUuid } from "@/server/public";
@@ -29,7 +30,24 @@ export async function GET(_req: Request, ctx: { params: Promise<{ kind: string; 
     if (session.role === "vet" && row.vetId !== session.userId) return NOT_FOUND();
     key = kind === "receipt" ? row.fileKey : row.earKey;
   } else if (kind === "sighting" && session.role === "caretaker") {
-    const [row] = await db.select({ key: sightings.originalKey }).from(sightings).where(eq(sightings.id, id));
+    const [row] = await db
+      .select({ key: sightings.originalKey, publicKey: sightings.publicKey, publicReady: sightings.publicReady })
+      .from(sightings)
+      .where(eq(sightings.id, id));
+    // The open demo never serves a visitor's original to the next visitor: the public copy, or a plain placeholder.
+    if (row && hidePrivateInDemo()) {
+      if (row.publicReady && row.publicKey) {
+        return new Response(null, { status: 302, headers: { Location: getStorage().publicUrl(row.publicKey), "Cache-Control": "private, no-store" } });
+      }
+      return new Response(HIDDEN_IN_DEMO_SVG, {
+        headers: {
+          "Content-Type": "image/svg+xml",
+          "Cache-Control": "private, no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Content-Security-Policy": "default-src 'none'; sandbox",
+        },
+      });
+    }
     key = row?.key ?? null;
   }
   if (!key) return NOT_FOUND();

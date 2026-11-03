@@ -79,6 +79,7 @@ beforeEach(async () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
   setGatewayForTests(null);
 });
@@ -805,6 +806,7 @@ describe("the queue", () => {
   });
 
   it("holds every kind of waiting thing, with exact location only here", async () => {
+    vi.stubEnv("DEMO_MODE", "false"); // staff see exact places only outside the demo
     const w = await makeWorld({ funded: 250000 });
     await db.update(cats).set({ exactLat: 10.5, exactLng: 120.5 }).where(eq(cats.id, w.cat.id));
     await addPayout(w, { amount: 45000, status: "awaiting_approval" });

@@ -1,7 +1,8 @@
 import { deskTitle, type DeskSectionId } from "@/lib/deskSections";
 import type { ExactSpot } from "@/server/caretaker/queue";
 
-export function Where({ exact }: { exact: ExactSpot }) {
+export function Where({ exact, area, exactHidden }: { exact: ExactSpot; area: string; exactHidden: boolean }) {
+  if (exactHidden) return <p className="small"><span className="font-bold">Area:</span> {area}. <span className="soft">Exact spots are hidden in the demo.</span></p>;
   if (!exact) return <p className="small soft">No location on file.</p>;
   return (
     <p className="small">

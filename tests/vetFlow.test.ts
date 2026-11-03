@@ -1378,6 +1378,7 @@ describe("public pages", () => {
 
 describe("vet views", () => {
   it("the dashboard lists funded cats with exact location and only this vet's bookings", async () => {
+    vi.stubEnv("DEMO_MODE", "false"); // staff see exact places only outside the demo
     const vet = await makeClinicVet();
     const other = await makeClinicVet();
     const [funded] = await db
