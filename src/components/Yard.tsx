@@ -69,15 +69,6 @@ export function Yard({ yard }: { yard: PublicYard }) {
                     <span className="yard-bob">
                       <CatAvatar avatar={c.avatar} id={c.id} marks={c.marks} />
                     </span>
-                    {c.group === "waiting" && (
-                      <span className="yard-ask" aria-hidden="true">
-                        <svg viewBox="0 0 16 16" width="16" height="16">
-                          <circle cx="4" cy="8" r="1.4" />
-                          <circle cx="8" cy="8" r="1.4" />
-                          <circle cx="12" cy="8" r="1.4" />
-                        </svg>
-                      </span>
-                    )}
                     <span className="yard-name" aria-hidden="true">
                       {c.name}
                     </span>

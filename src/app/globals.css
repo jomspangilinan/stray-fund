@@ -789,22 +789,6 @@ input[type="checkbox"] {
   transform-origin: 40px 33px;
   animation: yard-blink 8s linear var(--off) infinite;
 }
-.yard-ask {
-  position: absolute;
-  top: 4%;
-  right: 2%;
-  display: grid;
-  place-items: center;
-  width: 26%;
-  aspect-ratio: 1;
-  border-radius: 999px;
-  background: var(--pop);
-}
-.yard-ask svg {
-  width: 70%;
-  height: 70%;
-  fill: var(--ink);
-}
 .yard-name {
   position: absolute;
   left: 50%;
@@ -984,10 +968,5 @@ input[type="checkbox"] {
   }
   .arrive-cat .avatar {
     animation: none;
-  }
-}
-@media (prefers-contrast: more) {
-  .yard-ask {
-    outline: 2px solid var(--ink);
   }
 }
