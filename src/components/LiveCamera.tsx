@@ -61,6 +61,11 @@ export function LiveCamera({
   onVideoReady,
   hideShutter = false,
   askLocation = true,
+  fullscreen = false,
+  topBar,
+  overlay,
+  controls,
+  busyPanel,
 }: {
   onCapture: (blob: Blob, where: CaptureLocation) => void | Promise<void>;
   disabled?: boolean;
@@ -70,6 +75,16 @@ export function LiveCamera({
   hideShutter?: boolean;
   /** Off for photos whose place does not matter, so no location prompt appears. */
   askLocation?: boolean;
+  /** Fills the screen with corner brackets, a top bar and a bottom panel. The default layout is unchanged. */
+  fullscreen?: boolean;
+  /** Fullscreen only: the top bar, such as a close link. */
+  topBar?: React.ReactNode;
+  /** Fullscreen only: drawn over the picture, under the brackets, such as a frozen photo. */
+  overlay?: React.ReactNode;
+  /** Fullscreen only: extra controls above the shutter. */
+  controls?: React.ReactNode;
+  /** Fullscreen only: replaces the shutter panel while it is set, such as progress. */
+  busyPanel?: React.ReactNode;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -141,6 +156,76 @@ export function LiveCamera({
 
   const live = status === "ready" || status === "capturing";
 
+  const buttons = (
+    <div className="flex flex-wrap gap-3">
+      {!live && (status === "idle" || status === "denied" || status === "error" || status === "nocamera") && (
+        <button type="button" className="btn" onClick={() => start(facing)} disabled={disabled}>
+          {status === "idle" ? "Open camera" : "Try again"}
+        </button>
+      )}
+      {live && (
+        <>
+          {!hideShutter && (
+            <button
+              type="button"
+              className={`btn ${fullscreen ? "flex-1" : ""}`}
+              onClick={shoot}
+              disabled={disabled || status === "capturing"}
+            >
+              {status === "capturing" ? "Taking photo" : "Take photo"}
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn-quiet"
+            onClick={() => start(facing === "environment" ? "user" : "environment")}
+            disabled={disabled || status === "capturing"}
+          >
+            {facing === "environment" ? "Use front camera" : "Use back camera"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+
+  if (fullscreen) {
+    return (
+      <div className="cam-full on-main">
+        <video
+          ref={videoRef}
+          playsInline
+          muted
+          autoPlay
+          aria-label="Live camera"
+          className={`absolute inset-0 h-full w-full object-cover ${live ? "" : "invisible"}`}
+        />
+        {!live && (
+          <div className="absolute inset-0 grid place-items-center p-8 text-center text-white">
+            <CameraMessage status={status} />
+          </div>
+        )}
+        {overlay}
+        {(live || overlay) && (
+          <div className="cam-brackets" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+            <i />
+          </div>
+        )}
+        <div className="cam-top">{topBar}</div>
+        <div className="cam-bottom">
+          {busyPanel ?? (
+            <>
+              {controls}
+              {buttons}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-4">
       <div className="relative aspect-[3/4] max-h-[60dvh] w-full overflow-hidden rounded-out bg-ink">
@@ -159,30 +244,7 @@ export function LiveCamera({
         )}
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        {!live && (status === "idle" || status === "denied" || status === "error" || status === "nocamera") && (
-          <button type="button" className="btn" onClick={() => start(facing)} disabled={disabled}>
-            {status === "idle" ? "Open camera" : "Try again"}
-          </button>
-        )}
-        {live && (
-          <>
-            {!hideShutter && (
-              <button type="button" className="btn" onClick={shoot} disabled={disabled || status === "capturing"}>
-                {status === "capturing" ? "Taking photo" : "Take photo"}
-              </button>
-            )}
-            <button
-              type="button"
-              className="btn-quiet"
-              onClick={() => start(facing === "environment" ? "user" : "environment")}
-              disabled={disabled || status === "capturing"}
-            >
-              {facing === "environment" ? "Use front camera" : "Use back camera"}
-            </button>
-          </>
-        )}
-      </div>
+      {buttons}
     </div>
   );
 }

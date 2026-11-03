@@ -673,11 +673,13 @@ describe("POST /api/spot", () => {
     const res = await post(await body({ lat: "10.123456", lng: "120.654321", sex: "female" }));
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
-    expect(Object.keys(json).sort()).toEqual(["catId", "message", "sightingId", "state"]);
+    expect(Object.keys(json).sort()).toEqual(["catId", "message", "reveal", "sightingId", "state"]);
     const text = JSON.stringify(json);
     expect(text).not.toContain("10.123456");
     expect(text).not.toContain("120.654321");
-    expect(text).not.toMatch(/originals\/|photos\//);
+    expect(text).not.toMatch(/originals\//);
+    // The only storage path allowed is the scrubbed public photo inside the reveal.
+    expect(JSON.stringify({ ...json, reveal: null })).not.toMatch(/photos\//);
     const [cat] = await catRows();
     expect(cat.sex).toBe("female");
   });

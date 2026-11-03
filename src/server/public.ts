@@ -35,7 +35,7 @@ export const isUuid = (s: string) => UUID.test(s);
 
 const SEX_LABEL: Record<string, string> = { female: "Female", male: "Male", unknown: "Sex unknown" };
 
-const STATUS_LABEL: Record<string, string> = {
+export const STATUS_LABEL: Record<string, string> = {
   spotted: "Spotted",
   queued: "Waiting for funding",
   funded: "Funded",
@@ -46,7 +46,7 @@ const STATUS_LABEL: Record<string, string> = {
   adopted: "Adopted",
 };
 
-const FLAG_LABEL: Record<string, string> = {
+export const FLAG_LABEL: Record<string, string> = {
   pregnant: "Pregnant",
   injured: "Injured",
   sick: "Sick",

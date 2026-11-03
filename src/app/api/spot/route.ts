@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { describeError } from "@/server/errors";
 import { BodyTooLarge, parseForm, readLimited } from "@/server/http";
 import { AuthError, requireRole } from "@/server/session";
+import { loadReveal } from "@/server/spotReveal";
 import { assertUnderRateLimit, processSpot, RateLimited, type Sex } from "@/server/spot";
 import { InvalidPhoto, MAX_BYTES } from "@/server/photos";
 
@@ -20,7 +21,7 @@ function coordinate(raw: FormDataEntryValue | null, min: number, max: number): n
 
 /**
  * Multipart form: photo (image/jpeg), optional lat and lng (both or neither), optional sex.
- * The answer is a whitelist: state, catId, sightingId, message. No coordinates or storage keys.
+ * The answer is a whitelist: state, catId, sightingId, message, and a reveal built by buildReveal. No coordinates, storage keys or assessment text.
  */
 export async function POST(req: Request) {
   try {
@@ -57,6 +58,7 @@ export async function POST(req: Request) {
       catId: out.catId ?? null,
       sightingId: out.sightingId,
       message: out.message,
+      reveal: await loadReveal(out.sightingId, out.state),
     });
   } catch (e) {
     if (e instanceof AuthError) return fail(e.message, e.status);

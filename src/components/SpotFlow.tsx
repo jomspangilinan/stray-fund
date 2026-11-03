@@ -1,18 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { COLONY } from "@/lib/config";
+import type { SpotReveal as Reveal } from "@/server/spotReveal";
 import { LiveCamera, type CaptureLocation } from "./LiveCamera";
+import { ScanChecklist } from "./ScanChecklist";
 import { SignIn } from "./SignIn";
+import { SpotReveal } from "./SpotReveal";
 
 type Sex = "unknown" | "female" | "male";
 type Done = {
   state: "new_cat" | "matched" | "needs_review" | "rejected" | "queued_for_ai";
   catId: string | null;
   message: string;
+  reveal: Reveal | null;
   locationMissing: boolean;
 };
-type Phase = { kind: "camera" } | { kind: "sending" } | { kind: "done"; done: Done } | { kind: "error"; message: string };
+type Phase =
+  | { kind: "camera" }
+  | { kind: "sending"; startedAt: number; responded: boolean }
+  | { kind: "done"; done: Done }
+  | { kind: "error"; message: string };
 
 const SEXES: { value: Sex; label: string }[] = [
   { value: "unknown", label: "Not sure" },
@@ -28,9 +37,57 @@ const HEADINGS: Record<Done["state"], string> = {
   queued_for_ai: "Saved",
 };
 
+/** How long every step shows ticked before the card appears. */
+const TICKED_MS = 450;
+const AREA = COLONY.area_name.split(",")[0];
+
 export function SpotFlow({ username }: { username: string | null }) {
   const [phase, setPhase] = useState<Phase>({ kind: "camera" });
   const [sex, setSex] = useState<Sex>("unknown");
+  const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const urlRef = useRef<string | null>(null);
+
+  const fullscreen = phase.kind !== "done" && Boolean(username);
+  const covering = Boolean(username) && (phase.kind !== "done" || phase.done.reveal !== null);
+
+  useEffect(() => {
+    if (!covering) return;
+    const before = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = before;
+    };
+  }, [covering]);
+
+  const startedAt = phase.kind === "sending" ? phase.startedAt : null;
+  useEffect(() => {
+    if (startedAt === null) return;
+    const tick = () => setElapsed(Date.now() - startedAt);
+    tick();
+    const id = setInterval(tick, 250);
+    return () => clearInterval(id);
+  }, [startedAt]);
+
+  useEffect(
+    () => () => {
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    },
+    [],
+  );
+
+  function keep(blob: Blob) {
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = URL.createObjectURL(blob);
+    setCapturedUrl(urlRef.current);
+  }
+
+  function again() {
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = null;
+    setCapturedUrl(null);
+    setPhase({ kind: "camera" });
+  }
 
   if (!username) {
     return (
@@ -42,7 +99,9 @@ export function SpotFlow({ username }: { username: string | null }) {
   }
 
   async function upload(blob: Blob, where: CaptureLocation) {
-    setPhase({ kind: "sending" });
+    keep(blob);
+    const startedAt = Date.now();
+    setPhase({ kind: "sending", startedAt, responded: false });
     const form = new FormData();
     form.set("photo", new File([blob], "cat.jpg", { type: "image/jpeg" }));
     if (where.lat !== null && where.lng !== null) {
@@ -57,10 +116,17 @@ export function SpotFlow({ username }: { username: string | null }) {
         setPhase({ kind: "error", message: body.error ?? "Could not send the photo. Try again." });
         return;
       }
-      setPhase({
-        kind: "done",
-        done: { state: body.state, catId: body.catId ?? null, message: body.message, locationMissing: where.lat === null },
-      });
+      const done: Done = {
+        state: body.state,
+        catId: body.catId ?? null,
+        message: body.message,
+        reveal: body.reveal ?? null,
+        locationMissing: where.lat === null,
+      };
+      // Tick every step first, so the list finishes only because the server answered.
+      setPhase({ kind: "sending", startedAt, responded: true });
+      await new Promise((r) => setTimeout(r, TICKED_MS));
+      setPhase({ kind: "done", done });
     } catch {
       setPhase({ kind: "error", message: "Could not reach the server. Check your connection and try again." });
     }
@@ -68,24 +134,26 @@ export function SpotFlow({ username }: { username: string | null }) {
 
   if (phase.kind === "done") {
     const { done } = phase;
+    if (done.reveal && (done.state === "new_cat" || done.state === "matched" || done.state === "needs_review")) {
+      return (
+        <SpotReveal
+          state={done.state}
+          catId={done.catId}
+          reveal={done.reveal}
+          capturedUrl={capturedUrl}
+          locationMissing={done.locationMissing}
+          onAgain={again}
+        />
+      );
+    }
     return (
       <div className="mt-6 grid gap-5" role="status">
         <div className={`note ${done.state === "rejected" ? "note-bad" : "note-ok"}`}>
           <h2 className="h2">{HEADINGS[done.state]}</h2>
           <p className="mt-2">{done.message}</p>
-          {done.locationMissing && (
-            <p className="mt-2">
-              Your location was not shared, so this photo is placed at the middle of the colony for now.
-            </p>
-          )}
         </div>
         <div className="flex flex-wrap gap-3">
-          {done.catId && (done.state === "new_cat" || done.state === "matched") && (
-            <Link href={`/cats/${done.catId}`} className="btn inline-flex items-center">
-              See the card
-            </Link>
-          )}
-          <button type="button" className="btn-quiet" onClick={() => setPhase({ kind: "camera" })}>
+          <button type="button" className="btn-quiet" onClick={again}>
             {done.state === "rejected" ? "Try again" : "Spot another"}
           </button>
         </div>
@@ -95,40 +163,68 @@ export function SpotFlow({ username }: { username: string | null }) {
 
   const sending = phase.kind === "sending";
   return (
-    <div className="mt-5 grid gap-5">
-      <fieldset className="grid gap-2" disabled={sending}>
-        <legend className="h2">Is it a girl or a boy?</legend>
-        <div role="radiogroup" aria-label="Sex" className="flex flex-wrap gap-2">
-          {SEXES.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              role="radio"
-              aria-checked={sex === o.value}
-              className="chip"
-              onClick={() => setSex(o.value)}
-            >
-              {sex === o.value ? "✓ " : ""}
-              {o.label}
-            </button>
-          ))}
-        </div>
-      </fieldset>
-      <LiveCamera onCapture={upload} disabled={sending} />
-      <p className="small soft max-w-[52ch]">
+    <>
+      <p className="small soft mt-5 max-w-[52ch]">
         Photos come only from the live camera, never from your gallery. That stops an old photo being reused to
         trigger funding.
       </p>
-      {sending && (
-        <p role="status" className="note note-ok font-bold">
-          Sending the photo. This can take a few seconds.
-        </p>
+      {fullscreen && (
+        <LiveCamera
+          fullscreen
+          onCapture={upload}
+          disabled={sending}
+          topBar={
+            <>
+              <Link href="/" className="cam-chip">
+                Close
+              </Link>
+              <span className="cam-chip">{AREA}</span>
+            </>
+          }
+          overlay={
+            sending && capturedUrl ? (
+              <div className="cam-frozen">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={capturedUrl} alt="The photo you just took" className="h-full w-full object-cover" />
+                <div className="scan-line" aria-hidden="true" />
+              </div>
+            ) : null
+          }
+          controls={
+            <fieldset className="grid gap-2">
+              <legend className="mb-2 font-bold">Is it a girl or a boy?</legend>
+              <div role="radiogroup" aria-label="Sex" className="flex flex-wrap gap-2">
+                {SEXES.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={sex === o.value}
+                    className="chip"
+                    onClick={() => setSex(o.value)}
+                  >
+                    {sex === o.value ? "✓ " : ""}
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              {phase.kind === "error" && (
+                <p role="alert" className="note note-bad mt-2 font-bold">
+                  {phase.message}
+                </p>
+              )}
+            </fieldset>
+          }
+          busyPanel={
+            sending ? (
+              <div role="status" aria-live="polite">
+                <p className="mb-3 font-bold">Checking your photo</p>
+                <ScanChecklist elapsedMs={elapsed} responded={phase.responded} />
+              </div>
+            ) : undefined
+          }
+        />
       )}
-      {phase.kind === "error" && (
-        <p role="alert" className="note note-bad font-bold">
-          {phase.message}
-        </p>
-      )}
-    </div>
+    </>
   );
 }

@@ -397,3 +397,184 @@ a.row:active,
 input[type="checkbox"] {
   accent-color: var(--main);
 }
+
+/* Full-screen camera, scan and reveal. A moment out in the world: ink and green ground, mango brackets. */
+.cam-full {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--ink);
+  color: #ffffff;
+  overflow: hidden;
+}
+.cam-top {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: calc(env(safe-area-inset-top) + 0.75rem) 1rem 0;
+}
+.cam-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0 1rem;
+  border-radius: var(--r-in);
+  background: var(--ink);
+  color: #ffffff;
+  font-weight: 700;
+}
+.cam-bottom {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 3;
+  display: grid;
+  gap: 1rem;
+  padding: 1rem 1rem calc(env(safe-area-inset-bottom) + 1rem);
+  border-radius: var(--r-out) var(--r-out) 0 0;
+  background: var(--ink);
+}
+.cam-bottom .chip {
+  background: #2a4d41;
+  color: #ffffff;
+}
+.cam-bottom .chip[aria-checked="true"] {
+  background: #ffffff;
+  color: var(--ink);
+}
+.cam-bottom .btn-quiet:disabled,
+.cam-bottom .btn:disabled {
+  background: #2a4d41;
+  color: #d5e6dc;
+}
+.cam-frozen {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--ink);
+}
+.cam-brackets {
+  position: absolute;
+  z-index: 2;
+  inset: 22% 14% 38% 14%;
+  pointer-events: none;
+}
+.cam-brackets i {
+  position: absolute;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 0 solid var(--pop);
+}
+.cam-brackets i:nth-child(1) { top: 0; left: 0; border-width: 4px 0 0 4px; border-top-left-radius: 10px; }
+.cam-brackets i:nth-child(2) { top: 0; right: 0; border-width: 4px 4px 0 0; border-top-right-radius: 10px; }
+.cam-brackets i:nth-child(3) { bottom: 0; left: 0; border-width: 0 0 4px 4px; border-bottom-left-radius: 10px; }
+.cam-brackets i:nth-child(4) { bottom: 0; right: 0; border-width: 0 4px 4px 0; border-bottom-right-radius: 10px; }
+
+/* The scan line sweeps the frame while the request runs. Transform only. */
+.scan-line {
+  position: absolute;
+  z-index: 2;
+  left: 14%;
+  right: 14%;
+  top: 22%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--pop);
+  box-shadow: 0 0 14px 3px rgba(255, 194, 26, 0.55);
+  animation: scan-sweep 2.4s cubic-bezier(0.77, 0, 0.175, 1) infinite alternate;
+}
+@keyframes scan-sweep {
+  from { transform: translateY(0); }
+  to { transform: translateY(calc(40dvh - 3px)); }
+}
+
+.scan-list {
+  display: grid;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.scan-step {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #c9dccf;
+  font-weight: 600;
+}
+.scan-step[data-active="true"],
+.scan-step[data-done="true"] {
+  color: #ffffff;
+}
+.scan-mark {
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+  color: var(--pop);
+}
+.scan-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--pop);
+  animation: scan-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes scan-pulse {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+
+.reveal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  overflow-y: auto;
+  background: var(--main);
+  color: #ffffff;
+}
+.reveal-title {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+.reveal-card {
+  overflow: hidden;
+  border-radius: var(--r-out);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.45);
+  animation: reveal-flip 440ms var(--ease-out) both;
+}
+@keyframes reveal-flip {
+  from {
+    opacity: 0;
+    transform: perspective(900px) rotateY(-70deg) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(900px) rotateY(0) scale(1);
+  }
+}
+.reveal .btn-quiet:disabled { background: var(--pale); }
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-line {
+    animation: none;
+    top: 50%;
+  }
+  .scan-dot {
+    animation: none;
+  }
+  .reveal-card {
+    animation: reveal-fade 180ms linear both;
+  }
+  @keyframes reveal-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}
