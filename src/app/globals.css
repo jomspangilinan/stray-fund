@@ -402,6 +402,9 @@ a.row:active,
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .name-panel {
+    transition: none;
+  }
   .press,
   .icon-btn,
   .btn,

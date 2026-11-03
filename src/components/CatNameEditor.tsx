@@ -24,10 +24,10 @@ export function CatNameEditor({
   const pencil = useRef<HTMLButtonElement>(null);
   const pending = names ? (names.pending ?? sentName) : null;
 
-  // The server's word wins once the refreshed page arrives (adjusting state during render, not in an effect).
-  const [seen, setSeen] = useState(names?.pending ?? null);
-  if ((names?.pending ?? null) !== seen) {
-    setSeen(names?.pending ?? null);
+  // The optimistic line lasts only until the refreshed page brings a new names object; then the server alone decides.
+  const [seen, setSeen] = useState(names);
+  if (names !== seen) {
+    setSeen(names);
     setSentName(null);
   }
 
