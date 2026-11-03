@@ -95,7 +95,19 @@ Paid tiers are used on purpose: free Postgres expires after 30 days and workers 
 
 ## 6. PayPal webhook
 
-In the PayPal developer dashboard, open your sandbox app, add a webhook with the URL `https://<your-web-service>.onrender.com/api/webhooks/paypal`, and subscribe to `PAYMENT.CAPTURE.COMPLETED` and the `PAYMENT.PAYOUTS-ITEM.*` events. Copy the webhook id into `PAYPAL_WEBHOOK_ID` on the web service. Until it is set, every webhook is rejected on purpose. If Render will not accept an empty value at Blueprint creation, enter a placeholder and replace it here.
+In the PayPal developer dashboard, open your sandbox app, add a webhook with the URL `https://<your-web-service>.onrender.com/api/webhooks/paypal`, and subscribe to these events (names from https://developer.paypal.com/api/rest/webhooks/event-names/):
+
+| Event | What the app does |
+| --- | --- |
+| `PAYMENT.CAPTURE.COMPLETED` | Records the donation as captured, once. |
+| `PAYMENT.CAPTURE.REFUNDED` | "A merchant refunds a payment capture." Writes a negative refund row linked to the donation, with the amount and fee effect PayPal reports. |
+| `PAYMENT.CAPTURE.REVERSED` | "PayPal reverses a payment capture." This is the chargeback money event. Same, as a reversal row. |
+| `PAYMENT.CAPTURE.DENIED` | "A payment capture is denied." Takes back what the donation still held, if it had been recorded as captured. |
+| `PAYMENT.PAYOUTS-ITEM.SUCCEEDED`, `.FAILED`, `.BLOCKED`, `.CANCELED`, `.HELD`, `.UNCLAIMED`, `.RETURNED`, `.REFUNDED` | Keeps vet payouts in step (the `PAYMENT.PAYOUTS-ITEM.*` family). |
+
+The `CUSTOMER.DISPUTE.*` events are not needed: a dispute moves no money by itself, and the money event is `PAYMENT.CAPTURE.REVERSED`. Subscribing to them does no harm, they are acknowledged and ignored. `PAYMENT.PAYOUTSBATCH.*` is also not needed, because the worker polls each batch.
+
+A refund or reversal never edits the donation. It is a separate row on the ledger (type Refund, negative), the pool and the "where every peso went" line drop by exactly what PayPal reports, and the line says how much was taken back. If the money was already given to cats or paid out, the pool shows below zero, new funding is refused, nothing is clawed back, and a question appears on the caretaker desk under Treasurer questions. A refund the app cannot read or that is larger than its donation is not recorded; it opens a question instead. Copy the webhook id into `PAYPAL_WEBHOOK_ID` on the web service. Until it is set, every webhook is rejected on purpose. If Render will not accept an empty value at Blueprint creation, enter a placeholder and replace it here.
 
 ## 7. First boot check
 

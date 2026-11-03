@@ -16,7 +16,10 @@ export type PoolStatus = {
   payoutFees: number;
   heldForCats: number;
   reservedPayouts: number;
+  /** Can be below zero: money PayPal took back after it was given to cats or paid out. */
   available: number;
+  /** Gross PayPal took back (refunds, reversals, denials). Already taken off grossIn, fees and available. */
+  reversedGross: number;
 };
 
 export class InsufficientFunds extends Error {
@@ -44,13 +47,25 @@ function assertPositiveInt(amount: number): void {
   }
 }
 
-/** Every figure is derived from SQL aggregates, never stored running balances. */
+/**
+ * Every figure is derived from SQL aggregates, never stored running balances. Refunds, reversals and denials are
+ * their own rows (donation_reversals) and count only while their donation is captured, so the donation row itself
+ * is never edited. A pool below zero is shown as it is: nothing is clawed back and no figure is clamped here.
+ */
 export async function getPoolStatus(tx: Tx): Promise<PoolStatus> {
   const result = await tx.execute(sql`
     select
-      (select coalesce(sum(gross), 0)::bigint from donations where status = ${CAPTURED}) as gross_in,
-      (select coalesce(sum(paypal_fee), 0)::bigint from donations where status = ${CAPTURED}) as paypal_fees,
-      (select coalesce(sum(net), 0)::bigint from donations where status = ${CAPTURED}) as net_in,
+      (select coalesce(sum(gross), 0)::bigint from donations where status = ${CAPTURED})
+        + (select coalesce(sum(r.gross_delta), 0)::bigint from donation_reversals r
+           join donations d on d.id = r.donation_id where d.status = ${CAPTURED}) as gross_in,
+      (select coalesce(sum(paypal_fee), 0)::bigint from donations where status = ${CAPTURED})
+        + (select coalesce(sum(r.fee_delta), 0)::bigint from donation_reversals r
+           join donations d on d.id = r.donation_id where d.status = ${CAPTURED}) as paypal_fees,
+      (select coalesce(sum(net), 0)::bigint from donations where status = ${CAPTURED})
+        + (select coalesce(sum(r.net_delta), 0)::bigint from donation_reversals r
+           join donations d on d.id = r.donation_id where d.status = ${CAPTURED}) as net_in,
+      (select coalesce(-sum(r.gross_delta), 0)::bigint from donation_reversals r
+         join donations d on d.id = r.donation_id where d.status = ${CAPTURED}) as reversed_gross,
       (select coalesce(sum(a.amount), 0)::bigint
          from allocations a join donations d on d.id = a.donation_id
          where d.status = ${CAPTURED}) as alloc_net,
@@ -75,6 +90,7 @@ export async function getPoolStatus(tx: Tx): Promise<PoolStatus> {
     heldForCats: allocNet - vetPaid - reservedPayouts,
     reservedPayouts,
     available: netIn - allocNet - payoutFees,
+    reversedGross: toInt(row.reversed_gross),
   };
 }
 
@@ -89,12 +105,15 @@ export async function allocateToCat(
   if (amount > available) throw new InsufficientFunds(amount, available);
 
   const result = await tx.execute(sql`
-    select d.id as donation_id, (d.net - coalesce(sum(a.amount), 0))::bigint as remaining
+    select d.id as donation_id,
+           (d.net - coalesce(sum(a.amount), 0)
+              + (select coalesce(sum(r.net_delta), 0) from donation_reversals r where r.donation_id = d.id))::bigint as remaining
     from donations d
     left join allocations a on a.donation_id = d.id
     where d.status = ${CAPTURED}
     group by d.id, d.net, d.created_at
-    having d.net - coalesce(sum(a.amount), 0) > 0
+    having d.net - coalesce(sum(a.amount), 0)
+             + (select coalesce(sum(r.net_delta), 0) from donation_reversals r where r.donation_id = d.id) > 0
     order by d.created_at asc, d.id asc
   `);
 

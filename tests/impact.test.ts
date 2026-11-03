@@ -171,7 +171,7 @@ describe("conservation identity", () => {
 
   it("reports an imbalance instead of hiding it", () => {
     const c = conservation({
-      grossIn: 1000, paypalFees: 0, vetPaid: 0, payoutFees: 0, heldForCats: 0, reservedPayouts: 0, available: 900,
+      grossIn: 1000, paypalFees: 0, vetPaid: 0, payoutFees: 0, heldForCats: 0, reservedPayouts: 0, available: 900, reversedGross: 0,
     });
     expect(c.balanced).toBe(false);
   });

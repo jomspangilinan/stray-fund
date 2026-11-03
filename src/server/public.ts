@@ -597,7 +597,8 @@ export async function getHelped(userId: string): Promise<PublicCat[]> {
 /** Captured net from this user's donations that no cat holds yet. */
 export async function getUnallocated(userId: string): Promise<number> {
   const res = await db.execute(sql`
-    select coalesce(sum(d.net - coalesce(x.allocated, 0)), 0)::bigint as unallocated
+    select coalesce(sum(d.net - coalesce(x.allocated, 0)
+             + (select coalesce(sum(r.net_delta), 0) from donation_reversals r where r.donation_id = d.id)), 0)::bigint as unallocated
     from donations d
     left join (
       select donation_id, sum(amount) as allocated from allocations group by donation_id

@@ -60,7 +60,7 @@ export async function getImpact(): Promise<Impact> {
 const PAYOUT_TYPE = { deposit: "vet_deposit", balance: "vet_balance" } as const;
 
 /**
- * One row per captured donation and per payout, newest first. Pending donations are left out because no
+ * One row per captured donation, per refund, reversal or denial of one (negative, its own row) and per payout, newest first. Pending donations are left out because no
  * money moved. Failed and refused payouts stay, marked by their status. The reason is the treasurer's own
  * public sentence; inputs, approvers and gateway errors are never selected.
  */
@@ -73,6 +73,14 @@ async function ledgerRows(tx: Tx): Promise<PublicLedgerRow[]> {
              d.status, coalesce(u.username, 'Anonymous') as who
       from donations d left join users u on u.id = d.user_id
       where d.status = ${CAPTURED}
+      union all
+      select r.created_at, to_char(r.created_at at time zone 'Asia/Manila', 'YYYY-MM-DD'), 'refund', r.gross_delta, r.fee_delta,
+             null::text, null::uuid, null::text, r.paypal_ref,
+             case r.kind when 'refund' then 'refunded' when 'reversal' then 'reversed' else 'denied' end,
+             coalesce(u.username, 'Anonymous')
+      from donation_reversals r
+      join donations d on d.id = r.donation_id and d.status = ${CAPTURED}
+      left join users u on u.id = d.user_id
       union all
       select p.created_at, to_char(p.created_at at time zone 'Asia/Manila', 'YYYY-MM-DD'), case p.kind when 'deposit' then ${PAYOUT_TYPE.deposit} else ${PAYOUT_TYPE.balance} end,
              p.amount, p.fee, c.name, p.cat_id, a.reason,

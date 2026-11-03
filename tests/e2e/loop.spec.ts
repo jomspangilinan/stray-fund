@@ -312,7 +312,7 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     const payoutFees = DEPOSIT_FEE + BALANCE_FEE;
     const held = PACKAGE - SURPLUS - vetPaid; // allocated to the cat, minus what the vet has been paid
     const left = grossIn - fees - (PACKAGE - SURPLUS) - payoutFees;
-    expect(snapshot.pool).toEqual({ grossIn, paypalFees: fees, vetPaid, payoutFees, heldForCats: held, reservedPayouts: 0, available: left });
+    expect(snapshot.pool).toEqual({ grossIn, paypalFees: fees, vetPaid, payoutFees, heldForCats: held, reservedPayouts: 0, available: left, reversedGross: 0 });
     expect(held).toBe(0);
     expect(grossIn).toBe(fees + vetPaid + payoutFees + held + left);
 

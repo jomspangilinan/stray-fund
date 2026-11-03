@@ -204,6 +204,40 @@ export const donations = pgTable(
   ],
 );
 
+/**
+ * Money PayPal took back from a captured donation: a refund, a reversal (chargeback) or a denial. Its own row,
+ * linked to the donation, which is never edited. Every delta is zero or negative and gross = fee + net, so
+ * adding these to the donation keeps the same identity. The pool adds them in only while the donation is captured.
+ */
+export const donationReversals = pgTable(
+  "donation_reversals",
+  {
+    id: id(),
+    donationId: uuid("donation_id")
+      .notNull()
+      .references(() => donations.id),
+    kind: text("kind").notNull(),
+    // PayPal's id for the refund or reversal, or the capture id for a denial. The key that makes a replay change nothing.
+    paypalRef: text("paypal_ref").notNull().unique(),
+    grossDelta: integer("gross_delta").notNull(),
+    feeDelta: integer("fee_delta").notNull(),
+    netDelta: integer("net_delta").notNull(),
+    // breakdown: PayPal's own seller_payable_breakdown. remaining: PayPal sent none, so everything the
+    // donation still held in net comes out and its fee stays spent.
+    basis: text("basis").notNull(),
+    // The caretaker question opened when this left the pool below zero.
+    reviewRequestId: uuid("review_request_id").references(() => reviewRequests.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("donation_reversals_donation_idx").on(t.donationId),
+    check("donation_reversals_kind_check", sql`${t.kind} in ('refund', 'reversal', 'denied')`),
+    check("donation_reversals_basis_check", sql`${t.basis} in ('breakdown', 'remaining')`),
+    check("donation_reversals_sign_check", sql`${t.grossDelta} <= 0 and ${t.feeDelta} <= 0 and ${t.netDelta} <= 0`),
+    check("donation_reversals_breakdown_check", sql`${t.grossDelta} = ${t.feeDelta} + ${t.netDelta}`),
+  ],
+);
+
 export const allocations = pgTable("allocations", {
   id: id(),
   donationId: uuid("donation_id")

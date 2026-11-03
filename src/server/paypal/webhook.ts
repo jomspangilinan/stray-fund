@@ -7,6 +7,7 @@ import { webhookEvents } from "../db/schema";
 import { applyPayoutStatusIn } from "../moneyGate";
 import { accessToken, credentials } from "./payouts";
 import { recordCapture, UnknownOrder, type RawCapture } from "./orders";
+import { applyCaptureReversal, REVERSAL_EVENTS } from "./reversals";
 
 export type WebhookEvent = {
   id: string;
@@ -94,6 +95,11 @@ async function applyEvent(tx: Tx, event: WebhookEvent): Promise<void> {
     }
     return;
   }
+  const reversal = REVERSAL_EVENTS[event.event_type];
+  if (reversal) {
+    await applyCaptureReversal(tx, reversal, r);
+    return;
+  }
   if (event.event_type.startsWith("PAYMENT.PAYOUTS-ITEM.")) {
     const batchId = str(r.payout_batch_id);
     if (!batchId) {
@@ -118,7 +124,7 @@ export async function handleWebhookEvent(event: WebhookEvent): Promise<"processe
   return db.transaction(async (tx) => {
     // Payout effects need the colony lock. Take it before anything else so the
     // lock order is the same everywhere.
-    if (event.event_type.startsWith("PAYMENT.PAYOUTS-ITEM.")) await lockColony(tx);
+    if (event.event_type.startsWith("PAYMENT.PAYOUTS-ITEM.") || event.event_type in REVERSAL_EVENTS) await lockColony(tx);
     const inserted = await tx
       .insert(webhookEvents)
       .values({ paypalEventId: event.id })

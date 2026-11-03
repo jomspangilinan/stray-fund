@@ -5,7 +5,8 @@ import type { PublicLedgerRow } from "@/server/public";
 /** Payout states where the money is committed but no vet has been paid yet. Mirrors getPoolStatus. */
 export const IN_FLIGHT = ["awaiting_approval", "queued", "sent", "needs_review"] as const;
 
-export const isDonationRow = (r: Pick<PublicLedgerRow, "type">) => r.type === "donation";
+/** Money coming in, or taken back out of what came in: a donation, or a refund of one (negative amount and fee). */
+export const isDonationRow = (r: Pick<PublicLedgerRow, "type">) => r.type === "donation" || r.type === "refund";
 
 export type LedgerTotals = {
   donated: number;
@@ -57,18 +58,24 @@ export function conservation(p: PoolStatus): Conservation {
   const text =
     `Donated ${formatPeso(parts.donated)} = PayPal fees ${formatPeso(parts.paypalFees)}` +
     ` + paid to vets ${formatPeso(parts.paidToVets)} + payout fees ${formatPeso(parts.payoutFees)}` +
-    ` + held for cats ${formatPeso(parts.held)} + left in the pool ${formatPeso(parts.pool)}`;
+    ` + held for cats ${formatPeso(parts.held)} + left in the pool ${formatPeso(parts.pool)}` +
+    (p.reversedGross > 0 ? `. Donated is after ${formatPeso(p.reversedGross)} that PayPal took back` : "") +
+    (parts.pool < 0 ? `. The pool is below zero because some of that money was already spent, so no new cat is funded until donations cover it` : "");
   return { text, balanced, parts };
 }
 
 const TYPE_LABEL: Record<string, string> = {
   donation: "Donation",
+  refund: "Refund",
   vet_deposit: "Vet deposit",
   vet_balance: "Vet balance",
 };
 
 const LEDGER_STATUS_LABEL: Record<string, string> = {
   captured: "Received",
+  refunded: "Refunded",
+  reversed: "Taken back by PayPal",
+  denied: "Taken back by PayPal",
   succeeded: "Paid",
   failed: "Failed",
   queued: "Sending",

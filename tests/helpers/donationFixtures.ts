@@ -48,3 +48,46 @@ export function captureEvent(eventId: string, orderId: string, patch: Partial<Ra
     },
   };
 }
+
+const money = (centavos: number) => ({
+  currency_code: "PHP",
+  value: `${Math.floor(centavos / 100)}.${String(centavos % 100).padStart(2, "0")}`,
+});
+
+/**
+ * A PAYMENT.CAPTURE.REFUNDED / REVERSED body. The resource is a refund object whose "up" link names the capture,
+ * and seller_payable_breakdown holds the amount, the fee PayPal gave back and the net taken from the seller.
+ */
+export function reversalEvent(
+  eventId: string,
+  eventType: "PAYMENT.CAPTURE.REFUNDED" | "PAYMENT.CAPTURE.REVERSED" | "PAYMENT.CAPTURE.DENIED",
+  o: { refundId: string; captureId?: string; orderId?: string; gross?: number; fee?: number; status?: string; breakdown?: boolean },
+) {
+  const gross = o.gross ?? FIXTURE_GROSS;
+  const fee = o.fee ?? 0;
+  const captureId = o.captureId ?? String(FIXTURE_CAPTURE.id);
+  return {
+    id: eventId,
+    event_type: eventType,
+    resource: {
+      id: o.refundId,
+      status: o.status ?? "COMPLETED",
+      amount: money(gross),
+      ...(o.breakdown === false
+        ? {}
+        : {
+            seller_payable_breakdown: {
+              gross_amount: money(gross),
+              paypal_fee: money(fee),
+              net_amount: money(gross - fee),
+              total_refunded_amount: money(gross),
+            },
+          }),
+      links: [
+        { rel: "self", href: `https://api.sandbox.paypal.com/v2/payments/refunds/${o.refundId}` },
+        { rel: "up", href: `https://api.sandbox.paypal.com/v2/payments/captures/${captureId}` },
+      ],
+      ...(o.orderId ? { supplementary_data: { related_ids: { order_id: o.orderId } } } : {}),
+    },
+  };
+}

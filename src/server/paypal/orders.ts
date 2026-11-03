@@ -13,6 +13,7 @@ import { e2eFakesEnabled } from "../e2e/guard";
 import { fakeOrdersGateway } from "../e2e/paypal";
 import { CAPTURED } from "../ledger";
 import { enqueueWakeup } from "../wakeups";
+import { askIfPoolShort } from "./reversals";
 
 export type Donation = typeof donations.$inferSelect;
 
@@ -226,6 +227,8 @@ export async function recordCapture(capture: PayPalCapture, tx?: Tx): Promise<Do
     gross: first.gross,
     net: first.net,
   });
+  // A refund can arrive before its capture. Now that it counts, the pool may be short.
+  await askIfPoolShort(tx, first.id);
   return first;
 }
 
