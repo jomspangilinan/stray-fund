@@ -36,6 +36,13 @@
       "when": 1793688535283,
       "tag": "0004_catch_flow",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793691479986,
+      "tag": "0005_wakeup_scheduling",
+      "breakpoints": true
     }
   ]
 }

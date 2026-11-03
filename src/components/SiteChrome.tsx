@@ -34,6 +34,7 @@ const LINKS = [
   { href: "/collection", label: "Collection" },
   { href: "/catch", label: "Catch" },
   { href: "/donate", label: "Donate" },
+  { href: "/agent", label: "Treasurer" },
 ] as const;
 
 export function SiteNav() {

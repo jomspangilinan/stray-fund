@@ -12,7 +12,7 @@ import { getStorage } from "./storage";
  * someone adds it here on purpose.
  *
  * Never public: exact or fuzzed coordinates, original photo keys, sighting state,
- * assessments, emails, receipts, who caught a cat.
+ * assessments, emails, receipts, who caught a cat, agent inputs, approvers, gateway errors.
  */
 
 const TZ = "Asia/Manila";
@@ -257,6 +257,104 @@ export function publicLedgerRow(row: LedgerInput): PublicLedgerRow {
     status: row.status,
     who: row.who ?? null,
   };
+}
+
+const ACTION_LABEL: Record<string, string> = {
+  fund_cat: "Funded a cat",
+  payout_deposit: "Vet deposit",
+  payout_balance: "Vet balance",
+  caretaker_review: "Asked a caretaker",
+  payout_review_resolved: "Caretaker settled a payment",
+};
+
+const ACTION_STATUS_LABEL: Record<string, string> = {
+  done: "Done",
+  open: "Waiting for a caretaker",
+  awaiting_approval: "Waiting for approval",
+  queued: "Sending",
+  sent: "Sent",
+  succeeded: "Paid",
+  failed: "Failed",
+  needs_review: "Being checked",
+  rejected: "Rejected",
+  denied: "Refused by the rules",
+};
+
+export type PublicAgentAction = {
+  id: string;
+  action: string;
+  reason: string;
+  amount: number | null;
+  status: string;
+  /** Whether the action was held back or went wrong, for styling only. */
+  refused: boolean;
+  paypalRef: string | null;
+  date: string;
+  cat: string | null;
+};
+
+type AgentActionInput = {
+  id: string;
+  action: string;
+  reason: string;
+  amount: number | null;
+  status: string;
+  paypalRef: string | null;
+  createdAt: Date;
+  cat: string | null;
+};
+
+/** Never inputs, approver identities or gateway error text, which all live on the same row. */
+export function publicAgentAction(row: AgentActionInput): PublicAgentAction {
+  return {
+    id: row.id,
+    action: ACTION_LABEL[row.action] ?? "Treasurer action",
+    reason: row.reason,
+    amount: row.amount ?? null,
+    status: ACTION_STATUS_LABEL[row.status] ?? "Recorded",
+    refused: ["denied", "failed", "rejected"].includes(row.status),
+    paypalRef: row.paypalRef ?? null,
+    date: manilaDate(row.createdAt),
+    cat: row.cat ?? null,
+  };
+}
+
+const MAX_AGENT_ACTIONS = 100;
+
+/** Newest first. The cat comes from the action's payout, or for funding from its recorded id. */
+export async function listAgentActions(): Promise<PublicAgentAction[]> {
+  const { rows } = await db.execute(sql`
+    select a.id, a.action, a.reason, a.amount, a.status, a.paypal_ref, a.created_at, c.name as cat
+    from agent_actions a
+    left join payouts p on p.action_id = a.id
+    left join cats c on c.id = coalesce(
+      p.cat_id,
+      case when a.inputs->>'catId' ~* ${UUID.source} then (a.inputs->>'catId')::uuid end
+    )
+    order by a.created_at desc, a.id desc
+    limit ${MAX_AGENT_ACTIONS}
+  `);
+  return (rows as {
+    id: string;
+    action: string;
+    reason: string;
+    amount: number | null;
+    status: string;
+    paypal_ref: string | null;
+    created_at: Date | string;
+    cat: string | null;
+  }[]).map((r) =>
+    publicAgentAction({
+      id: r.id,
+      action: r.action,
+      reason: r.reason,
+      amount: r.amount,
+      status: r.status,
+      paypalRef: r.paypal_ref,
+      createdAt: new Date(r.created_at),
+      cat: r.cat,
+    }),
+  );
 }
 
 /** Exact coordinates only for caretakers and vets. Fuzzed ones are never exposed. */

@@ -312,6 +312,10 @@ export const wakeups = pgTable(
     payload: jsonb("payload"),
     status: text("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
+    // Not claimable before this. Pushed forward by retry backoff.
+    runAfter: timestamp("run_after", { withTimezone: true }).notNull().defaultNow(),
+    // Set at each claim, so a run abandoned by a crash can be reclaimed.
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [

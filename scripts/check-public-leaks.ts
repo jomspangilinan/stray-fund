@@ -19,6 +19,7 @@ const SENTINELS = [
   "10.987654321", "120.123456789", "10.55555555", "120.66666666", "11.246813579", "121.135792468",
   "leakcheck.sentinel@example.test", "originals/", "exact_lat", "exactLat", "fuzzed", "originalKey",
   "original_key", "locationApproximate", "paypal_email", "paypalEmail", "requested_sex", "assessment",
+  "agentinputs-sentinel", "gatewayerror-sentinel",
 ];
 
 async function main() {
@@ -46,7 +47,13 @@ async function main() {
   const token = await new SignJWT({ role: "donor", username: `leak_${tag}` })
     .setProtectedHeader({ alg: "HS256" }).setSubject(donor.id).setIssuedAt().setExpirationTime("1h").sign(secret);
 
-  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/collection", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid"];
+  await pool.query(
+    `insert into agent_actions (action, inputs, reason, amount, status, approved_by, paypal_ref)
+     values ('fund_cat', $1, 'Leak check reason', 150000, 'done', $2, 'LEAKREF')`,
+    [JSON.stringify({ catId: cat.id, secret: "agentinputs-sentinel", gatewayError: "gatewayerror-sentinel" }), donor.id],
+  );
+
+  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/collection", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed"];
   const viewers: [string, Record<string, string>][] = [["anon", {}], ["donor", { cookie: `sf_session=${token}` }]];
   let bad = 0, checked = 0;
   try {

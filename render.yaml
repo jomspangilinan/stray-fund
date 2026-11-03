@@ -1,4 +1,4 @@
-# Render blueprint. The background worker is added in a later task.
+# Render blueprint. Plan names are unverified until the first deploy.
 services:
   - type: web
     name: stray-fund
@@ -17,6 +17,41 @@ services:
         value: "true"
       - key: NODE_VERSION
         value: "22"
+
+  # The treasurer: claims wakeups, calls Bedrock, and keeps payouts in step with PayPal.
+  - type: worker
+    name: stray-fund-worker
+    runtime: node
+    region: singapore
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm run worker
+    # SIGTERM lets the current wakeup finish. A run has an 8 minute deadline, past this limit
+    # the platform kills it and another worker reclaims the wakeup after 10 minutes.
+    maxShutdownDelaySeconds: 300
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stray-fund-db
+          property: connectionString
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: AWS_REGION
+        value: ap-southeast-1
+      - key: AI_MODEL
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
 
 databases:
   - name: stray-fund-db
