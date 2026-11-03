@@ -25,11 +25,11 @@ A cat's card also has a Save image button that makes a 9:16 picture of the cat.
 
 ## Why PayPal
 
-The whole idea is that money moves visibly. Checkout takes donations, Payouts pays the vet, and webhooks tell the app what actually settled. Each payout carries a stable `sender_batch_id`, so a retry can't pay twice. The PayPal agent toolkit gives the treasurer read-only access to orders and transactions, with personal details removed. The ledger's PayPal reference column lets anyone match a row to a PayPal record.
+The whole idea is that money moves visibly. Checkout takes donations, Payouts pays the vet, and webhooks tell the app what actually settled. Each payout carries a stable `sender_batch_id`, so a retry can't pay twice. The treasurer is also offered two read-only PayPal agent toolkit tools, `get_order` and `list_transactions`, with personal details removed. `[CONFIRM AFTER LIVE RUN]` The ledger's PayPal reference column lets anyone match a row to a PayPal record.
 
 ## How AI and PayPal move money together
 
-The AI decides what should happen next. Code decides whether it may happen and how much. PayPal moves the money.
+The hackathon's theme is "Build What's Next with PayPal and AI", and a project must meaningfully use both. Here each has a job the fund can't run without: the AI decides what should happen next, code decides whether it may happen and how much, and PayPal moves the money.
 
 | Step | What the AI does | What PayPal does |
 |---|---|---|
@@ -113,7 +113,7 @@ Read this before you trust it with anything real.
 - **Two neighbours can queue a cat.** Names are free to make, so one person could use two. Without a verified ear-tip photo the balance never releases, but the deposit may already be paid.
 - **Refunds and chargebacks are handled in code but not proven on real PayPal.** A refund whose webhook is lost is not polled.
 - **Items under "Before real money" in [docs/deploy.md](docs/deploy.md)** are open: MFA and key rotation, TLS-only bucket policies, a separate live PayPal app, payouts stuck at PayPal that need a developer, and more.
-- **Not yet verified on real PayPal or Bedrock:** real webhook signatures and payload shapes, a donation captured through the screen, the treasurer on Bedrock, phone camera over HTTPS, real S3. Sandbox order, capture and payout calls were run once from a script. `[CONFIRM AFTER LIVE RUN]`
+- **Not yet verified on real PayPal or Bedrock:** real webhook signatures and payload shapes, a donation captured through the screen, the treasurer on Bedrock, the toolkit's `get_order` through the app and `list_transactions` (it returned 403 on the sandbox app), phone camera over HTTPS, real S3. Sandbox order, capture and payout calls were run once from a script. `[CONFIRM AFTER LIVE RUN]`
 - **Cut or later:** adoption fees, foster allowance, monthly sponsors, merging duplicate cats, a map.
 
 ## Licence
