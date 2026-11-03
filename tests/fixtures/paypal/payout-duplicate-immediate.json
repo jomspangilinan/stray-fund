@@ -1,0 +1,25 @@
+{
+  "status": 400,
+  "body": {
+    "name": "USER_BUSINESS_ERROR",
+    "message": "User business error.",
+    "debug_id": "DEBUG_FAKE",
+    "information_link": "https://developer.paypal.com/docs/api/payments.payouts-batch/#errors",
+    "details": [
+      {
+        "field": "SENDER_BATCH_ID",
+        "location": "body",
+        "issue": "Batch with given sender_batch_id already exists",
+        "link": [
+          {
+            "href": "https://api.sandbox.paypal.com/v1/payments/payouts/FAKE",
+            "rel": "self",
+            "method": "GET",
+            "encType": "application/json"
+          }
+        ]
+      }
+    ],
+    "links": []
+  }
+}

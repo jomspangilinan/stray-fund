@@ -1,0 +1,22 @@
+{
+  "status": 200,
+  "body": {
+    "id": "ID_FAKE001",
+    "status": "PAYER_ACTION_REQUIRED",
+    "payment_source": {
+      "paypal": {}
+    },
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v2/checkout/orders/FAKE",
+        "rel": "self",
+        "method": "GET"
+      },
+      {
+        "href": "https://www.sandbox.paypal.com/checkoutnow?token=FAKE",
+        "rel": "payer-action",
+        "method": "GET"
+      }
+    ]
+  }
+}

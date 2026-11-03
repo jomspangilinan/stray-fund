@@ -1,0 +1,71 @@
+{
+  "status": 200,
+  "body": {
+    "batch_header": {
+      "payout_batch_id": "BATCH_FAKE001",
+      "batch_status": "SUCCESS",
+      "time_created": "2026-11-03T05:48:24Z",
+      "time_completed": "2026-11-03T05:48:47Z",
+      "sender_batch_header": {
+        "sender_batch_id": "spike-nouser-1793684902628"
+      },
+      "funding_source": "BALANCE",
+      "amount": {
+        "currency": "PHP",
+        "value": "10.00"
+      },
+      "fees": {
+        "currency": "PHP",
+        "value": "0.20"
+      }
+    },
+    "items": [
+      {
+        "payout_item_id": "ITEM_FAKE002",
+        "transaction_id": "TXN_FAKE003",
+        "activity_id": "0CP95595T93046224",
+        "transaction_status": "UNCLAIMED",
+        "payout_item_fee": {
+          "currency": "PHP",
+          "value": "0.20"
+        },
+        "payout_batch_id": "BATCH_FAKE001",
+        "payout_item": {
+          "recipient_type": "EMAIL",
+          "amount": {
+            "currency": "PHP",
+            "value": "10.00"
+          },
+          "note": "spike",
+          "receiver": "sandbox-user@example.test",
+          "recipient_wallet": "PAYPAL",
+          "purpose": "GOODS"
+        },
+        "time_processed": "2026-11-03T05:48:39Z",
+        "errors": {
+          "name": "RECEIVER_UNREGISTERED",
+          "message": "The recipient for this payout does not have an account. A link to sign up for an account was sent to the recipient. However, if the recipient does not claim this payout within 30 days, the funds will be returned to your account.",
+          "information_link": "https://developer.paypal.com/docs/api/payments.payouts-batch/#errors",
+          "details": [],
+          "links": []
+        },
+        "links": [
+          {
+            "href": "https://api.sandbox.paypal.com/v1/payments/payouts-item/FAKE",
+            "rel": "item",
+            "method": "GET",
+            "encType": "application/json"
+          }
+        ]
+      }
+    ],
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v1/payments/payouts/FAKE?page_size=1000&page=1",
+        "rel": "self",
+        "method": "GET",
+        "encType": "application/json"
+      }
+    ]
+  }
+}

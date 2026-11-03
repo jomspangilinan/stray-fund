@@ -1,0 +1,17 @@
+{
+  "status": 400,
+  "body": {
+    "name": "VALIDATION_ERROR",
+    "message": "Invalid request - see details",
+    "debug_id": "DEBUG_FAKE",
+    "information_link": "https://developer.paypal.com/docs/api/payments.payouts-batch/#errors",
+    "details": [
+      {
+        "field": "items[0].receiver",
+        "location": "body",
+        "issue": "Receiver is invalid or does not match with type"
+      }
+    ],
+    "links": []
+  }
+}

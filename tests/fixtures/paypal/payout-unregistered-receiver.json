@@ -1,0 +1,20 @@
+{
+  "status": 201,
+  "body": {
+    "batch_header": {
+      "payout_batch_id": "BATCH_FAKE001",
+      "batch_status": "PENDING",
+      "sender_batch_header": {
+        "sender_batch_id": "spike-nouser-1793684902628"
+      }
+    },
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v1/payments/payouts/FAKE",
+        "rel": "self",
+        "method": "GET",
+        "encType": "application/json"
+      }
+    ]
+  }
+}

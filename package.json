@@ -12,6 +12,7 @@
     "db:migrate": "tsx src/server/db/migrate.ts"
   },
   "dependencies": {
+    "@paypal/agent-toolkit": "^1.11.0",
     "dotenv": "^18.0.9",
     "drizzle-orm": "^0.45.4",
     "next": "16.4.4",

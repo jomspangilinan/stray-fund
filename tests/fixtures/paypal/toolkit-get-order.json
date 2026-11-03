@@ -1,0 +1,38 @@
+{
+  "status": 200,
+  "body": {
+    "id": "ID_FAKE001",
+    "intent": "CAPTURE",
+    "status": "PAYER_ACTION_REQUIRED",
+    "payment_source": {
+      "paypal": {}
+    },
+    "purchase_units": [
+      {
+        "reference_id": "default",
+        "amount": {
+          "currency_code": "PHP",
+          "value": "100.00",
+          "breakdown": {}
+        },
+        "payee": {
+          "email_address": "sandbox-user@example.test",
+          "merchant_id": "ACCT_FAKE002"
+        }
+      }
+    ],
+    "create_time": "2026-11-03T05:47:54Z",
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v2/checkout/orders/FAKE",
+        "rel": "self",
+        "method": "GET"
+      },
+      {
+        "href": "https://www.sandbox.paypal.com/checkoutnow?token=FAKE",
+        "rel": "payer-action",
+        "method": "GET"
+      }
+    ]
+  }
+}

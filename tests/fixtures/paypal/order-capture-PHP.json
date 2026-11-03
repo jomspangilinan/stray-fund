@@ -1,0 +1,109 @@
+{
+  "status": 201,
+  "body": {
+    "id": "ID_FAKE001",
+    "status": "COMPLETED",
+    "payment_source": {
+      "paypal": {
+        "email_address": "sandbox-user@example.test",
+        "account_id": "ACCT_FAKE002",
+        "account_status": "VERIFIED",
+        "name": {
+          "given_name": "Sandbox Person",
+          "surname": "Sandbox Person"
+        },
+        "address": {
+          "country_code": "PH"
+        }
+      }
+    },
+    "purchase_units": [
+      {
+        "reference_id": "default",
+        "shipping": {
+          "name": {
+            "full_name": "Sandbox Person"
+          },
+          "address": {
+            "address_line_1": "REDACTED",
+            "admin_area_2": "REDACTED",
+            "admin_area_1": "REDACTED",
+            "postal_code": "REDACTED",
+            "country_code": "PH"
+          }
+        },
+        "payments": {
+          "captures": [
+            {
+              "id": "ID_FAKE003",
+              "status": "COMPLETED",
+              "amount": {
+                "currency_code": "PHP",
+                "value": "100.00"
+              },
+              "final_capture": true,
+              "seller_protection": {
+                "status": "ELIGIBLE",
+                "dispute_categories": [
+                  "ITEM_NOT_RECEIVED",
+                  "UNAUTHORIZED_TRANSACTION"
+                ]
+              },
+              "seller_receivable_breakdown": {
+                "gross_amount": {
+                  "currency_code": "PHP",
+                  "value": "100.00"
+                },
+                "paypal_fee": {
+                  "currency_code": "PHP",
+                  "value": "18.40"
+                },
+                "net_amount": {
+                  "currency_code": "PHP",
+                  "value": "81.60"
+                }
+              },
+              "links": [
+                {
+                  "href": "https://api.sandbox.paypal.com/v2/payments/captures/FAKE",
+                  "rel": "self",
+                  "method": "GET"
+                },
+                {
+                  "href": "https://api.sandbox.paypal.com/v2/payments/captures/FAKE/refund",
+                  "rel": "refund",
+                  "method": "POST"
+                },
+                {
+                  "href": "https://api.sandbox.paypal.com/v2/checkout/orders/FAKE",
+                  "rel": "up",
+                  "method": "GET"
+                }
+              ],
+              "create_time": "2026-11-03T06:01:56Z",
+              "update_time": "2026-11-03T06:01:56Z"
+            }
+          ]
+        }
+      }
+    ],
+    "payer": {
+      "name": {
+        "given_name": "Sandbox Person",
+        "surname": "Sandbox Person"
+      },
+      "email_address": "sandbox-user@example.test",
+      "payer_id": "ACCT_FAKE002",
+      "address": {
+        "country_code": "PH"
+      }
+    },
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v2/checkout/orders/FAKE",
+        "rel": "self",
+        "method": "GET"
+      }
+    ]
+  }
+}
