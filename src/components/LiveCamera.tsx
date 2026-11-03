@@ -12,7 +12,7 @@ const JPEG_QUALITY = 0.9;
 const LOCATION_TIMEOUT_MS = 5000;
 
 /** Resolves with a position, or with nulls on denial, timeout or no support. Never rejects. */
-function locate(): Promise<CaptureLocation> {
+export function locate(): Promise<CaptureLocation> {
   const none: CaptureLocation = { lat: null, lng: null };
   if (typeof navigator === "undefined" || !navigator.geolocation) return Promise.resolve(none);
   return new Promise((resolve) => {
@@ -32,7 +32,7 @@ function locate(): Promise<CaptureLocation> {
   });
 }
 
-function toJpeg(video: HTMLVideoElement): Promise<Blob | null> {
+export function toJpeg(video: HTMLVideoElement): Promise<Blob | null> {
   const w = video.videoWidth;
   const h = video.videoHeight;
   if (!w || !h) return Promise.resolve(null);
@@ -58,9 +58,15 @@ function stop(stream: MediaStream | null) {
 export function LiveCamera({
   onCapture,
   disabled = false,
+  onVideoReady,
+  hideShutter = false,
 }: {
   onCapture: (blob: Blob, where: CaptureLocation) => void | Promise<void>;
   disabled?: boolean;
+  /** Called with the playing video element once the camera is live, and with null when it stops. */
+  onVideoReady?: (video: HTMLVideoElement | null) => void;
+  /** Hides the shutter button, for callers that capture on their own. */
+  hideShutter?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -68,11 +74,16 @@ export function LiveCamera({
   const attempt = useRef(0);
   const [status, setStatus] = useState<Status>("idle");
   const [facing, setFacing] = useState<Facing>("environment");
+  const readyCb = useRef(onVideoReady);
+  useEffect(() => {
+    readyCb.current = onVideoReady;
+  });
 
   const start = useCallback(async (want: Facing) => {
     const mine = ++attempt.current;
     stop(streamRef.current);
     streamRef.current = null;
+    readyCb.current?.(null);
     if (!window.isSecureContext) return setStatus("insecure");
     if (!navigator.mediaDevices?.getUserMedia) return setStatus("nocamera");
     setStatus("starting");
@@ -90,6 +101,7 @@ export function LiveCamera({
       }
       setFacing(want);
       setStatus("ready");
+      if (video) readyCb.current?.(video);
     } catch (e) {
       if (mine !== attempt.current) return;
       const name = e instanceof DOMException ? e.name : "";
@@ -105,6 +117,7 @@ export function LiveCamera({
       attempt.current++;
       stop(streamRef.current);
       streamRef.current = null;
+      readyCb.current?.(null);
     },
     [],
   );
@@ -154,9 +167,11 @@ export function LiveCamera({
         )}
         {live && (
           <>
-            <button type="button" className="btn" onClick={shoot} disabled={disabled || status === "capturing"}>
-              {status === "capturing" ? "Taking photo" : "Take photo"}
-            </button>
+            {!hideShutter && (
+              <button type="button" className="btn" onClick={shoot} disabled={disabled || status === "capturing"}>
+                {status === "capturing" ? "Taking photo" : "Take photo"}
+              </button>
+            )}
             <button
               type="button"
               className="btn-quiet"
