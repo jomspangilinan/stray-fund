@@ -7,6 +7,7 @@ import {
   captureFromOrder,
   createDonationOrder,
   ForbiddenOrder,
+  TooManyOrders,
   CaptureMismatch,
   InvalidAmount,
   recordCapture,
@@ -71,6 +72,32 @@ describe("createDonationOrder", () => {
     await expect(createDonationOrder(u.id, amount, g)).rejects.toBeInstanceOf(InvalidAmount);
     expect(g.createOrder).not.toHaveBeenCalled();
     expect(await rows()).toHaveLength(0);
+  });
+
+  it("caps pending orders at 5 per user in 10 minutes, before calling PayPal", async () => {
+    const u = await makeDonor();
+    const other = await makeDonor();
+    const g = gw();
+    for (let i = 0; i < 5; i++) await makePendingOrder(u.id);
+    await expect(createDonationOrder(u.id, 10_000, g)).rejects.toBeInstanceOf(TooManyOrders);
+    expect(g.createOrder).not.toHaveBeenCalled();
+    // Another user is unaffected.
+    await expect(createDonationOrder(other.id, 10_000, g)).resolves.toBeDefined();
+  });
+
+  it("does not count old pending orders or captured ones", async () => {
+    const u = await makeDonor();
+    for (let i = 0; i < 4; i++) {
+      const { row } = await makePendingOrder(u.id);
+      await db
+        .update(donations)
+        .set({ createdAt: new Date(Date.now() - 11 * 60_000) })
+        .where(eq(donations.id, row.id));
+    }
+    const { orderId } = await makePendingOrder(u.id);
+    await recordCapture(captureFor(orderId));
+    await makePendingOrder(u.id);
+    await expect(createDonationOrder(u.id, 10_000, gw())).resolves.toBeDefined();
   });
 
   it("accepts exactly the minimum", async () => {

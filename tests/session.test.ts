@@ -207,6 +207,17 @@ describe("donation routes", () => {
     expect(d.status).toBe(401);
   });
 
+  it("create returns 429 after 5 pending orders in 10 minutes", async () => {
+    const res = await post({ username: "spammer_1" });
+    keepCookie(res);
+    const session = await getSession();
+    for (let i = 0; i < 5; i++) await makePendingOrder(session!.userId);
+    const out = await donationPost(
+      new Request("http://localhost/x", { method: "POST", body: JSON.stringify({ amount: 10_000 }) }),
+    );
+    expect(out.status).toBe(429);
+  });
+
   it("create rejects a bad amount with 400 before calling PayPal", async () => {
     keepCookie(await post({ username: "giver_1" }));
     for (const amount of [5_000, 100.5, "100"]) {

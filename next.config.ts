@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Stops `next dev` rewriting AGENTS.md.
+  agentRules: false,
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {

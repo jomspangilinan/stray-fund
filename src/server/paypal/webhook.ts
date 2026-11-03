@@ -47,6 +47,9 @@ export async function verifyWebhook(headers: Headers, rawBody: string): Promise<
     body,
     signal,
   });
+  // A 4xx means PayPal did not accept the verification request, so we cannot
+  // vouch for the event. 5xx is PayPal's fault and must be retried.
+  if (res.status >= 400 && res.status < 500) return false;
   if (!res.ok) throw new Error(`Webhook verification call failed: HTTP ${res.status}`);
   const out = (await res.json()) as { verification_status?: string };
   return out.verification_status === "SUCCESS";
@@ -56,14 +59,19 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" && v ? v : undefined;
 }
 
-function centavos(m: unknown): number | undefined {
-  const money = m as { currency_code?: unknown; value?: unknown } | undefined;
-  if (!money || money.currency_code !== CURRENCY || typeof money.value !== "string") return undefined;
-  try {
-    return fromPayPalValue(money.value);
-  } catch {
-    return undefined;
+/** Payouts money uses "currency"; Orders uses "currency_code". Accept both. */
+function centavos(m: unknown, what: string): number | undefined {
+  const money = m as { currency?: unknown; currency_code?: unknown; value?: unknown } | undefined;
+  const currency = money?.currency ?? money?.currency_code;
+  if (currency === CURRENCY && typeof money?.value === "string") {
+    try {
+      return fromPayPalValue(money.value);
+    } catch {
+      // fall through to the log
+    }
   }
+  console.error(`Unreadable ${what} on a payout event, recording none`);
+  return undefined;
 }
 
 async function applyEvent(tx: Tx, event: WebhookEvent): Promise<void> {
@@ -92,7 +100,7 @@ async function applyEvent(tx: Tx, event: WebhookEvent): Promise<void> {
     await applyPayoutStatusIn(tx, batchId, {
       itemStatus: str(r.transaction_status),
       itemId: str(r.payout_item_id),
-      fee: centavos(r.payout_item_fee),
+      fee: r.payout_item_fee === undefined ? undefined : centavos(r.payout_item_fee, "fee"),
       senderBatchId: str(r.sender_batch_id),
     });
   }

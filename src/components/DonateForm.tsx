@@ -77,21 +77,29 @@ export function DonateForm({ clientId, username }: { clientId: string; username:
 
   async function onApprove(data: { orderID: string }) {
     setOutcome({ kind: "confirming" });
-    const res = await fetch(`/api/donations/${encodeURIComponent(data.orderID)}/capture`, {
-      method: "POST",
-    });
-    const body = (await res.json().catch(() => ({}))) as {
-      status?: string;
-      gross?: number;
-      net?: number;
-      error?: string;
-    };
-    if (!res.ok) {
-      setOutcome({ kind: "error", message: body.error ?? "Could not confirm the payment" });
-    } else if (body.status === "captured" && typeof body.gross === "number" && typeof body.net === "number") {
-      setOutcome({ kind: "captured", gross: body.gross, net: body.net });
-    } else {
-      setOutcome({ kind: "waiting" });
+    try {
+      const res = await fetch(`/api/donations/${encodeURIComponent(data.orderID)}/capture`, {
+        method: "POST",
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        status?: string;
+        gross?: number;
+        net?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        setOutcome({ kind: "error", message: body.error ?? "Could not confirm the payment" });
+      } else if (body.status === "captured" && typeof body.gross === "number" && typeof body.net === "number") {
+        setOutcome({ kind: "captured", gross: body.gross, net: body.net });
+      } else {
+        setOutcome({ kind: "waiting" });
+      }
+    } catch {
+      // The connection dropped, so we do not know whether the payment went through.
+      setOutcome({
+        kind: "error",
+        message: "We lost the connection before PayPal confirmed your payment",
+      });
     }
   }
 
@@ -162,12 +170,12 @@ export function DonateForm({ clientId, username }: { clientId: string; username:
         )}
         {outcome.kind === "error" && (
           <p role="alert" className="note note-bad font-bold">
-            {outcome.message}. If PayPal took money, it will still be counted. Otherwise, try again.
+            {outcome.message}. Check your PayPal activity before paying again. If PayPal took the money, it will still be counted.
           </p>
         )}
       </div>
 
-      {valid && outcome.kind !== "confirming" ? (
+      {valid && outcome.kind !== "confirming" && outcome.kind !== "waiting" ? (
         clientId ? (
           <PayPalScriptProvider options={{ clientId, currency: CURRENCY, intent: "capture" }}>
             <PayPalButtons
@@ -191,7 +199,7 @@ export function DonateForm({ clientId, username }: { clientId: string; username:
         )
       ) : (
         <button className="btn" disabled>
-          {outcome.kind === "confirming" ? "Confirming" : "Choose an amount"}
+          {outcome.kind === "confirming" ? "Confirming" : outcome.kind === "waiting" ? "Waiting for PayPal" : "Choose an amount"}
         </button>
       )}
     </div>

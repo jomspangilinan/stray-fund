@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { describeError } from "@/server/errors";
 import { AuthError, requireRole } from "@/server/session";
 import {
   captureDonation,
@@ -26,7 +27,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ orderId: stri
       console.error("Capture mismatch", e.message);
       return NextResponse.json({ error: "The payment did not add up and was not recorded" }, { status: 502 });
     }
-    console.error("Capture failed", e);
+    console.error("Capture failed", describeError(e));
     return NextResponse.json({ error: "Could not confirm the payment" }, { status: 502 });
   }
 }

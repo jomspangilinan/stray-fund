@@ -1,15 +1,24 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closePool, db } from "../src/server/db/client";
-import { donations, wakeups, webhookEvents } from "../src/server/db/schema";
+import { readFileSync } from "node:fs";
+import { donations, payouts, wakeups, webhookEvents } from "../src/server/db/schema";
+import { addPayout, makeWorld } from "./helpers/payoutFixtures";
 import { clearPayPalTokenCache } from "../src/server/paypal/payouts";
 import { truncateAll } from "./helpers/db";
 import { captureEvent, makeDonor, makePendingOrder } from "./helpers/donationFixtures";
 
-const applyPayoutStatusIn = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock("../src/server/moneyGate", async (orig) => ({
-  ...(await orig<typeof import("../src/server/moneyGate")>()),
-  applyPayoutStatusIn,
-}));
+// A spy that still runs the real function, so tests can both inspect calls and see effects.
+const applyPayoutStatusIn = vi.hoisted(() => vi.fn());
+vi.mock("../src/server/moneyGate", async (orig) => {
+  const actual = await orig<typeof import("../src/server/moneyGate")>();
+  applyPayoutStatusIn.mockImplementation(actual.applyPayoutStatusIn);
+  return { ...actual, applyPayoutStatusIn };
+});
+
+/** The real sandbox payout item: payout_item_fee uses "currency", not "currency_code". */
+const PAYOUT_ITEM = JSON.parse(
+  readFileSync(new URL("./fixtures/paypal/payout-batch-PHP-SUCCESS-SUCCESS.json", import.meta.url), "utf8"),
+).body.items[0] as Record<string, unknown>;
 
 import { POST } from "../src/app/api/webhooks/paypal/route";
 
@@ -22,6 +31,7 @@ const SIG_HEADERS = {
 };
 
 let verifyStatus = "SUCCESS";
+let verifyHttp: number | "network" = 200;
 let verifyCalls: { url: string; body: string }[] = [];
 
 function stubPayPal() {
@@ -33,6 +43,8 @@ function stubPayPal() {
       }
       if (url.endsWith("/v1/notifications/verify-webhook-signature")) {
         verifyCalls.push({ url, body: String(init?.body) });
+        if (verifyHttp === "network") throw new TypeError("fetch failed");
+        if (verifyHttp !== 200) return Response.json({ name: "ERR" }, { status: verifyHttp });
         return Response.json({ verification_status: verifyStatus });
       }
       throw new Error(`Unexpected fetch ${url}`);
@@ -52,6 +64,7 @@ beforeEach(async () => {
   vi.stubEnv("PAYPAL_CLIENT_SECRET", "test-secret");
   vi.stubEnv("PAYPAL_WEBHOOK_ID", "WH-TEST");
   verifyStatus = "SUCCESS";
+  verifyHttp = 200;
   verifyCalls = [];
   applyPayoutStatusIn.mockClear();
   clearPayPalTokenCache();
@@ -90,6 +103,20 @@ describe("signature", () => {
       transmission_id: "tx-1",
       auth_algo: "SHA256withRSA",
     });
+  });
+
+  it("treats a 4xx from the verify call as a failed verification (400)", async () => {
+    verifyHttp = 401;
+    const res = await send(JSON.stringify({ id: "EV-1", event_type: "X" }));
+    expect(res.status).toBe(400);
+    expect(await eventRows()).toHaveLength(0);
+  });
+
+  it("keeps 500 for a 5xx from the verify call, and for a network error", async () => {
+    verifyHttp = 503;
+    expect((await send(JSON.stringify({ id: "EV-1", event_type: "X" }))).status).toBe(500);
+    verifyHttp = "network";
+    expect((await send(JSON.stringify({ id: "EV-1", event_type: "X" }))).status).toBe(500);
   });
 
   it("rejects with 400 when PAYPAL_WEBHOOK_ID is unset, and never calls PayPal", async () => {
@@ -164,25 +191,46 @@ describe("events", () => {
       JSON.stringify({
         id: "EV-P1",
         event_type: "PAYMENT.PAYOUTS-ITEM.SUCCEEDED",
-        resource: {
-          payout_batch_id: "BATCH-1",
-          payout_item_id: "ITEM-1",
-          sender_batch_id: "11111111-1111-1111-1111-111111111111",
-          transaction_status: "SUCCESS",
-          payout_item_fee: { currency_code: "PHP", value: "0.20" },
-        },
+        resource: { ...PAYOUT_ITEM, sender_batch_id: "11111111-1111-1111-1111-111111111111" },
       }),
     );
     expect(res.status).toBe(200);
     expect(applyPayoutStatusIn).toHaveBeenCalledTimes(1);
     const [, batchId, update] = applyPayoutStatusIn.mock.calls[0] as unknown as [unknown, string, object];
-    expect(batchId).toBe("BATCH-1");
+    expect(batchId).toBe("BATCH_FAKE001");
     expect(update).toEqual({
       itemStatus: "SUCCESS",
-      itemId: "ITEM-1",
+      itemId: "ITEM_FAKE002",
       fee: 20,
       senderBatchId: "11111111-1111-1111-1111-111111111111",
     });
+  });
+
+  it("a payout item event from the real fixture ends with payouts.fee = 20", async () => {
+    const w = await makeWorld();
+    const p = await addPayout(w, { amount: 1000, status: "sent", batchId: "BATCH_FAKE001" });
+    const res = await send(
+      JSON.stringify({
+        id: "EV-FEE",
+        event_type: "PAYMENT.PAYOUTS-ITEM.SUCCEEDED",
+        resource: { ...PAYOUT_ITEM, sender_batch_id: p.id },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const [row] = await db.select().from(payouts);
+    expect(row).toMatchObject({ status: "succeeded", fee: 20, paypalItemId: "ITEM_FAKE002" });
+  });
+
+  it("logs an unreadable fee instead of dropping it silently", async () => {
+    await send(
+      JSON.stringify({
+        id: "EV-BADFEE",
+        event_type: "PAYMENT.PAYOUTS-ITEM.SUCCEEDED",
+        resource: { ...PAYOUT_ITEM, payout_item_fee: { currency: "USD", value: "0.20" } },
+      }),
+    );
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("fee"));
+    expect(applyPayoutStatusIn.mock.calls[0][2]).toMatchObject({ fee: undefined });
   });
 
   it("returns 500 and keeps no dedupe row when the payout handler throws", async () => {

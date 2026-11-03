@@ -4,7 +4,7 @@ import {
   Environment,
   OrdersController,
 } from "@paypal/paypal-server-sdk";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { CURRENCY, MAX_DONATION, MIN_DONATION } from "@/lib/config";
 import { fromPayPalValue, toPayPalValue } from "@/lib/money";
 import { db, type Tx } from "../db/client";
@@ -15,6 +15,8 @@ import { enqueueWakeup } from "../wakeups";
 export type Donation = typeof donations.$inferSelect;
 
 export const PENDING = "pending";
+/** Unfinished orders one user may open in 10 minutes. */
+const MAX_PENDING_ORDERS = 5;
 
 type Money = { currency_code?: unknown; value?: unknown };
 
@@ -37,6 +39,12 @@ export class InvalidAmount extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidAmount";
+  }
+}
+export class TooManyOrders extends Error {
+  constructor() {
+    super("Too many unfinished donations. Wait a few minutes and try again.");
+    this.name = "TooManyOrders";
   }
 }
 export class CaptureMismatch extends Error {
@@ -117,6 +125,17 @@ export async function createDonationOrder(
   gw: OrdersGateway = sdkOrdersGateway,
 ): Promise<{ orderId: string }> {
   const gross = validateDonationAmount(amount);
+  const recent = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(donations)
+    .where(
+      and(
+        eq(donations.userId, userId),
+        eq(donations.status, PENDING),
+        gt(donations.createdAt, sql`now() - interval '10 minutes'`),
+      ),
+    );
+  if (recent[0].n >= MAX_PENDING_ORDERS) throw new TooManyOrders();
   const { orderId } = await gw.createOrder(gross);
   await db.insert(donations).values({
     userId,
