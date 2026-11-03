@@ -130,7 +130,7 @@ describe("the public agent feed", () => {
   it("the feed story names a person only when one signed off", () => {
     const pay = (status: string, signedOffByPerson: boolean) => feedStory({ action: "Vet first payment", status, signedOffByPerson });
     expect(pay("Paid", true)?.person).toBe("A caretaker signed it off.");
-    expect(pay("Paid", false)?.person).toBe("No sign-off was needed. It was within the spending rules.");
+    expect(pay("Paid", false)?.person).toBe("No caretaker signed it off.");
     expect(pay("Waiting for approval", false)?.person).toBe("Waiting for a caretaker to sign it off.");
     expect(pay("Refused by the rules", false)?.person).toBe("The spending rules stopped it.");
     expect(pay("Rejected", false)?.person).toBe("It was stopped and nothing was paid.");
