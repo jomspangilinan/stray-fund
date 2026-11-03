@@ -195,7 +195,7 @@ export async function processWakeup(w: Wakeup, deps: WorkerDeps = {}): Promise<v
     return;
   }
   console.log(
-    `[worker] ${w.kind} ${w.id} attempt ${w.attempts}: stop=${result.stop} actions=${result.actions.join(",") || "none"}`,
+    `[worker] ${w.kind} ${w.id} attempt ${w.attempts}: stop=${result.stop} actions=${result.actions.join(",") || "none"} tokens=${result.usage.input}/${result.usage.output}`,
   );
 
   try {

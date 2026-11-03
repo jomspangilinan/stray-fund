@@ -71,9 +71,12 @@ async function main() {
     }
     const html = await (await fetch(`${BASE}/cats/${cat.id}`)).text();
     if (!html.includes(`LeakCat ${tag}`)) { bad++; console.log("FAIL: seeded cat did not render, so the scan proved nothing"); }
+    const feed = await (await fetch(`${BASE}/agent`)).text();
+    if (!feed.includes("Leak check reason")) { bad++; console.log("FAIL: agent feed did not render the seeded action"); }
     const col = await (await fetch(`${BASE}/collection`, { headers: { cookie: `sf_session=${token}` } })).text();
     if (!col.includes(`LeakCat ${tag}`)) { bad++; console.log("FAIL: collection did not render the seeded cat"); }
   } finally {
+    await pool.query("delete from agent_actions where approved_by=$1", [donor.id]);
     await pool.query("delete from allocations where donation_id=$1", [don.id]);
     await pool.query("delete from donations where id=$1", [don.id]);
     await pool.query("delete from sightings where cat_id=$1", [cat.id]);

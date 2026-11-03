@@ -632,6 +632,7 @@ describe("runAgent against a scripted model", () => {
     const out = await runAgent(wakeup, deps(script));
 
     expect(out).toMatchObject({ actions: ["fund_next_cat"], finalText: "Mimi is funded.", stop: "end_turn" });
+    expect(out.usage).toMatchObject({ turns: 2, input: 2, output: 2 });
     expect(await catStatus(mimi.id)).toBe("funded");
   });
 
@@ -842,6 +843,23 @@ describe("toolkit", () => {
         context: { sandbox: true },
       },
     });
+  });
+
+  it("the real toolkit schemas are stable between runs and enforce the nested id pattern", async () => {
+    const definition = async () =>
+      JSON.stringify((await loadToolkitTools()).map((t) => (t as unknown as { input_schema: unknown }).input_schema));
+    const first = await definition();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(await definition()).toBe(first);
+    expect(first).not.toContain("default");
+    expect(first).not.toContain("$schema");
+
+    const tools = await loadToolkitTools();
+    const list = tools.find((t) => t.name === "list_transactions")!;
+    expect(() => list.parse({ transaction_id: "../../v1/x" })).toThrow();
+    expect(list.parse({ transaction_status: "S" })).toEqual({ transaction_status: "S" });
+    const order = tools.find((t) => t.name === "get_order")!;
+    expect(() => order.parse({ id: "../../x" })).toThrow();
   });
 
   const orderTool = (text: string) =>

@@ -16,7 +16,7 @@ export const SYSTEM_PROMPT = `You are the treasurer of a neighbourhood stray cat
 How to work:
 - Something has just happened. Check the current state with your tools before you act, because earlier events may already be handled.
 - After a donation or a new cat, read the pool and the waiting list, then fund cats in order while the pool can cover a care package.
-- After a payment event, read the open bookings and do what is due: pay a deposit on a confirmed booking with none, or release a balance once a receipt is verified and the deposit has succeeded.
+- After a booking or payment event, read the open bookings and do what is due: pay a deposit on a confirmed booking with none, or release a balance once a receipt is verified and the deposit has succeeded.
 - If there is nothing to do, say so in a sentence and stop.
 
 Who goes first:
@@ -54,7 +54,9 @@ export type AgentStop =
   | "tool_failure"
   | "other";
 
-export type AgentResult = { actions: string[]; finalText: string; stop: AgentStop };
+export type AgentUsage = { input: number; output: number; cacheRead: number; cacheWrite: number; turns: number };
+
+export type AgentResult = { actions: string[]; finalText: string; stop: AgentStop; usage: AgentUsage };
 
 export type AgentClient = Pick<Anthropic, "beta">;
 
@@ -105,6 +107,7 @@ export function eventNeedsPerson(event: WakeupEvent): boolean {
 const NEXT_STEP: Record<string, string> = {
   donation_captured: "Money has come in. See whether it can fund the next cat.",
   cat_queued: "A cat has joined the queue. See whether the pool can fund the next cat.",
+  booking_confirmed: "A vet visit is confirmed. See whether a deposit is due on the open bookings.",
   payout_status_changed: "A vet payment has changed. See whether anything is now due on the open bookings.",
 };
 
@@ -154,9 +157,11 @@ function textOf(message: { content: { type: string; text?: string }[] } | undefi
 export async function runAgent(wakeup: AgentWakeup, deps: AgentDeps = {}): Promise<AgentResult> {
   const consumeBudget = deps.consumeBudget ?? consumeAiBudget;
   const { tools, actions, state } = createAgentTools(deps);
+  const usage: AgentUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 };
   const finish = (stop: AgentStop, finalText: string): AgentResult => ({
     actions,
     finalText,
+    usage,
     stop: stop === "end_turn" && state.internalErrors > 0 ? "tool_failure" : stop,
   });
 
@@ -182,15 +187,18 @@ export async function runAgent(wakeup: AgentWakeup, deps: AgentDeps = {}): Promi
     { signal: deps.signal ?? AbortSignal.timeout(RUN_DEADLINE_MS) },
   );
 
-  let turns = 0;
   let last: Parameters<typeof textOf>[0];
   let lastStop: string | null = null;
   for await (const message of runner) {
-    turns++;
+    usage.turns++;
+    usage.input += message.usage.input_tokens;
+    usage.output += message.usage.output_tokens;
+    usage.cacheRead += message.usage.cache_read_input_tokens ?? 0;
+    usage.cacheWrite += message.usage.cache_creation_input_tokens ?? 0;
     last = message;
     lastStop = message.stop_reason;
     if (message.stop_reason !== "tool_use") break;
-    if (turns >= MAX_ITERATIONS) continue; // The runner runs this turn's tools, then stops.
+    if (usage.turns >= MAX_ITERATIONS) continue; // The runner runs this turn's tools, then stops.
     // Run this turn's tools now, since they were already paid for. The runner reuses the result.
     await runner.generateToolResponse();
     if (!(await consumeBudget())) return finish("budget", textOf(last));
