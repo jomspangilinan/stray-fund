@@ -1,6 +1,8 @@
 import { CURRENCY } from "@/lib/config";
 import { fromPayPalValue } from "@/lib/money";
 import { db, lockColony, type Tx } from "../db/client";
+import { e2eFakesEnabled } from "../e2e/guard";
+import { fakeVerifyWebhook } from "../e2e/paypal";
 import { webhookEvents } from "../db/schema";
 import { applyPayoutStatusIn } from "../moneyGate";
 import { accessToken, credentials } from "./payouts";
@@ -26,6 +28,7 @@ const HEADERS = {
  * With no PAYPAL_WEBHOOK_ID this refuses everything rather than skipping the check.
  */
 export async function verifyWebhook(headers: Headers, rawBody: string): Promise<boolean> {
+  if (e2eFakesEnabled()) return fakeVerifyWebhook(headers);
   const webhookId = process.env.PAYPAL_WEBHOOK_ID;
   if (!webhookId) {
     console.error("PAYPAL_WEBHOOK_ID is not set, rejecting webhook");

@@ -9,6 +9,8 @@ import { CURRENCY, MAX_DONATION, MIN_DONATION } from "@/lib/config";
 import { fromPayPalValue, toPayPalValue } from "@/lib/money";
 import { db, type Tx } from "../db/client";
 import { donations } from "../db/schema";
+import { e2eFakesEnabled } from "../e2e/guard";
+import { fakeOrdersGateway } from "../e2e/paypal";
 import { CAPTURED } from "../ledger";
 import { enqueueWakeup } from "../wakeups";
 
@@ -109,6 +111,11 @@ export const sdkOrdersGateway: OrdersGateway = {
   },
 };
 
+/** The real PayPal gateway, or the end-to-end test's fake. Production cannot reach the fake. */
+export function ordersGateway(): OrdersGateway {
+  return e2eFakesEnabled() ? fakeOrdersGateway : sdkOrdersGateway;
+}
+
 export function validateDonationAmount(amount: unknown): number {
   if (typeof amount !== "number" || !Number.isSafeInteger(amount)) {
     throw new InvalidAmount("Amount must be a whole number of centavos");
@@ -122,7 +129,7 @@ export function validateDonationAmount(amount: unknown): number {
 export async function createDonationOrder(
   userId: string,
   amount: unknown,
-  gw: OrdersGateway = sdkOrdersGateway,
+  gw: OrdersGateway = ordersGateway(),
 ): Promise<{ orderId: string }> {
   const gross = validateDonationAmount(amount);
   const recent = await db
@@ -226,7 +233,7 @@ export async function recordCapture(capture: PayPalCapture, tx?: Tx): Promise<Do
 export async function captureDonation(
   userId: string,
   orderId: string,
-  gw: OrdersGateway = sdkOrdersGateway,
+  gw: OrdersGateway = ordersGateway(),
 ): Promise<Donation> {
   const [row] = await db.select().from(donations).where(eq(donations.paypalOrderId, orderId));
   if (!row) throw new UnknownOrder(orderId);

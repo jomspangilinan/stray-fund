@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { payouts } from "../db/schema";
 import { approvePayout, rejectPayout, resolveNeedsReview, type GateResult } from "../moneyGate";
-import { restPayoutGateway, type PayoutGateway } from "../paypal/payouts";
+import { payoutGateway, type PayoutGateway } from "../paypal/payouts";
 import { audit, reqText, reqUuid, Refusal, type Handler } from "./shared";
 
 let override: PayoutGateway | null = null;
@@ -35,7 +35,7 @@ async function gate(run: () => Promise<GateResult>): Promise<GateResult> {
 
 export const payoutApprove: Handler = async (caretakerId, body) => {
   const payoutId = reqUuid(body, "payoutId", "The payout");
-  const r = await gate(() => approvePayout(payoutId, caretakerId, override ?? restPayoutGateway));
+  const r = await gate(() => approvePayout(payoutId, caretakerId, override ?? payoutGateway()));
   if (r.status === "rejected" && r.code) {
     throw new Refusal(409, `The spending rules refuse this payout now: ${r.message} Nothing was paid.`);
   }

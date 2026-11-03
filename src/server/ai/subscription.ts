@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { consumeAiBudget } from "./budget";
-import { resolveProvider, type AiResponse, type AiTransport } from "./client";
+import { e2eFakesEnabled } from "../e2e/guard";
+import { e2eTransport, resolveProvider, type AiResponse, type AiTransport } from "./client";
 import { DEFAULT_CLI_MODEL, runClaudeText } from "./cli";
 
 /**
@@ -298,5 +299,7 @@ export function createSubscriptionClient(
  * AI_PROVIDER rule as every other call, so production refuses claude-cli by throwing here.
  */
 export function treasurerClient(env: Record<string, string | undefined> = process.env): Anthropic | undefined {
+  // The end-to-end test's treasurer is the fake AI, behind the same real tool runner.
+  if (e2eFakesEnabled(env)) return createSubscriptionClient(e2eTransport);
   return resolveProvider(env) === "claude-cli" ? createSubscriptionClient() : undefined;
 }

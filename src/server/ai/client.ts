@@ -3,6 +3,7 @@ import type * as z from "zod/v4";
 import { buildBedrockParams, bedrockModel, createBedrockClient, type BedrockParams } from "./bedrock";
 import { DEFAULT_CLI_MODEL, runCli } from "./cli";
 import { consumeAiBudget } from "./budget";
+import { e2eFakesEnabled } from "../e2e/guard";
 import type { AiRequest, Effort, Result } from "./types";
 
 export type { Effort, Result };
@@ -50,8 +51,12 @@ export function resolveProvider(env: Record<string, string | undefined> = proces
   throw new Error("Unknown AI_PROVIDER");
 }
 
+/** The fake AI of the end-to-end test, loaded only when E2E_FAKES is on. Refused in production. */
+export const e2eTransport: AiTransport = async (params, signal) => (await import("../e2e/ai")).fakeAiTransport(params, signal);
+
 function bedrockTransport(): AiTransport {
   if (override) return override;
+  if (e2eFakesEnabled()) return e2eTransport;
   bedrockClient ??= createBedrockClient();
   const get = bedrockClient;
   return async (params) => (await get().messages.create(params)) as AiResponse;
@@ -97,7 +102,7 @@ export async function parseVision<T>(args: {
 }): Promise<Result<T>> {
   let provider: AiProvider;
   try {
-    provider = override ? "bedrock" : resolveProvider();
+    provider = override || e2eFakesEnabled() ? "bedrock" : resolveProvider();
   } catch (e) {
     logFailure(e);
     return { ok: false, reason: "unavailable" };

@@ -7,7 +7,7 @@ import { wakeups } from "../db/schema";
 import { describeError } from "../errors";
 import { reconcilePayouts, retryUnknownPayouts } from "../moneyGate";
 import { retryPendingEvidence } from "../vetFlow";
-import { restPayoutGateway } from "../paypal/payouts";
+import { payoutGateway } from "../paypal/payouts";
 import { isUuid } from "../public";
 import { fileReview } from "./review";
 import { payoutRetryBlocked } from "./tools";
@@ -265,7 +265,7 @@ async function isolated(name: string, job: () => Promise<unknown>): Promise<void
 
 /** Each job is isolated, so one failing never stops the others. */
 export async function runMaintenance(deps: WorkerDeps = {}): Promise<void> {
-  const gateway = deps.gateway ?? restPayoutGateway;
+  const gateway = deps.gateway ?? payoutGateway();
   await isolated("reconcile", deps.reconcile ?? (() => reconcilePayouts(gateway)));
   await isolated("payout retry", deps.retryUnknown ?? (() => retryUnknownPayouts(gateway)));
   await isolated("sighting retry", deps.retrySightings ?? retryPendingSightings);

@@ -1,5 +1,6 @@
 import type { BetaRunnableTool } from "@anthropic-ai/sdk/lib/tools/BetaRunnableTool";
 import { ToolError } from "@anthropic-ai/sdk/lib/tools/ToolError";
+import { e2eFakesEnabled } from "../e2e/guard";
 import { describeError } from "../errors";
 
 /** The only PayPal toolkit tools the agent may see. Every money action stays behind the gate. */
@@ -197,6 +198,8 @@ export function toolkitToClaudeTools(toolkit: ToolkitLike): BetaRunnableTool[] {
 export async function loadToolkitTools(
   opts: { importToolkit?: () => Promise<unknown> } = {},
 ): Promise<BetaRunnableTool[]> {
+  // The end-to-end test has no PayPal account to read from.
+  if (e2eFakesEnabled()) return [];
   try {
     const clientId = process.env.PAYPAL_CLIENT_ID;
     const clientSecret = process.env.PAYPAL_CLIENT_SECRET;

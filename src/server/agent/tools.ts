@@ -10,7 +10,7 @@ import { describeError } from "../errors";
 import { CONFIRMED_BOOKING } from "../guardrails";
 import { InsufficientFunds, allocateToCat, getPoolStatus } from "../ledger";
 import { BATCH_EXISTS_FLAG, requestPayout, type GateResult } from "../moneyGate";
-import { restPayoutGateway, type PayoutGateway } from "../paypal/payouts";
+import { payoutGateway, type PayoutGateway } from "../paypal/payouts";
 import { manilaDate } from "../public";
 import { isPlainText } from "../plainText";
 import { fileReview } from "./review";
@@ -239,7 +239,7 @@ function gateOutcome(gate: GateResult, amount: number): Outcome {
  * at worst ask for something the code then refuses.
  */
 export function createAgentTools(deps: AgentToolDeps = {}) {
-  const gateway = deps.gateway ?? restPayoutGateway;
+  const gateway = deps.gateway ?? payoutGateway();
   const now = deps.now ?? (() => new Date());
   const syncCat = deps.syncCat ?? syncCatForPayout;
   const actions: string[] = [];

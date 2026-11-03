@@ -122,7 +122,8 @@ export function createS3Storage(opts: S3Options = {}): Storage {
   };
 }
 
-export const LOCAL_DATA_DIR = path.join(process.cwd(), ".data");
+/** STORAGE_LOCAL_DIR lets the end-to-end test keep its photos apart from the developer's own. */
+export const LOCAL_DATA_DIR = process.env.STORAGE_LOCAL_DIR || path.join(process.cwd(), ".data");
 
 function localPath(dir: string, area: "private" | "public", key: string): string {
   const ok = area === "private" ? PRIVATE_KEY.test(key) : PUBLIC_KEY.test(key);

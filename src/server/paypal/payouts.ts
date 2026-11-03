@@ -1,5 +1,7 @@
 import { CURRENCY } from "@/lib/config";
 import { fromPayPalValue, toPayPalValue } from "@/lib/money";
+import { e2eFakesEnabled } from "../e2e/guard";
+import { fakePayoutGateway } from "../e2e/paypal";
 
 export type PayoutCreateInput = {
   /** Always the payout row id. PayPal treats it as the idempotency key. */
@@ -231,3 +233,8 @@ export const restPayoutGateway: PayoutGateway = {
     });
   },
 };
+
+/** The real PayPal gateway, or the end-to-end test's fake. Production cannot reach the fake. */
+export function payoutGateway(): PayoutGateway {
+  return e2eFakesEnabled() ? fakePayoutGateway : restPayoutGateway;
+}
