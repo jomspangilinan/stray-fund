@@ -39,6 +39,8 @@ export type CliExecOptions = {
   timeout: number;
   maxBuffer: number;
   killSignal: NodeJS.Signals;
+  /** Aborting kills the child. */
+  signal?: AbortSignal;
 };
 export type CliExec = (file: string, args: string[], opts: CliExecOptions) => Promise<{ stdout: string; stderr: string }>;
 
@@ -142,7 +144,7 @@ function promptFor(files: string[], text: string): string {
  * One bare call to the local `claude` CLI with no tools at all, run in a fresh empty directory.
  * Returns stdout. Throws on a timeout, a non-zero exit or a missing binary, with nothing quoted.
  */
-export async function runClaudeText(args: string[]): Promise<string> {
+export async function runClaudeText(args: string[], signal?: AbortSignal): Promise<string> {
   await acquire();
   let dir: string | null = null;
   try {
@@ -155,6 +157,7 @@ export async function runClaudeText(args: string[]): Promise<string> {
         timeout: CLI_TIMEOUT_MS,
         maxBuffer: CLI_MAX_OUTPUT_BYTES,
         killSignal: "SIGKILL",
+        ...(signal ? { signal } : {}),
       });
       return stdout;
     } catch (e) {
