@@ -6,7 +6,7 @@ import { BlockSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
 import { PageSwitch } from "@/components/PageSwitch";
 import { FUND_PAGES } from "@/lib/nav";
-import { conservation } from "@/lib/impact";
+import { barParts, conservation } from "@/lib/impact";
 import { moneyIsTest } from "@/lib/config";
 import { formatPeso } from "@/lib/money";
 import { getImpact } from "@/server/impact";
@@ -17,8 +17,9 @@ async function Impact() {
   await connection();
   const impact = await getImpact();
   const c = conservation(impact.pool);
+  const bar = barParts(c);
   const counts: [string, number][] = [
-    ["Cats neutered", impact.catsNeutered],
+    ["Cats fixed", impact.catsNeutered],
     ["Vaccinated", impact.catsVaccinated],
     ["Dewormed", impact.catsDewormed],
     ["Adopted", impact.catsAdopted],
@@ -31,20 +32,38 @@ async function Impact() {
         <h2 id="adds-up" className="h2">
           Where every peso went
         </h2>
-        <p className="mt-2 text-lg font-bold leading-snug">{c.text}</p>
+        {bar && (
+          <>
+            <div className="mt-3 flex h-6 gap-0.5 overflow-hidden rounded-in" role="img" aria-label={bar.map((b) => `${b.label} ${formatPeso(b.amount)}`).join(", ")}>
+              {bar.map((b) => (
+                <span key={b.key} className={`bar-${b.key}`} style={{ flexGrow: b.amount, flexBasis: 0 }} />
+              ))}
+            </div>
+            <ul className="mt-3 grid gap-2">
+              {bar.map((b) => (
+                <li key={b.key} className="flex items-center gap-3">
+                  <span aria-hidden="true" className={`bar-${b.key} h-4 w-4 flex-none rounded-[4px]`} />
+                  <span className="flex-1">{b.label}</span>
+                  <span className="font-extrabold tabular-nums">{formatPeso(b.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <p className="mt-4 font-bold leading-snug">{c.text}</p>
         {c.balanced ? (
-          <p className="note note-ok mt-3">This adds up to the centavo, across every donation and payout.</p>
+          <p className="note note-ok mt-3">This adds up exactly, across every donation and payout.</p>
         ) : (
           <p role="alert" className="note note-bad mt-3 font-bold">
             These figures do not add up. Please tell a caretaker.
           </p>
         )}
         <p className="small soft mt-3">
-          Held for cats is money on its way to a vet
-          {impact.pool.reservedPayouts > 0 ? ` (${formatPeso(impact.pool.reservedPayouts)} right now)` : ""}.
+          Set aside for cats is money kept for vet visits
+          {impact.pool.reservedPayouts > 0 ? `, ${formatPeso(impact.pool.reservedPayouts)} of it on its way to a vet right now` : ""}.
         </p>
         <Link href="/ledger" className="link mt-1">
-          See every donation and payout
+          See every donation and payment
         </Link>
       </section>
 
@@ -62,7 +81,7 @@ async function Impact() {
         </dl>
         <p className="mt-3 soft">
           {impact.catsNeuteredByFund.toLocaleString("en-US")} by the fund.{" "}
-          {impact.alreadyNeutered.toLocaleString("en-US")} {impact.alreadyNeutered === 1 ? "was" : "were"} already neutered when found, as a caretaker confirmed.
+          {impact.alreadyNeutered.toLocaleString("en-US")} {impact.alreadyNeutered === 1 ? "was" : "were"} already fixed when found, as a caretaker confirmed. Fixed means spayed or neutered.
         </p>
       </section>
 

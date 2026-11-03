@@ -321,21 +321,19 @@ a.row:active,
   color: var(--danger);
 }
 
-/* Progress shown as segments plus words. The bar is only a picture of the words. */
-.steps {
-  display: flex;
-  gap: 3px;
-}
-.steps i {
-  width: 14px;
-  height: 5px;
-  border-radius: 2px;
-  background: var(--bar-off);
-  opacity: 0.45;
-}
-.steps i.on {
+/* The four parts of "Where every peso went". Each also has a word and an amount beside it. */
+.bar-vets {
   background: var(--main);
-  opacity: 1;
+}
+.bar-aside {
+  background: var(--bar-off);
+}
+.bar-free {
+  background: var(--pale);
+  box-shadow: inset 0 0 0 1px var(--bar-off);
+}
+.bar-fees {
+  background: var(--ink);
 }
 
 /* Loading */

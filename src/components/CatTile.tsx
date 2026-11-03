@@ -6,7 +6,6 @@ const NEEDS_FUNDING = "Waiting for funding";
 
 /** A big cat picture with a name, a status and one short line. Public data only. */
 export function CatTile({ cat, line }: { cat: PublicCat; line?: React.ReactNode }) {
-  const done = cat.journey.filter((s) => s.done).length;
   return (
     <li className="tile">
       <Link href={`/cats/${cat.id}`} className="press block">
@@ -18,7 +17,7 @@ export function CatTile({ cat, line }: { cat: PublicCat; line?: React.ReactNode 
           <span className={`tag max-w-full !whitespace-normal ${cat.statusLabel === NEEDS_FUNDING ? "tag-pop" : ""}`}>
             {cat.statusLabel === NEEDS_FUNDING ? "Needs funding" : cat.statusLabel}
           </span>
-          <span className="small soft">{line ?? `${done} of ${cat.journey.length} steps`}</span>
+          {line && <span className="small soft">{line}</span>}
         </span>
       </Link>
     </li>

@@ -13,7 +13,7 @@ import { getVetBooking, type VetBookingView, type VetPayout } from "@/server/vet
 
 export const metadata: Metadata = { title: "Booking | Stray Fund" };
 
-const PAYOUT_KIND: Record<string, string> = { deposit: "Deposit", balance: "Balance" };
+const PAYOUT_KIND: Record<string, string> = { deposit: "First payment", balance: "Final payment" };
 const PAYOUT_STATUS: Record<string, string> = {
   awaiting_approval: "Waiting for a caretaker",
   queued: "Sending",
@@ -32,7 +32,7 @@ const VERIFICATION: Record<string, string> = {
 };
 
 function Payouts({ payouts }: { payouts: VetPayout[] }) {
-  if (payouts.length === 0) return <p className="mt-2 soft">No payments yet. The treasurer pays the deposit shortly after booking.</p>;
+  if (payouts.length === 0) return <p className="mt-2 soft">No payments yet. The fund helper sends the first payment shortly after booking.</p>;
   return (
     <ul className="mt-3 grid gap-3">
       {payouts.map((p, i) => (
@@ -53,7 +53,7 @@ function EvidenceSection({ view }: { view: VetBookingView }) {
   return (
     <section className="mt-8" aria-labelledby="evidence">
       <h2 id="evidence" className="h2">
-        Evidence
+        Photos and receipt
       </h2>
       {receipt && receipt.verification !== "verified" && (
         <div className={`note mt-3 ${receipt.verification === "rejected" ? "note-bad" : ""}`}>
@@ -72,13 +72,13 @@ function EvidenceSection({ view }: { view: VetBookingView }) {
       <div className="mt-4">
         {evidence.state === "open" && <EvidenceForm bookingId={booking.id} catName={booking.catName} />}
         {evidence.state === "waiting_deposit" && (
-          <p className="note">The form opens once the deposit has reached you. PayPal can take a few minutes.</p>
+          <p className="note">The form opens once the first payment has reached you. PayPal can take a few minutes.</p>
         )}
         {evidence.state === "waiting_cat" && <p className="note">The form opens once the cat is in care.</p>}
         {evidence.state === "checking" && <p className="note">Your last submission is still being checked. You do not need to send it again.</p>}
         {evidence.state === "waiting_caretaker" && <p className="note">Waiting for a caretaker. You do not need to send anything again.</p>}
         {evidence.state === "verified" && (
-          <p className="note note-ok font-bold">Verified. The treasurer releases the balance next, and it shows above once sent.</p>
+          <p className="note note-ok font-bold">Verified. The fund helper sends the final payment next, and it shows above once sent.</p>
         )}
         {evidence.state === "closed" && <p className="note">This booking is closed.</p>}
       </div>

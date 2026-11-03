@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense } from "react";
 import { isDemoMode, moneyIsTest } from "@/lib/config";
 import { getSession } from "@/server/session";
@@ -18,7 +19,12 @@ async function Form() {
 export default function DonatePage() {
   return (
     <main>
-      <PageHead title="Donate">One shared fund pays vets to neuter strays.</PageHead>
+      <PageHead title="Donate">
+        All gifts go into one shared fund that pays vets to spay or neuter strays.{" "}
+        <Link href="/ledger" className="link !inline !min-h-0">
+          See the Fund
+        </Link>
+      </PageHead>
       <Suspense fallback={<BlockSkeleton label="Loading the donation form" />}>
         <Form />
       </Suspense>

@@ -6,12 +6,12 @@ export function GoalCard({ goal, href }: { goal: GoalProgress; href?: string }) 
   const body = (
     <>
       <p className="text-xl font-extrabold leading-tight tracking-tight">
-        {goal.neutered} of {goal.goal} cats neutered
+        {goal.neutered} of {goal.goal} cats fixed
       </p>
       <div
         className="goal-bar mt-3"
         role="progressbar"
-        aria-label="Cats neutered"
+        aria-label="Cats fixed"
         aria-valuemin={0}
         aria-valuemax={goal.goal}
         aria-valuenow={Math.min(goal.neutered, goal.goal)}

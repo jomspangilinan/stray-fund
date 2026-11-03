@@ -162,8 +162,8 @@ describe("the ear-tip answer stays private", () => {
 
 describe("public feed and audit of flag moves", () => {
   it("labels a confirmed ear-tip", () => {
-    const row = publicAgentAction({ id: "x", action: "ear_tip_confirmed", reason: "r", amount: null, status: "done", paypalRef: null, createdAt: new Date(), cat: null });
-    expect(row.action).not.toBe("Treasurer action");
+    const row = publicAgentAction({ id: "x", action: "ear_tip_confirmed", reason: "r", amount: null, status: "done", paypalRef: null, createdAt: new Date(), cat: null, signedOffByPerson: false });
+    expect(row.action).not.toBe("Fund helper action");
   });
 
   it("writes one audit row per real move, and none for who answered in public", async () => {

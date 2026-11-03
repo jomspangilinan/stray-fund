@@ -860,7 +860,7 @@ describe("audit rows on the public feed", () => {
       const [row] = await actionsNamed(name);
       const shown = feed.find((f) => f.id === row.id);
       expect(shown, name).toBeDefined();
-      expect(shown!.action, name).not.toBe("Treasurer action");
+      expect(shown!.action, name).not.toBe("Fund helper action");
       expect(shown!.status).toBe("Done");
     }
     expect(feed.length).toBeGreaterThanOrEqual(4);

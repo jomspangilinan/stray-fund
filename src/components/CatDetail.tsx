@@ -6,7 +6,6 @@ import type { NameControls } from "@/server/catNames";
 import { CatPhoto } from "./CatPhoto";
 import { EarTipAsk } from "./EarTipAsk";
 import type { EarTipAnswer } from "./EarTipChoice";
-import { Progress } from "./CatRow";
 import { JourneyTimeline, niceDate } from "./JourneyTimeline";
 import { CatNameEditor } from "./CatNameEditor";
 import { SaveImage } from "./SaveImage";
@@ -57,7 +56,6 @@ export function CatDetail({
         <p className="mt-1 soft">
           {cat.sex}, {cat.statusLabel.toLowerCase()}
         </p>
-        <Progress cat={cat} />
         {needsFunding && (
           <div className="mt-3 grid gap-1">
             <Link href="/donate" className="btn-pop">

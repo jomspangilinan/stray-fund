@@ -91,10 +91,19 @@ describe("the public agent feed", () => {
       approvedBy: "someone",
     } as never);
     expect(Object.keys(out).sort()).toEqual(
-      ["action", "amount", "cat", "date", "id", "paypalRef", "reason", "refused", "status"].sort(),
+      ["action", "amount", "cat", "date", "id", "paypalRef", "reason", "refused", "signedOffByPerson", "status"].sort(),
     );
-    expect(out.action).toBe("Treasurer action");
+    expect(out.action).toBe("Fund helper action");
     expect(out.status).toBe("Recorded");
+  });
+
+  it("says whether a person approved an action, never who", async () => {
+    const { caretaker } = await seed();
+    await db.update(agentActions).set({ approvedBy: null }).where(eq(agentActions.action, "payout_deposit"));
+    const rows = await listAgentActions();
+    expect(rows.find((r) => r.action === "Vet first payment")?.signedOffByPerson).toBe(false);
+    expect(rows.find((r) => r.cat === "Mimi")?.signedOffByPerson).toBe(true);
+    expect(JSON.stringify(rows)).not.toContain(caretaker.id);
   });
 
   it("an empty feed says so", () => {

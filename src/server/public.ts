@@ -278,8 +278,8 @@ export function publicLedgerRow(row: LedgerInput): PublicLedgerRow {
 
 const ACTION_LABEL: Record<string, string> = {
   fund_cat: "Funded a cat",
-  payout_deposit: "Vet deposit",
-  payout_balance: "Vet balance",
+  payout_deposit: "Vet first payment",
+  payout_balance: "Vet final payment",
   caretaker_review: "Asked a caretaker",
   payout_review_resolved: "Caretaker settled a payment",
   payout_note: "Caretaker added a note to a payment",
@@ -319,6 +319,8 @@ export type PublicAgentAction = {
   status: string;
   /** Whether the action was held back or went wrong, for styling only. */
   refused: boolean;
+  /** Only whether a person signed it off. Never who. */
+  signedOffByPerson: boolean;
   paypalRef: string | null;
   date: string;
   cat: string | null;
@@ -333,17 +335,19 @@ type AgentActionInput = {
   paypalRef: string | null;
   createdAt: Date;
   cat: string | null;
+  signedOffByPerson: boolean;
 };
 
 /** Never inputs, approver identities or gateway error text, which all live on the same row. */
 export function publicAgentAction(row: AgentActionInput): PublicAgentAction {
   return {
     id: row.id,
-    action: ACTION_LABEL[row.action] ?? "Treasurer action",
+    action: ACTION_LABEL[row.action] ?? "Fund helper action",
     reason: row.reason,
     amount: row.amount ?? null,
     status: ACTION_STATUS_LABEL[row.status] ?? "Recorded",
     refused: ["denied", "failed", "rejected"].includes(row.status),
+    signedOffByPerson: row.signedOffByPerson === true,
     paypalRef: row.paypalRef ?? null,
     date: manilaDate(row.createdAt),
     cat: row.cat ?? null,
@@ -355,7 +359,8 @@ const MAX_AGENT_ACTIONS = 100;
 /** Newest first. The cat comes from the action's payout, or for funding from its recorded id. */
 export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promise<PublicAgentAction[]> {
   const { rows } = await db.execute(sql`
-    select a.id, a.action, a.reason, a.amount, a.status, a.paypal_ref, a.created_at, c.name as cat
+    select a.id, a.action, a.reason, a.amount, a.status, a.paypal_ref, a.created_at, c.name as cat,
+           (a.approved_by is not null) as approved_by_person
     from agent_actions a
     left join payouts p on p.action_id = a.id
     left join cats c on c.id = coalesce(
@@ -376,6 +381,7 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
     paypal_ref: string | null;
     created_at: Date | string;
     cat: string | null;
+    approved_by_person: boolean;
   }[]).map((r) =>
     publicAgentAction({
       id: r.id,
@@ -386,6 +392,7 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
       paypalRef: r.paypal_ref,
       createdAt: new Date(r.created_at),
       cat: r.cat,
+      signedOffByPerson: r.approved_by_person === true,
     }),
   );
 }

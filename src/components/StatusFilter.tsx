@@ -6,7 +6,7 @@ const GROUPS = Object.keys(STATUS_GROUPS) as StatusGroup[];
 /** Filter links for the cat list. Each one is a plain link, so no script is needed. */
 export function StatusFilter({ current }: { current: StatusGroup | "all" | null }) {
   return (
-    <nav aria-label="Filter cats" className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]">
+    <nav aria-label="Filter cats" className="flex flex-wrap gap-2">
       {(["all", ...GROUPS] as const).map((g) => (
         <Link
           key={g}

@@ -43,7 +43,7 @@ export type Conservation = {
   parts: { donated: number; paypalFees: number; paidToVets: number; payoutFees: number; held: number; pool: number };
 };
 
-/** Donated = PayPal fees + paid to vets + payout fees + held for cats (in-flight included) + left in the pool. */
+/** Donated = PayPal fees + paid to vets + payout fees + set aside for cats (in-flight included) + still free. */
 export function conservation(p: PoolStatus): Conservation {
   const held = p.heldForCats + p.reservedPayouts;
   const parts = {
@@ -58,17 +58,36 @@ export function conservation(p: PoolStatus): Conservation {
   const text =
     `Donated ${formatPeso(parts.donated)} = PayPal fees ${formatPeso(parts.paypalFees)}` +
     ` + paid to vets ${formatPeso(parts.paidToVets)} + payout fees ${formatPeso(parts.payoutFees)}` +
-    ` + held for cats ${formatPeso(parts.held)} + left in the pool ${formatPeso(parts.pool)}` +
+    ` + set aside for cats ${formatPeso(parts.held)} + still free ${formatPeso(parts.pool)}` +
     (p.reversedGross > 0 ? `. Donated is after ${formatPeso(p.reversedGross)} that PayPal took back` : "") +
-    (parts.pool < 0 ? `. The pool is below zero because some of that money was already spent, so no new cat is funded until donations cover it` : "");
+    (parts.pool < 0 ? `. The fund is below zero because some of that money was already spent, so no new cat is funded until donations cover it` : "");
   return { text, balanced, parts };
+}
+
+export type BarPart = { key: "vets" | "aside" | "free" | "fees"; label: string; amount: number };
+
+/**
+ * The same figures as the sentence, in four groups for a bar. Fees are PayPal's and the payout fees together.
+ * Null when a part is below zero or nothing came in, because a bar cannot show that and the sentence says why.
+ * When it is not null the amounts add up to the donated total exactly.
+ */
+export function barParts(c: Conservation): BarPart[] | null {
+  const { donated, paypalFees, payoutFees, paidToVets, held, pool } = c.parts;
+  const parts: BarPart[] = [
+    { key: "vets", label: "Paid to vets", amount: paidToVets },
+    { key: "aside", label: "Set aside for cats", amount: held },
+    { key: "free", label: "Still free", amount: pool },
+    { key: "fees", label: "Fees", amount: paypalFees + payoutFees },
+  ];
+  if (donated <= 0 || parts.some((p) => p.amount < 0)) return null;
+  return c.balanced ? parts : null;
 }
 
 const TYPE_LABEL: Record<string, string> = {
   donation: "Donation",
   refund: "Refund",
-  vet_deposit: "Vet deposit",
-  vet_balance: "Vet balance",
+  vet_deposit: "First payment",
+  vet_balance: "Final payment",
 };
 
 const LEDGER_STATUS_LABEL: Record<string, string> = {

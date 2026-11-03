@@ -167,7 +167,7 @@ describe("a refund after the money was allocated", () => {
     expect(await db.select().from(allocations)).toHaveLength(1);
     // The Proof sentence says so in plain words and still adds up.
     expect(conservation(p).text).toContain("after ₱100.00 that PayPal took back");
-    expect(conservation(p).text).toContain("left in the pool -₱81.60");
+    expect(conservation(p).text).toContain("still free -₱81.60");
     expect(conservation(p).text).toContain("below zero");
 
     // New money arrives, but the pool is still short, so nothing new can be funded from the old gap.

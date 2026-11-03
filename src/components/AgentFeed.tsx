@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { feedHeadline, feedStory } from "@/lib/feedCopy";
 import { formatPeso } from "@/lib/money";
 import type { PublicAgentAction } from "@/server/public";
 
@@ -43,17 +44,25 @@ export function AgentFeed({ initial }: { initial: PublicAgentAction[] }) {
       {actions.length === 0 ? (
         <div className="card mt-5">
           <p className="font-bold">Nothing yet.</p>
-          <p className="mt-1 soft">The treasurer posts here as soon as money moves.</p>
+          <p className="mt-1 soft">The fund helper posts here as soon as money moves.</p>
         </div>
       ) : (
         <ul aria-live="polite" className="mt-5 grid gap-3">
-          {actions.map((a) => (
+          {actions.map((a) => {
+            const story = feedStory(a);
+            return (
             <li key={a.id} id={`a-${a.id}`} className="card scroll-mt-4">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-4">
-                <h2 className="h2">{a.cat ? `${a.action}: ${a.cat}` : a.action}</h2>
-                {a.amount !== null && <p className="text-lg font-extrabold">{formatPeso(a.amount)}</p>}
+              <div className="flex items-baseline justify-between gap-x-4">
+                <h2 className="h2 min-w-0">{feedHeadline(a)}</h2>
+                {a.amount !== null && <p className="flex-none text-lg font-extrabold tabular-nums">{formatPeso(a.amount)}</p>}
               </div>
               <p className="mt-2">{a.reason}</p>
+              {story && (
+                <ol className="small mt-3 grid gap-1 border-l-4 border-pale pl-3">
+                  <li>{story.ai}</li>
+                  {story.person && <li className="font-bold">{story.person}</li>}
+                </ol>
+              )}
               <p className="small soft mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className={`tag ${a.refused ? "tag-bad" : ""}`}>{a.status}</span>
                 <span>{a.date}</span>
@@ -61,13 +70,14 @@ export function AgentFeed({ initial }: { initial: PublicAgentAction[] }) {
                   <>
                     <span className="break-all">PayPal {a.paypalRef}</span>
                     <Link href={`/ledger?q=${encodeURIComponent(a.paypalRef)}`} className="font-bold text-main underline underline-offset-4">
-                      In the ledger
+                      See it in Money
                     </Link>
                   </>
                 )}
               </p>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </>

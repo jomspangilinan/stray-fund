@@ -16,11 +16,11 @@ const BOOKING_STATUS: Record<string, string> = { confirmed: "Confirmed", complet
 /** What happens next for a booking, in the vet's words. */
 const NEXT_STEP: Record<VetBookingRow["evidence"], string> = {
   open: "Send the receipt and a photo of the ear-tip.",
-  waiting_deposit: "Waiting for the deposit to reach you.",
+  waiting_deposit: "Waiting for the first payment to reach you.",
   waiting_cat: "Waiting for the cat to come in.",
   checking: "Being checked. Nothing to send.",
   waiting_caretaker: "Waiting for a caretaker. Nothing to send.",
-  verified: "Verified. The treasurer pays the balance next.",
+  verified: "Verified. The fund helper sends the final payment next.",
   closed: "Closed.",
 };
 

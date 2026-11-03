@@ -15,7 +15,7 @@ import {
 } from "../src/server/db/schema";
 import { getPoolStatus } from "../src/server/ledger";
 import { getImpact, getLedger } from "../src/server/impact";
-import { conservation, ledgerTotals } from "../src/lib/impact";
+import { barParts, conservation, ledgerTotals } from "../src/lib/impact";
 import { formatPeso } from "../src/lib/money";
 import { truncateAll } from "./helpers/db";
 
@@ -165,12 +165,25 @@ describe("conservation identity", () => {
     expect(c.balanced).toBe(true);
     expect(c.text).toBe(
       `Donated ${formatPeso(150_000)} = PayPal fees ${formatPeso(6_500)} + paid to vets ${formatPeso(25_000)}` +
-        ` + payout fees ${formatPeso(100)} + held for cats ${formatPeso(p.heldForCats + p.reservedPayouts)}` +
-        ` + left in the pool ${formatPeso(p.available)}`,
+        ` + payout fees ${formatPeso(100)} + set aside for cats ${formatPeso(p.heldForCats + p.reservedPayouts)}` +
+        ` + still free ${formatPeso(p.available)}`,
     );
     // 150,000 = 6,500 + 25,000 + 100 + (70,000 - 25,000) + 73,400
     expect(c.parts.held).toBe(45_000);
     expect(c.parts.pool).toBe(73_400);
+  });
+
+  it("the bar parts add up to the donated total exactly, and are withheld when a part is below zero", async () => {
+    await seedMix();
+    const c = conservation((await getImpact()).pool);
+    const bar = barParts(c)!;
+    expect(bar.map((b) => b.label)).toEqual(["Paid to vets", "Set aside for cats", "Still free", "Fees"]);
+    expect(bar.reduce((s, b) => s + b.amount, 0)).toBe(c.parts.donated);
+    const under = conservation({
+      grossIn: 1000, paypalFees: 0, vetPaid: 0, payoutFees: 0, heldForCats: 1100, reservedPayouts: 0, available: -100, reversedGross: 0,
+    });
+    expect(under.balanced).toBe(true);
+    expect(barParts(under)).toBeNull();
   });
 
   it("reports an imbalance instead of hiding it", () => {

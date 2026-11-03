@@ -19,7 +19,7 @@ export function Yard({ yard, intro = false }: { yard: PublicYard; intro?: boolea
       <div className="yard-goal">
         <div className="flex items-center justify-between gap-3">
           <h2 id="yard-title" className="yard-count">
-            {goal.neutered} of {goal.goal} neutered
+            {goal.neutered} of {goal.goal} fixed
           </h2>
           {total > 0 && (
             <Link href="/cats" className="link !text-white underline flex-none">
@@ -27,11 +27,11 @@ export function Yard({ yard, intro = false }: { yard: PublicYard; intro?: boolea
             </Link>
           )}
         </div>
-        {intro && <p className="yard-intro">Neighbours fund neutering for stray cats. The money is shown in the open.</p>}
+        {intro && <p className="yard-intro">Neighbours fund spay and neuter for stray cats. The money is shown in the open.</p>}
         <div
           className="goal-bar"
           role="progressbar"
-          aria-label="Cats neutered"
+          aria-label="Cats fixed"
           aria-valuemin={0}
           aria-valuemax={goal.goal}
           aria-valuenow={Math.min(goal.neutered, goal.goal)}

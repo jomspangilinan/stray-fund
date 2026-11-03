@@ -1,10 +1,11 @@
 "use client";
 
 import { PayPalButtons, PayPalScriptProvider } from "@paypal/react-paypal-js";
+import Link from "next/link";
 import { useId, useState } from "react";
 import { CURRENCY, MAX_DONATION, MIN_DONATION } from "@/lib/config";
 import { formatPeso, parsePesoInput } from "@/lib/money";
-import { feeNote } from "@/lib/moneyCopy";
+import { feeNote, testMoneyLine } from "@/lib/moneyCopy";
 import { SignInGate } from "./SignInGate";
 
 const PRESETS = [10_000, 50_000, 150_000] as const;
@@ -34,7 +35,7 @@ export function DonateForm({ clientId, username, demo = false, testMoney = true 
     return (
       <SignInGate demo={demo}>
         <p className="font-bold">Pick ₱100, ₱500, ₱1,500 or your own amount.</p>
-        <p className="soft">{testMoney ? "Pay with PayPal. Test money only. The Ledger shows where it goes." : "Pay with PayPal. The Ledger shows where it goes."}</p>
+        <p className="soft">{testMoney ? "Pay with PayPal. Test money only. The Fund pages show where it goes." : "Pay with PayPal. The Fund pages show where it goes."}</p>
       </SignInGate>
     );
   }
@@ -42,10 +43,20 @@ export function DonateForm({ clientId, username, demo = false, testMoney = true 
   if (outcome.kind === "captured") {
     const fee = outcome.gross - outcome.net;
     return (
-      <div className="mt-6" role="status">
+      <div className="mt-4" role="status">
         <div className="card">
           <h2 className="title">Thank you, {username}.</h2>
-          <dl className="mt-4 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
+          <p className="mt-2 text-lg font-bold leading-snug">Your gift is in the shared fund.</p>
+          <p className="mt-1">Next, the fund helper picks a cat that needs a vet. You can watch it happen.</p>
+          <div className="mt-4 grid gap-3">
+            <Link href="/ledger" className="btn w-full">
+              See your gift in Money
+            </Link>
+            <Link href="/agent" className="btn-quiet w-full">
+              Watch the fund helper
+            </Link>
+          </div>
+          <dl className="mt-5 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
             <dt>You gave</dt>
             <dd className="text-right">{formatPeso(outcome.gross)}</dd>
             <dt>PayPal fee</dt>
@@ -56,7 +67,8 @@ export function DonateForm({ clientId, username, demo = false, testMoney = true 
             </dd>
           </dl>
         </div>
-        <button type="button" className="btn-quiet mt-4" onClick={() => setOutcome({ kind: "idle" })}>
+        {testMoneyLine(testMoney) && <p className="small soft mt-3">{testMoneyLine(testMoney)}</p>}
+        <button type="button" className="link mt-1 min-h-11" onClick={() => setOutcome({ kind: "idle" })}>
           Give again
         </button>
       </div>

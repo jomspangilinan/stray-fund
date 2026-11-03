@@ -203,7 +203,7 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     expect(fakePayPalCalls().filter((c) => c.call === "payout.create")).toHaveLength(0);
     await page.reload();
     await expect(page.getByText("Waiting for a caretaker").first()).toBeVisible();
-    await expect(page.getByText("The form opens once the deposit has reached you.")).toBeVisible();
+    await expect(page.getByText("The form opens once the first payment has reached you.")).toBeVisible();
     expect((await catRow(catId)).status).toBe("booked");
     await wakeupsSettled();
   });
@@ -327,11 +327,11 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     expect(rows.reduce((s, r) => s + (r.type === "donation" ? r.amount : 0), 0)).toBe(grossIn);
 
     await page.goto("/impact");
-    await expect(page.getByText("This adds up to the centavo, across every donation and payout.")).toBeVisible();
-    await expect(page.getByText(`Donated ${peso(grossIn)} = PayPal fees ${peso(fees)} + paid to vets ${peso(vetPaid)} + payout fees ${peso(payoutFees)} + held for cats ${peso(held)} + left in the pool ${peso(left)}`)).toBeVisible();
-    await expect(page.getByRole("term").filter({ hasText: "Cats neutered" }).locator("xpath=following-sibling::dd[1]")).toHaveText("1");
+    await expect(page.getByText("This adds up exactly, across every donation and payout.")).toBeVisible();
+    await expect(page.getByText(`Donated ${peso(grossIn)} = PayPal fees ${peso(fees)} + paid to vets ${peso(vetPaid)} + payout fees ${peso(payoutFees)} + set aside for cats ${peso(held)} + still free ${peso(left)}`)).toBeVisible();
+    await expect(page.getByRole("term").filter({ hasText: "Cats fixed" }).locator("xpath=following-sibling::dd[1]")).toHaveText("1");
     await page.goto("/ledger");
-    await expect(page.getByRole("heading", { name: "Ledger" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Money" })).toBeVisible();
   });
 
   await test.step("Helped shows the cat to the people whose money stayed with it, and Cats shows it neutered", async () => {
@@ -398,7 +398,7 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
       expect.objectContaining({ amount: -REFUND, fee: 0, status: "refunded", paypalId: "E2E-REFUND-1" }),
     ]);
     await page.goto("/impact");
-    await expect(page.getByText("This adds up to the centavo, across every donation and payout.")).toBeVisible();
+    await expect(page.getByText("This adds up exactly, across every donation and payout.")).toBeVisible();
     await expect(page.getByText(`Donated ${peso(grossIn)} = PayPal fees ${peso(fees)}`, { exact: false })).toBeVisible();
     await expect(page.getByText(`${peso(REFUND)} that PayPal took back`, { exact: false })).toBeVisible();
   });

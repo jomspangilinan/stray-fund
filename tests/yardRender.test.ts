@@ -97,7 +97,7 @@ describe("Yard", () => {
 
   it("reads the goal from real counts and keeps the donate-free picture decorative", () => {
     const html = renderToStaticMarkup(createElement(Yard, { yard: yard([cat("11111111-1111-4111-8111-111111111111", "Mimi", a)]) }));
-    expect(html).toContain("4 of 30 neutered");
+    expect(html).toContain("4 of 30 fixed");
     expect(html).toContain('role="progressbar"');
     expect(html).toContain('aria-valuenow="4"');
     expect(html).toContain('class="yard-art" aria-hidden="true"');

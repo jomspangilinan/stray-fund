@@ -37,26 +37,29 @@ export function MissionList({ missions }: { missions: Mission[] }) {
     <ul className="list">
       {missions.map((m) => (
         <li key={`${m.kind}-${m.catId}`}>
-          <div className="row">
-            <Link href={`/cats/${m.catId}`} className="relative h-20 w-20 flex-none overflow-hidden rounded-out" aria-label={`Open ${nameOf(m)}'s card`}>
+          <div className="row press relative">
+            <span className="relative h-20 w-20 flex-none overflow-hidden rounded-out">
               <CatPhoto url={m.photoUrl} name={nameOf(m)} sizes="80px" />
-            </Link>
+            </span>
             <div className="min-w-0 flex-1">
-              <p className="font-bold leading-tight">{m.title}</p>
+              {/* The whole row opens the cat: this link stretches over it, and the buttons sit above it. */}
+              <Link href={`/cats/${m.catId}`} className="block font-bold leading-tight after:absolute after:inset-0">
+                {m.title}
+              </Link>
               <p className="small soft">{note[m.catId] ?? m.detail}</p>
             </div>
             {m.action === "spot" ? (
-              <Link href="/spot" className="btn-quiet !min-h-11 flex-none">
+              <Link href="/spot" className="btn-quiet relative z-10 !min-h-11 flex-none">
                 Spot
               </Link>
             ) : m.action === "card" ? (
-              <Link href={`/cats/${m.catId}`} className="btn-quiet !min-h-11 flex-none">
+              <span aria-hidden="true" className="btn-quiet !min-h-11 flex-none">
                 Open
-              </Link>
+              </span>
             ) : (
               <button
                 type="button"
-                className="btn-quiet !min-h-11 flex-none"
+                className="btn-quiet relative z-10 !min-h-11 flex-none"
                 onClick={async () => {
                   const r = await shareCard(m.catId, nameOf(m));
                   if (r === "copied") setNote((n) => ({ ...n, [m.catId]: "Link copied." }));

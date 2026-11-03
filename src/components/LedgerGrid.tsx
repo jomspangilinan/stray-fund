@@ -17,6 +17,7 @@ import {
 import {
   csvPesos,
   csvSafe,
+  IN_FLIGHT,
   isDonationRow,
   isProblemStatus,
   ledgerStatusLabel,
@@ -59,7 +60,10 @@ const theme = themeQuartz.withParams({
 });
 
 type Row = PublicLedgerRow;
-type GridRow = Row & { pinnedLabel?: string };
+type GridRow = Row;
+
+/** A payout that has not reached the vet yet. It reads as waiting, not as money already spent. */
+const isPending = (r: Row) => !isDonationRow(r) && (IN_FLIGHT as readonly string[]).includes(r.status);
 
 function subscribe(cb: () => void) {
   const m = window.matchMedia(PHONE);
@@ -78,7 +82,7 @@ function StatusTag({ status }: { status: string }) {
 }
 
 function CatCell({ data }: ICellRendererParams<GridRow>) {
-  if (!data?.cat || !data.catId) return data?.pinnedLabel ? null : <span className="soft">-</span>;
+  if (!data?.cat || !data.catId) return <span className="soft">-</span>;
   return (
     <Link href={`/cats/${data.catId}`} className="font-bold text-main underline underline-offset-4">
       {data.cat}
@@ -89,7 +93,7 @@ function CatCell({ data }: ICellRendererParams<GridRow>) {
 const amountText = (r: GridRow, which: "amount" | "fee") => {
   const v = which === "amount" ? r.amount : r.fee;
   if (v === null) return "";
-  return !r.pinnedLabel && !isDonationRow(r) && which === "amount" ? `-${formatPeso(v)}` : formatPeso(v);
+  return !isDonationRow(r) && !isPending(r) && which === "amount" ? `-${formatPeso(v)}` : formatPeso(v);
 };
 
 function NoRows() {
@@ -117,7 +121,7 @@ function Detail({ row, onClose }: { row: Row | null; onClose: () => void }) {
     }
   };
 
-  const out = row ? !isDonationRow(row) : false;
+  const out = row ? !isDonationRow(row) && !isPending(row) : false;
   return (
     <dialog
       ref={ref}
@@ -158,7 +162,7 @@ function Detail({ row, onClose }: { row: Row | null; onClose: () => void }) {
             )}
             {row.reason && (
               <div>
-                <dt className="small soft">Why the treasurer did this</dt>
+                <dt className="small soft">Why the fund helper did this</dt>
                 <dd>{row.reason}</dd>
               </div>
             )}
@@ -227,8 +231,16 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
         flex: phone ? 1 : 0,
         minWidth: 120,
         width: 130,
-        valueGetter: (p) => p.data?.pinnedLabel ?? (p.data ? typeLabel(p.data.type) : ""),
-        cellClass: (p) => (p.data?.pinnedLabel ? "font-bold" : ""),
+        valueGetter: (p) => (p.data ? typeLabel(p.data.type) : ""),
+        cellRenderer: (p: ICellRendererParams<GridRow>) =>
+          p.data && isPending(p.data) ? (
+            <span className="flex flex-col justify-center leading-tight">
+              <span>{typeLabel(p.data.type)}</span>
+              <span className="text-xs font-bold text-soft">{ledgerStatusLabel(p.data.status)}</span>
+            </span>
+          ) : (
+            typeLabel(p.data?.type ?? "")
+          ),
       },
       {
         colId: "cat",
@@ -248,7 +260,7 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
         valueGetter: (p) => (p.data ? p.data.amount / 100 : null),
         valueFormatter: (p) => (p.data ? amountText(p.data, "amount") : ""),
         getQuickFilterText: (p) => (p.data ? `${amountText(p.data, "amount")} ${p.data.amount / 100}` : ""),
-        cellClass: "tabular-nums font-bold",
+        cellClass: (p) => (p.data && isPending(p.data) ? "tabular-nums font-bold text-soft" : "tabular-nums font-bold"),
       },
       {
         colId: "fee",
@@ -267,8 +279,8 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
         headerName: "Status",
         width: 140,
         hide: phone,
-        valueGetter: (p) => (p.data && !p.data.pinnedLabel ? ledgerStatusLabel(p.data.status) : ""),
-        cellRenderer: (p: ICellRendererParams<GridRow>) => (p.data && !p.data.pinnedLabel ? <StatusTag status={p.data.status} /> : null),
+        valueGetter: (p) => (p.data ? ledgerStatusLabel(p.data.status) : ""),
+        cellRenderer: (p: ICellRendererParams<GridRow>) => (p.data ? <StatusTag status={p.data.status} /> : null),
       },
       { colId: "who", headerName: "Who", field: "who", width: 150, hide: phone },
       { colId: "reason", headerName: "Why", field: "reason", flex: 1, minWidth: 160, hide: phone },
@@ -289,15 +301,7 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
     setShown(visible);
   }, []);
 
-  const pinned = useMemo<GridRow[]>(() => {
-    const t = ledgerTotals(shown);
-    const line = (pinnedLabel: string, amount: number, fee: number | null): GridRow => ({
-      pinnedLabel, date: "", type: "", amount, fee, cat: null, catId: null, reason: null, paypalId: null, status: "", who: null,
-    });
-    const out = [line("Received", t.donated, t.paypalFees), line("Paid to vets", t.paidToVets, t.payoutFees)];
-    if (t.inFlight > 0) out.push(line("On its way", t.inFlight, null));
-    return out;
-  }, [shown]);
+  const totals = useMemo(() => ledgerTotals(shown), [shown]);
 
   const onReady = (e: GridReadyEvent<GridRow>) => {
     apiRef.current = e.api;
@@ -305,7 +309,7 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
   };
 
   const openRow = (data: GridRow | undefined) => {
-    if (data && !data.pinnedLabel) setOpen(data);
+    if (data) setOpen(data);
   };
   const onRowClicked = (e: RowClickedEvent<GridRow>) => {
     if ((e.event?.target as HTMLElement | null)?.closest("a")) return;
@@ -322,7 +326,6 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
     apiRef.current?.exportDataAsCsv({
       fileName: "stray-fund-ledger.csv",
       allColumns: true,
-      skipPinnedBottom: true,
       processCellCallback: (p) => {
         const r = p.node?.data;
         if (!r) return "";
@@ -342,10 +345,29 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
     });
 
   return (
-    <section aria-label="Ledger" className="mt-5 lg:-mx-16 xl:-mx-44">
-      <div className="flex flex-wrap items-center gap-2">
+    <section aria-label="Money" className="mt-5 lg:-mx-16 xl:-mx-44">
+      <dl className="grid grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-x-3 gap-y-4" aria-label="Totals">
+        <div>
+          <dt className="small soft">Received</dt>
+          <dd className="text-lg font-extrabold tabular-nums leading-tight">{formatPeso(totals.donated)}</dd>
+          <dd className="small soft max-sm:hidden">PayPal fees {formatPeso(totals.paypalFees)}</dd>
+        </div>
+        <div>
+          <dt className="small soft">Paid to vets</dt>
+          <dd className="text-lg font-extrabold tabular-nums leading-tight">{formatPeso(totals.paidToVets)}</dd>
+          <dd className="small soft max-sm:hidden">Fees {formatPeso(totals.payoutFees)}</dd>
+        </div>
+        {totals.inFlight > 0 && (
+          <div>
+            <dt className="small soft">On its way</dt>
+            <dd className="text-lg font-extrabold tabular-nums leading-tight">{formatPeso(totals.inFlight)}</dd>
+            <dd className="small soft max-sm:hidden">Not paid yet</dd>
+          </div>
+        )}
+      </dl>
+      <div className="mt-5 flex flex-wrap items-center gap-2">
         <label className="min-w-0 flex-1 basis-56">
-          <span className="sr-only">Search the ledger</span>
+          <span className="sr-only">Search the money list</span>
           <input
             type="search"
             value={quick}
@@ -364,7 +386,7 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
       </p>
       {stale && (
         <p role="status" className="note note-bad mt-2 font-bold">
-          Could not refresh the ledger. What you see may be out of date, and we will keep trying.
+          Could not refresh the money list. What you see may be out of date, and we will keep trying.
         </p>
       )}
       <div className="mt-2 h-[clamp(24rem,calc(100dvh-15rem),36rem)] max-w-full overflow-hidden rounded-out">
@@ -375,7 +397,6 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
           defaultColDef={defaultColDef}
           quickFilterText={quick}
           includeHiddenColumnsInQuickFilter
-          pinnedBottomRowData={pinned}
           onGridReady={onReady}
           onModelUpdated={(e) => refresh(e.api)}
           onRowClicked={onRowClicked}

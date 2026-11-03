@@ -8,7 +8,6 @@ import { MissionList } from "@/components/MissionList";
 import { PageHead } from "@/components/PageHead";
 import { PageSwitch } from "@/components/PageSwitch";
 import { HELPED_PAGES } from "@/lib/nav";
-import { COLONY } from "@/lib/config";
 import { getGoalProgress, getMissions } from "@/server/public";
 import { getSession } from "@/server/session";
 
@@ -23,9 +22,8 @@ async function Missions() {
       <div className="mt-4">
         <GoalCard goal={goal} />
       </div>
-      <h2 className="h2 mt-8">{COLONY.area_name}</h2>
       {missions.length === 0 ? (
-        <div className="card mt-3">
+        <div className="card mt-6">
           <p className="font-bold">No missions right now</p>
           <Link href="/spot" className="btn mt-4">
             Spot a cat
@@ -33,7 +31,7 @@ async function Missions() {
         </div>
       ) : (
         <>
-          <p className="small soft mt-1">Picked from who needs help most.</p>
+          <h2 className="h2 mt-8">Who needs help most</h2>
           <div className="mt-3">
             <MissionList missions={missions} />
           </div>
