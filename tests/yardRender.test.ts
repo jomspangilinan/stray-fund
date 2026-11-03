@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { CatAvatar } from "../src/components/CatAvatar";
 import { Yard } from "../src/components/Yard";
-import { AVATAR_PATTERNS, EYE, FUR, catAvatar, type Avatar } from "../src/lib/avatar";
+import { AVATAR_PATTERNS, EYE, FUR, RIBBON, catAvatar, type Avatar } from "../src/lib/avatar";
 import type { YardCat } from "../src/lib/yard";
 import type { PublicYard } from "../src/server/public";
 
@@ -16,6 +16,7 @@ const cat = (id: string, name: string, avatar: Avatar, group: YardCat["group"] =
   statusLabel: group === "waiting" ? "Waiting for funding" : "Neutered",
   avatar,
   marks: [],
+  female: false,
 });
 const yard = (cats: YardCat[], stage: PublicYard["stage"] = 1): PublicYard => ({ cats, total: cats.length, stage, goal });
 
@@ -29,9 +30,28 @@ describe("CatAvatar", () => {
       expect(html).toContain(FUR.ginger);
       for (const m of html.match(/#[0-9a-fA-F]{6}/g) ?? []) {
         // Either a palette colour or one of the fixed drawing colours, never anything else.
-        expect(/^#(e7a3a0|12352a|df6f69|f2c54f|d98585|5b4a44)$/i.test(m) || hexes.has(m.toLowerCase())).toBe(true);
+        expect(/^#(e7a3a0|12352a|df6f69|f2c54f|d98585|5b4a44)$/i.test(m) || m.toLowerCase() === RIBBON || hexes.has(m.toLowerCase())).toBe(true);
       }
     }
+  });
+
+  it("draws a ribbon only when told she is a girl, never for anything else, and nothing but a flag reaches it", () => {
+    const a: Avatar = { pattern: "tabby", base: "brown", accent: "ginger" };
+    const draw = (props: Record<string, unknown>) => renderToStaticMarkup(createElement(CatAvatar, { avatar: a, id: "cat-1", ...props }));
+    expect(draw({})).not.toContain(RIBBON);
+    expect(draw({ ribbon: false })).not.toContain(RIBBON);
+    const girl = draw({ ribbon: true });
+    expect(girl).toContain(RIBBON);
+    expect(girl).not.toContain("avatar-ribbon-pop");
+    // A collar and a ribbon are different colours and can sit together.
+    const both = draw({ ribbon: true, marks: ["collar"] });
+    expect(both).toContain(RIBBON);
+    expect(both).toContain("#df6f69");
+    // Only the pop on the reveal carries the animation class.
+    expect(draw({ ribbon: true, ribbonPop: true })).toContain("avatar-ribbon-pop");
+    expect(draw({ ribbon: false, ribbonPop: true })).not.toContain(RIBBON);
+    // Text where a flag should be draws nothing from the text.
+    expect(draw({ ribbon: "<script>" })).not.toContain("script");
   });
 
   it("draws the same cat for the same id and shows the tail, eye and face details from the id", () => {

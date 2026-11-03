@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AVATAR_PATTERNS, EYE, FACES, FUR, NEUTRAL_AVATAR, TAILS, catAvatar, catDetails, parseAvatar } from "../src/lib/avatar";
+import { AVATAR_PATTERNS, EYE, FACES, FUR, NEUTRAL_AVATAR, RIBBON, RIBBON_EDGE, TAILS, catAvatar, catDetails, parseAvatar } from "../src/lib/avatar";
 
 const FUR_KEYS = Object.keys(FUR);
 
@@ -132,6 +132,42 @@ describe("catDetails", () => {
         expect(catDetails(id, p).face).toBe("none");
       }
       expect(catDetails(id, "patched").face).not.toBe("blaze");
+    }
+  });
+});
+
+describe("the ribbon", () => {
+  const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const lum = (hex: string) => {
+    const [r, g, b] = rgb(hex).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a: string, b: string) => {
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const hue = (hex: string) => {
+    const [r, g, b] = rgb(hex);
+    const max = Math.max(r, g, b);
+    const d = max - Math.min(r, g, b);
+    const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+  };
+
+  it("is one fixed colour from the tables, and an edge, both plain hex", () => {
+    expect(RIBBON).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(RIBBON_EDGE).toBe(FUR.white);
+  });
+
+  it("is clearly not the vaccinated collar red, and not a coat colour", () => {
+    const diff = Math.abs(hue(RIBBON) - hue("#df6f69"));
+    expect(Math.min(diff, 360 - diff)).toBeGreaterThan(90);
+    expect(Object.values(FUR)).not.toContain(RIBBON);
+  });
+
+  it("can be read on every coat: the fill or its edge stands out from each fur colour", () => {
+    for (const [name, fur] of Object.entries(FUR)) {
+      expect(Math.max(contrast(RIBBON, fur), contrast(RIBBON_EDGE, fur)), name).toBeGreaterThanOrEqual(3);
     }
   });
 });

@@ -30,6 +30,9 @@ export function SpotReveal({
 }) {
   // Another name changes the name in place. The rest of the card is what the server sent.
   const [name, setName] = useState(reveal.name);
+  // A girl wears a ribbon. When someone answers Girl here it pops on once; a cat who already was a girl just has it.
+  const [female, setFemale] = useState(reveal.female);
+  const [popped, setPopped] = useState(false);
   const { heading, sub } = revealCopy(state, name);
   const photo = reveal.photoUrl ?? capturedUrl;
   const tags = [reveal.coat, reveal.yourEarTip ? `Your answer: ear-tip ${reveal.yourEarTip}` : null, ...reveal.flags, reveal.probablyFemale ? "Probably female" : null].filter(
@@ -47,7 +50,7 @@ export function SpotReveal({
           <div className="arrive">
             <div className="arrive-floor" aria-hidden="true" />
             <div className="arrive-cat" aria-hidden="true">
-              <CatAvatar avatar={reveal.avatar} id={reveal.catId ?? ""} />
+              <CatAvatar avatar={reveal.avatar} id={reveal.catId ?? ""} ribbon={female} ribbonPop={popped} />
             </div>
             <p className="arrive-note small">A look-alike. The photo is the real one.</p>
           </div>
@@ -75,7 +78,15 @@ export function SpotReveal({
             {catId && (reveal.askSex || reveal.askEarTip) && (
               <div className="grid gap-5 pt-2">
                 {reveal.askSex && (
-                  <SexAsk catId={catId} />
+                  <SexAsk
+                    catId={catId}
+                    onSex={(sex) => {
+                      if (sex === "female" && !female) {
+                        setPopped(true);
+                        setFemale(true);
+                      }
+                    }}
+                  />
                 )}
                 {reveal.askEarTip && <EarTipAsk catId={catId} initial="unsure" bare />}
               </div>

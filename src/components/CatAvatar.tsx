@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { EYE, FUR, catDetails, type Avatar, type CatDetails } from "@/lib/avatar";
+import { EYE, FUR, RIBBON, RIBBON_EDGE, catDetails, type Avatar, type CatDetails } from "@/lib/avatar";
 import type { CareMark } from "@/lib/yard";
 
 const EAR_LEFT = "M25.5 27 L24 11 L36.5 19.5 Z";
@@ -126,9 +126,23 @@ function Coat({ a, d }: { a: Avatar; d: CatDetails }) {
 
 /**
  * A flat, front-facing cat in the app's own soft shapes. It only ever reads fixed palette names, so no text from a
- * stored coat can reach the markup. The drawing is a look-alike; the real photo stays on the card.
+ * stored coat can reach the markup. The drawing is a look-alike; the real photo stays on the card. The ribbon is
+ * a yes or no: only `ribbon === true` draws it, in one fixed colour. `ribbonPop` is for the moment she is first
+ * called a girl, and plays one short scale.
  */
-export function CatAvatar({ avatar, id, marks = [] }: { avatar: Avatar; id: string; marks?: CareMark[] }) {
+export function CatAvatar({
+  avatar,
+  id,
+  marks = [],
+  ribbon = false,
+  ribbonPop = false,
+}: {
+  avatar: Avatar;
+  id: string;
+  marks?: CareMark[];
+  ribbon?: boolean;
+  ribbonPop?: boolean;
+}) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const clip = `av-${uid}`;
   const ground = avatar.pattern === "calico" ? FUR.white : FUR[avatar.base];
@@ -181,6 +195,12 @@ export function CatAvatar({ avatar, id, marks = [] }: { avatar: Avatar; id: stri
       )}
       {d.face === "blaze" && blazeOk && <path d="M40 19.5 L37.6 35.5 L42.4 35.5 Z" fill={FUR.cream} />}
       {d.face === "cheek" && <ellipse cx={d.flip ? 49.5 : 30.5} cy="39" rx="4.2" ry="3.2" fill={FUR[avatar.accent]} />}
+      {ribbon === true && (
+        <g className={ribbonPop === true ? "avatar-ribbon avatar-ribbon-pop" : "avatar-ribbon"}>
+          <path d="M40 21.6 L35.4 18.4 Q33.9 21.6 35.4 24.8 Z M40 21.6 L44.6 18.4 Q46.1 21.6 44.6 24.8 Z" fill={RIBBON} stroke={RIBBON_EDGE} strokeWidth="0.9" strokeLinejoin="round" />
+          <circle cx="40" cy="21.6" r="1.7" fill={RIBBON} stroke={RIBBON_EDGE} strokeWidth="0.9" />
+        </g>
+      )}
       <g className="avatar-eyes">
         <ellipse cx="33" cy="33" rx="2.5" ry="3" fill={EYE[d.eyes]} />
         <ellipse cx="47" cy="33" rx="2.5" ry="3" fill={EYE[d.eyes]} />

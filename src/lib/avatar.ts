@@ -31,6 +31,10 @@ export const AVATAR_PATTERNS = [
 ] as const;
 export type AvatarPattern = (typeof AVATAR_PATTERNS)[number];
 
+/** The ribbon a girl wears: one fixed blue with a white edge, so it reads on every coat and is far from the collar red. */
+export const RIBBON = "#1c4aa0";
+export const RIBBON_EDGE = FUR.white;
+
 export type Avatar = { pattern: AvatarPattern; base: FurKey; accent: FurKey };
 
 /** The cat shown until a real one is ready, and for any coat we cannot read. */
