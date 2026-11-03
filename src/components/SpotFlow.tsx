@@ -60,13 +60,14 @@ export function SpotFlow({ username }: { username: string | null }) {
   const urlRef = useRef<string | null>(null);
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const detector = useCatDetector(video, phase.kind === "camera" && Boolean(username));
+  const [stage, setStage] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const bracketBox =
     detector.state === "found" && detector.box && detector.video && typeof window !== "undefined"
       ? clampBox(boxToView(padded(detector.box), detector.video, { w: window.innerWidth, h: window.innerHeight }), {
           x: 16,
-          y: 120,
+          y: (stage?.y ?? 0) + 12,
           w: window.innerWidth - 32,
-          h: window.innerHeight - 120 - 360,
+          h: (stage?.h ?? window.innerHeight) - 12 - 52,
         })
       : null;
 
@@ -196,6 +197,15 @@ export function SpotFlow({ username }: { username: string | null }) {
           fullscreen
           onVideoReady={setVideo}
           bracketBox={bracketBox}
+          onStageRect={setStage}
+          scanning={sending && Boolean(capturedUrl)}
+          stageNote={
+            !(sending && capturedUrl) && detector.state !== "off" ? (
+              <p className="cam-status" role="status" aria-live="polite">
+                {detector.state === "found" ? "Cat found" : "Looking for a cat"}
+              </p>
+            ) : null
+          }
           onCapture={upload}
           disabled={sending}
           topBar={
@@ -211,12 +221,7 @@ export function SpotFlow({ username }: { username: string | null }) {
               <div className="cam-frozen">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={capturedUrl} alt="The photo you just took" className="h-full w-full object-cover" />
-                <div className="scan-line" aria-hidden="true" />
               </div>
-            ) : detector.state !== "off" ? (
-              <p className="cam-status" role="status" aria-live="polite">
-                {detector.state === "found" ? "Cat found" : "Looking for a cat"}
-              </p>
             ) : null
           }
           controls={

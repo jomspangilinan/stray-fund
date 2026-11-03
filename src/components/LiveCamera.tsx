@@ -67,6 +67,9 @@ export function LiveCamera({
   controls,
   busyPanel,
   bracketBox = null,
+  stageNote,
+  scanning = false,
+  onStageRect,
 }: {
   onCapture: (blob: Blob, where: CaptureLocation) => void | Promise<void>;
   disabled?: boolean;
@@ -88,6 +91,12 @@ export function LiveCamera({
   busyPanel?: React.ReactNode;
   /** Fullscreen only: where the brackets sit, in pixels of the view. Null keeps them centred. */
   bracketBox?: { x: number; y: number; w: number; h: number } | null;
+  /** Fullscreen only: a short status shown along the bottom edge of the viewfinder, above the panel. */
+  stageNote?: React.ReactNode;
+  /** Fullscreen only: sweeps a scan line down the frame. */
+  scanning?: boolean;
+  /** Fullscreen only: the visible viewfinder in pixels of the view, between the top bar and the panel. */
+  onStageRect?: (r: { x: number; y: number; w: number; h: number }) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -95,10 +104,35 @@ export function LiveCamera({
   const attempt = useRef(0);
   const [status, setStatus] = useState<Status>("idle");
   const [facing, setFacing] = useState<Facing>("environment");
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stageTop, setStageTop] = useState(0);
+  const stageCb = useRef(onStageRect);
+  useEffect(() => {
+    stageCb.current = onStageRect;
+  });
   const readyCb = useRef(onVideoReady);
   useEffect(() => {
     readyCb.current = onVideoReady;
   });
+
+  // The viewfinder is whatever the top bar and the panel leave free, so the frame follows the panel's height.
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      setStageTop(r.top);
+      stageCb.current?.({ x: r.left, y: r.top, w: r.width, h: r.height });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [fullscreen]);
 
   const start = useCallback(async (want: Facing) => {
     const mine = ++attempt.current;
@@ -207,30 +241,41 @@ export function LiveCamera({
           aria-label="Live camera"
           className={`absolute inset-0 h-full w-full object-cover ${live ? "" : "invisible"}`}
         />
-        {!live && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 p-8 pb-40 text-center text-white">
-            <CameraMessage status={status} />
-            {openButton}
-          </div>
-        )}
         {overlay}
-        {(live || overlay) && (
-          <div
-            className={`cam-brackets ${bracketBox ? "locked" : ""}`}
-            style={
-              bracketBox
-                ? { left: bracketBox.x, top: bracketBox.y, width: bracketBox.w, height: bracketBox.h, right: "auto", bottom: "auto" }
-                : undefined
-            }
-            aria-hidden="true"
-          >
-            <i />
-            <i />
-            <i />
-            <i />
-          </div>
-        )}
         <div className="cam-top">{topBar}</div>
+        <div className="cam-stage" ref={stageRef}>
+          {!live && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 p-8 text-center text-white">
+              <CameraMessage status={status} />
+              {openButton}
+            </div>
+          )}
+          {(live || overlay) &&
+            (bracketBox ? (
+              <div
+                className="cam-brackets locked"
+                style={{ left: bracketBox.x, top: bracketBox.y - stageTop, width: bracketBox.w, height: bracketBox.h }}
+                aria-hidden="true"
+              >
+                <i />
+                <i />
+                <i />
+                <i />
+                {scanning && <div className="scan-line" />}
+              </div>
+            ) : (
+              <div className="cam-frame-area">
+                <div className="cam-brackets" aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                  <i />
+                  {scanning && <div className="scan-line" />}
+                </div>
+              </div>
+            ))}
+          {stageNote}
+        </div>
         <div className="cam-bottom">
           {busyPanel ?? (
             <>
