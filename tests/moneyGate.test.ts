@@ -1379,7 +1379,15 @@ describe("money gate", () => {
       expect(again.payoutId).not.toBe(res.payoutId);
     });
 
-    it.each(["FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "CANCELED"])(
+    it.each(["BLOCKED", "REVERSED"])("%s is not proven final, so a sent payout goes to review and keeps its reservation", async (itemStatus) => {
+      const p = await sentPayout();
+      await applyPayoutStatus("B-9", { itemStatus });
+      expect((await payoutRow(p.id)).status).toBe("needs_review");
+      expect(await reserved()).toBe(45000);
+      expect(await allWakeups()).toHaveLength(1);
+    });
+
+    it.each(["FAILED", "RETURNED", "REFUNDED", "CANCELED"])(
       "%s fails a sent payout",
       async (itemStatus) => {
         const p = await sentPayout();
@@ -1480,7 +1488,7 @@ describe("money gate", () => {
 
       it("settles a needs_review row as failed on a failing status, freeing the money", async () => {
         const p = await addPayout(w, { amount: 45000, status: "needs_review", attempts: 2 });
-        await applyPayoutStatus("PB-REAL", { senderBatchId: p.id, itemStatus: "BLOCKED" });
+        await applyPayoutStatus("PB-REAL", { senderBatchId: p.id, itemStatus: "FAILED" });
         expect(await payoutRow(p.id)).toMatchObject({ status: "failed", paypalPayoutBatchId: "PB-REAL" });
         expect(await reserved()).toBe(0);
       });

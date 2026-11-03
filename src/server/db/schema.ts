@@ -194,6 +194,9 @@ export const donations = pgTable(
     // touch what the donation is worth. reconcile_after is the earliest the next question may be asked.
     reconcileAttempts: integer("reconcile_attempts").notNull().default(0),
     reconcileAfter: timestamp("reconcile_after", { withTimezone: true }),
+    // Where the last check left it. unresolved: PayPal erred or the order is approved or pending, so money might be
+    // out there. closed: PayPal says VOIDED or 404, never asked again. escalated: a caretaker question was opened.
+    reconcileState: text("reconcile_state"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -370,6 +373,9 @@ export const payouts = pgTable(
     lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
     // Evidence for a person reviewing the payout. Never exposed publicly.
     lastGatewayError: text("last_gateway_error"),
+    // Set when PayPal reported SUCCESS for a payout the fund had called failed. Points at the caretaker question.
+    // While that question is open the agent may not ask for this booking and kind again.
+    lateSuccessReviewId: uuid("late_success_review_id").references(() => reviewRequests.id),
     createdAt: createdAt(),
   },
   (t) => [

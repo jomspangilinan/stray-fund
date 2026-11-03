@@ -1,11 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { closePool, db } from "../src/server/db/client";
-import { donationReversals, donations, wakeups } from "../src/server/db/schema";
+import { donationReversals, donations, reviewRequests, wakeups } from "../src/server/db/schema";
 import { getPoolStatus } from "../src/server/ledger";
 import { handleWebhookEvent } from "../src/server/paypal/webhook";
 import type { OrdersGateway } from "../src/server/paypal/orders";
-import { PayPalRateLimited } from "../src/server/paypal/orders";
+import { OrderNotFound, PayPalRateLimited } from "../src/server/paypal/orders";
 import { reconcilePendingDonations } from "../src/server/paypal/reconcileOrders";
 import { runMaintenance } from "../src/server/agent/worker";
 import { truncateAll } from "./helpers/db";
@@ -86,12 +86,15 @@ describe("a capture whose webhook was lost", () => {
     expect((await db.transaction((tx) => getPoolStatus(tx))).grossIn).toBe(2 * FIXTURE_GROSS);
   });
 
-  it("an order the donor approved but nobody captured is captured with the same request id as the page uses", async () => {
+  it("an order the donor approved but nobody captured is never captured by the worker, it only backs off", async () => {
+    // The page may have told the donor it failed, and they may have paid on a second order. Only the donor's own tap captures.
     const orderId = await pendingOrder(30);
     const gw = gateway(() => ({ id: orderId, status: "APPROVED", purchase_units: [{}] }));
     await run(gw);
-    expect(gw.captureOrder).toHaveBeenCalledWith(orderId);
-    expect((await row(orderId)).status).toBe("captured");
+    expect(gw.captureOrder).not.toHaveBeenCalled();
+    expect(await row(orderId)).toMatchObject({ status: "pending", net: 0, reconcileAttempts: 1 });
+    expect((await row(orderId)).reconcileAfter!.getTime()).toBeGreaterThan(Date.now());
+    expect(await captureWakeups()).toBe(0);
   });
 
   it("an order that is only created, or a capture still pending, stays pending", async () => {
@@ -190,6 +193,72 @@ describe("what it leaves alone", () => {
     await run(gw);
     expect(gw.getOrder).toHaveBeenCalledTimes(1);
     expect((await db.select().from(donations)).every((d) => d.status === "pending")).toBe(true);
+  });
+});
+
+describe("terminal answers stop the polling", () => {
+  it.each([
+    ["VOIDED", (id: string) => orderBody(id, { status: "VOIDED" })],
+    ["404", () => new OrderNotFound()],
+  ])("an order PayPal calls %s is asked about once", async (_name, answer) => {
+    const orderId = await pendingOrder(30);
+    const gw = gateway(answer as (id: string) => unknown);
+    await run(gw);
+    await db.execute(sql`update donations set reconcile_after = null`);
+    await run(gw);
+    expect(gw.getOrder).toHaveBeenCalledTimes(1);
+    expect((await row(orderId)).status).toBe("pending");
+    expect(await db.select().from(reviewRequests)).toHaveLength(0);
+  });
+});
+
+describe("money PayPal holds is never lost quietly", () => {
+  const asked = () => db.select().from(reviewRequests);
+
+  it("a COMPLETED order that cannot be recorded opens one caretaker question, however often it is checked", async () => {
+    const orderId = await pendingOrder(30);
+    const gw = gateway((id) => orderBody(id, { gross: 5 }));
+    await run(gw);
+    await db.execute(sql`update donations set reconcile_after = null`);
+    await run(gw);
+    expect(await row(orderId)).toMatchObject({ status: "pending", net: 0 });
+    const qs = await asked();
+    expect(qs).toHaveLength(1);
+    expect(qs[0]).toMatchObject({ status: "open" });
+    expect(qs[0].reason).toContain(orderId);
+  });
+
+  it("a row that ages out with an unresolved check opens one question, and a clean one asks nothing", async () => {
+    const stuck = await pendingOrder(30);
+    const lapsed = await pendingOrder(30);
+    const errored = await pendingOrder(30);
+    const gw = gateway((id) =>
+      id === stuck ? { id, status: "APPROVED", purchase_units: [{}] } : id === lapsed ? orderBody(id, { status: "CREATED" }) : new Error("HTTP 503"),
+    );
+    await run(gw);
+    for (const id of [stuck, lapsed, errored]) await age(id, 72 * 60 + 10);
+    await run(gw);
+    await run(gw);
+    const qs = await asked();
+    expect(qs).toHaveLength(2);
+    expect(qs.map((q) => q.reason).join(" ")).toContain(stuck);
+    expect(qs.map((q) => q.reason).join(" ")).toContain(errored);
+    expect(qs.map((q) => q.reason).join(" ")).not.toContain(lapsed);
+    // Asked once: the caretaker closes them and they do not come back.
+    await db.execute(sql`update review_requests set status = 'resolved'`);
+    await run(gw);
+    expect((await asked()).filter((q) => q.status === "open")).toHaveLength(0);
+  });
+});
+
+describe("a rate limit", () => {
+  it("ends the batch and says so without claiming all checks are paused", async () => {
+    await pendingOrder(30);
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    await run(gateway(() => new PayPalRateLimited()));
+    const text = err.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(text).toContain("rate limit");
+    expect(text).not.toContain("pausing donation checks");
   });
 });
 

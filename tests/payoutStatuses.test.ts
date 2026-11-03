@@ -1,12 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { closePool, db, withColonyLock } from "../src/server/db/client";
-import { payouts, reviewRequests } from "../src/server/db/schema";
+import { payouts, reviewRequests, wakeups } from "../src/server/db/schema";
 import { getPoolStatus } from "../src/server/ledger";
-import { applyPayoutStatus, reconcilePayouts } from "../src/server/moneyGate";
+import { applyPayoutStatus, reconcilePayouts, requestPayout, resolveNeedsReview } from "../src/server/moneyGate";
 import { handleWebhookEvent } from "../src/server/paypal/webhook";
 import { truncateAll } from "./helpers/db";
-import { FakeGateway, addPayout, makeWorld, type World } from "./helpers/payoutFixtures";
+import { FakeGateway, addPayout, depositRequest, makeCaretaker, makeWorld, type World } from "./helpers/payoutFixtures";
 
 /*
  * Every status the Payouts schema lists (https://developer.paypal.com/api/payments.payouts-batch/v1/schema.json):
@@ -36,9 +36,9 @@ describe("polling a batch, every status in the schema", () => {
     ["SUCCESS", "succeeded"],
     ["FAILED", "failed"],
     ["RETURNED", "failed"],
-    ["BLOCKED", "failed"],
+    ["BLOCKED", "needs_review"],
     ["REFUNDED", "failed"],
-    ["REVERSED", "failed"],
+    ["REVERSED", "needs_review"],
     ["PENDING", "sent"],
     ["UNCLAIMED", "sent"],
     ["ONHOLD", "sent"],
@@ -50,8 +50,8 @@ describe("polling a batch, every status in the schema", () => {
     await reconcilePayouts(gw);
     expect((await row(p.id)).status).toBe(expected);
     expect((await pool()).vetPaid).toBe(expected === "succeeded" ? 45000 : 0);
-    // Only a succeeded or still-live payout holds the reservation.
-    expect((await pool()).reservedPayouts).toBe(expected === "sent" ? 45000 : 0);
+    // Anything not proven final holds the reservation, so the agent cannot pay again while it is open.
+    expect((await pool()).reservedPayouts).toBe(["sent", "needs_review"].includes(expected) ? 45000 : 0);
   });
 
   const BATCH: [string, string | undefined, string][] = [
@@ -84,10 +84,42 @@ describe("polling a batch, every status in the schema", () => {
   });
 });
 
+describe("a BLOCKED payout", () => {
+  it("goes to review and keeps the reservation, so the booking cannot be paid a second time", async () => {
+    const p = await sentPayout();
+    await applyPayoutStatus("B-1", { itemStatus: "BLOCKED" });
+    const after = await row(p.id);
+    expect(after.status).toBe("needs_review");
+    expect((await pool()).reservedPayouts).toBe(45000);
+    // A second BLOCKED poll changes nothing and makes no second wakeup.
+    const wakeupsBefore = (await db.select().from(wakeups)).length;
+    await applyPayoutStatus("B-1", { itemStatus: "BLOCKED" });
+    expect((await db.select().from(wakeups)).length).toBe(wakeupsBefore);
+    // The booking is still held by the live payout.
+    expect(await requestPayout({ ...depositRequest(w), reason: "Again.", inputs: {} }, new FakeGateway())).toMatchObject({ status: "rejected", code: "DUPLICATE_PAYOUT" });
+  });
+
+  it("clears to succeeded when PayPal later says SUCCESS, or to failed on FAILED, and not_paid is refused while a batch is on it", async () => {
+    const p = await sentPayout();
+    await applyPayoutStatus("B-1", { itemStatus: "BLOCKED" });
+    await expect(resolveNeedsReview(p.id, (await makeCaretaker()).id, { outcome: "not_paid", note: "checked" })).rejects.toThrow(/batch/);
+    await applyPayoutStatus("B-1", { itemStatus: "SUCCESS", fee: 100 });
+    expect((await row(p.id)).status).toBe("succeeded");
+  });
+
+  it("FAILED after BLOCKED frees it", async () => {
+    const p = await sentPayout();
+    await applyPayoutStatus("B-1", { itemStatus: "BLOCKED" });
+    await applyPayoutStatus("B-1", { itemStatus: "FAILED" });
+    expect((await row(p.id)).status).toBe("failed");
+    expect((await pool()).reservedPayouts).toBe(0);
+  });
+});
+
 describe("a success PayPal reports after we called the payout failed", () => {
   it("is not shown as paid, is not hidden, and puts a question on the caretaker desk once", async () => {
     const p = await sentPayout();
-    await applyPayoutStatus("B-1", { itemStatus: "BLOCKED" });
+    await applyPayoutStatus("B-1", { itemStatus: "FAILED" });
     expect((await row(p.id)).status).toBe("failed");
     expect(await asked()).toHaveLength(0);
 
@@ -101,7 +133,7 @@ describe("a success PayPal reports after we called the payout failed", () => {
     expect(qs).toHaveLength(1);
     expect(qs[0]).toMatchObject({ status: "open" });
     expect(qs[0].reason).toContain(p.id);
-    expect(after.lastGatewayError).toContain("SUCCESS");
+    expect(after.lateSuccessReviewId).toBe(qs[0].id);
   });
 
   it("other late statuses on a failed payout ask nothing", async () => {
@@ -118,7 +150,7 @@ describe("the webhook when the resource carries no transaction_status", () => {
   const EVENTS: [string, string][] = [
     ["SUCCEEDED", "succeeded"],
     ["FAILED", "failed"],
-    ["BLOCKED", "failed"],
+    ["BLOCKED", "needs_review"],
     ["CANCELED", "failed"],
     ["REFUNDED", "failed"],
     ["RETURNED", "failed"],

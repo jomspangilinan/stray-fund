@@ -90,6 +90,9 @@ const ITEM_EVENT_STATUS: Record<string, string> = {
   UNCLAIMED: "UNCLAIMED",
 };
 
+const itemEventStatus = (suffix: string): string | undefined =>
+  Object.hasOwn(ITEM_EVENT_STATUS, suffix) ? ITEM_EVENT_STATUS[suffix] : undefined;
+
 async function applyEvent(tx: Tx, event: WebhookEvent): Promise<void> {
   const r = event.resource ?? {};
   if (event.event_type === "PAYMENT.CAPTURE.COMPLETED") {
@@ -107,7 +110,7 @@ async function applyEvent(tx: Tx, event: WebhookEvent): Promise<void> {
     }
     return;
   }
-  const reversal = REVERSAL_EVENTS[event.event_type];
+  const reversal = Object.hasOwn(REVERSAL_EVENTS, event.event_type) ? REVERSAL_EVENTS[event.event_type] : undefined;
   if (reversal) {
     await applyCaptureReversal(tx, reversal, r);
     return;
@@ -119,7 +122,7 @@ async function applyEvent(tx: Tx, event: WebhookEvent): Promise<void> {
       return;
     }
     await applyPayoutStatusIn(tx, batchId, {
-      itemStatus: str(r.transaction_status) ?? ITEM_EVENT_STATUS[event.event_type.slice("PAYMENT.PAYOUTS-ITEM.".length)],
+      itemStatus: str(r.transaction_status) ?? itemEventStatus(event.event_type.slice("PAYMENT.PAYOUTS-ITEM.".length)),
       itemId: str(r.payout_item_id),
       fee: r.payout_item_fee === undefined ? undefined : centavos(r.payout_item_fee, "fee"),
       senderBatchId: str(r.sender_batch_id),
@@ -136,7 +139,7 @@ export async function handleWebhookEvent(event: WebhookEvent): Promise<"processe
   return db.transaction(async (tx) => {
     // Payout effects need the colony lock. Take it before anything else so the
     // lock order is the same everywhere.
-    if (event.event_type.startsWith("PAYMENT.PAYOUTS-ITEM.") || event.event_type in REVERSAL_EVENTS) await lockColony(tx);
+    if (event.event_type.startsWith("PAYMENT.PAYOUTS-ITEM.") || Object.hasOwn(REVERSAL_EVENTS, event.event_type)) await lockColony(tx);
     const inserted = await tx
       .insert(webhookEvents)
       .values({ paypalEventId: event.id })

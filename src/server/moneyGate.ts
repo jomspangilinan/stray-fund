@@ -54,12 +54,16 @@ export const IN_FLIGHT_WINDOW_SECONDS = 60;
 export const BATCH_EXISTS_FLAG = "BATCH_EXISTS";
 
 const ITEM_SUCCEEDED = new Set(["SUCCESS"]);
-const ITEM_FAILED = new Set(["FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "CANCELED"]);
+/** Proven final and the money did not stay gone: PayPal says funds were not deducted, or came back. */
+const ITEM_FAILED = new Set(["FAILED", "RETURNED", "REFUNDED", "CANCELED"]);
+/**
+ * Not proven final. BLOCKED says only "has been blocked" and the docs do not say where the funds are; REVERSED is
+ * documented for web uploads only. Both can still clear to SUCCESS, so they hold the reservation for a caretaker.
+ */
+const ITEM_UNSETTLED = new Set(["BLOCKED", "REVERSED"]);
 /** Money that really did come back after a success. */
 const ITEM_UNDOES_SUCCESS = new Set(["RETURNED", "REFUNDED"]);
 const BATCH_DEAD = new Set(["DENIED", "CANCELED"]);
-/** Leads last_gateway_error when PayPal reported SUCCESS for a payout the fund had already called failed. */
-export const LATE_SUCCESS_FLAG = "LATE_SUCCESS";
 
 /** Drizzle wraps driver errors, so the Postgres error may be on the cause chain. */
 function isLivePayoutViolation(e: unknown): boolean {
@@ -614,12 +618,16 @@ export async function resolveNeedsReview(
 
 function nextStatus(payout: Payout, itemStatus: string | undefined): PayoutStatus | undefined {
   if (!itemStatus) return undefined;
-  const target = ITEM_SUCCEEDED.has(itemStatus)
+  const target: PayoutStatus | undefined = ITEM_SUCCEEDED.has(itemStatus)
     ? "succeeded"
     : ITEM_FAILED.has(itemStatus)
       ? "failed"
-      : undefined;
+      : ITEM_UNSETTLED.has(itemStatus)
+        ? "needs_review"
+        : undefined;
   if (!target) return undefined;
+  // Already waiting for a person, and PayPal has nothing new to say.
+  if (payout.status === "needs_review" && target === "needs_review") return undefined;
   // A real PayPal status settles a review that nobody could settle before.
   if (payout.status === "sent" || payout.status === "needs_review") return target;
   if (payout.status === "succeeded" && ITEM_UNDOES_SUCCESS.has(itemStatus)) return "failed";
@@ -651,20 +659,25 @@ async function findPayout(
 
 /**
  * A failed payout is terminal and has freed its reservation, so a later SUCCESS would otherwise vanish while the
- * money has left. It stays failed (nobody has checked it, and "paid" must be true), but it is flagged on the row and
- * a question goes to the caretaker desk, once. Nothing is paid again by the fund on its own.
+ * money has left. It stays failed (nobody has checked, and "paid" must be true) and a question goes to the caretaker
+ * desk, once per payout. The question's id is kept on the row: while it is open the agent may not ask for this
+ * booking and kind again, because a new row would mean a new sender_batch_id and a second payment. The row's
+ * last_gateway_error is left alone, so earlier evidence such as BATCH_EXISTS is never overwritten.
  */
 async function flagLateSuccess(tx: Tx, payout: Payout, batchId: string): Promise<void> {
-  const flagged = `${LATE_SUCCESS_FLAG}: PayPal reports SUCCESS for batch ${batchId}`;
-  if (payout.lastGatewayError === flagged) return;
+  if (payout.lateSuccessReviewId) return;
   console.error(`Payout ${payout.id} is failed but PayPal reports SUCCESS for batch ${batchId}`);
-  await tx.update(payouts).set({ lastGatewayError: flagged }).where(eq(payouts.id, payout.id));
-  await tx.insert(reviewRequests).values({
-    subject: "PayPal says a failed payout succeeded",
-    reason:
-      `Payout ${payout.id} was marked failed, but PayPal now reports SUCCESS for batch ${batchId}. ` +
-      `The money may have reached the vet. It still shows as failed and unpaid. Check it at PayPal before anyone asks for this payout again.`,
-  });
+  const [made] = await tx
+    .insert(reviewRequests)
+    .values({
+      subject: "PayPal says a failed payout succeeded",
+      reason:
+        `Payout ${payout.id} was marked failed, but PayPal now reports SUCCESS for batch ${batchId}. ` +
+        `The money may have reached the vet. It still shows as failed and unpaid, and the agent may not ask for this payout again until you close this. ` +
+        `Check it at PayPal first.`,
+    })
+    .returning({ id: reviewRequests.id });
+  await tx.update(payouts).set({ lateSuccessReviewId: made.id }).where(eq(payouts.id, payout.id));
 }
 
 /** Idempotent. The wakeup commits with the status change, and only on a real change. */

@@ -1,11 +1,11 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { BetaRunnableTool } from "@anthropic-ai/sdk/lib/tools/BetaRunnableTool";
 import { ToolError } from "@anthropic-ai/sdk/lib/tools/ToolError";
 import * as z from "zod/v4";
 import { syncCatForPayout, transitionCat } from "../catTransitions";
 import { db, withColonyLock, type Tx } from "../db/client";
-import { agentActions, bookings, cats, guardrails, payouts, receipts } from "../db/schema";
+import { agentActions, bookings, cats, guardrails, payouts, receipts, reviewRequests } from "../db/schema";
 import { describeError } from "../errors";
 import { CONFIRMED_BOOKING } from "../guardrails";
 import { InsufficientFunds, allocateToCat, getPoolStatus } from "../ledger";
@@ -156,7 +156,7 @@ async function fundCat(catId: string, why: string, now: Date): Promise<Outcome> 
   }
 }
 
-type PayoutHistory = { status: string; lastGatewayError: string | null };
+type PayoutHistory = { status: string; lastGatewayError: string | null; lateSuccessOpen?: boolean };
 
 /**
  * Why the agent may not ask for this payout again, if so. Money may have left on a
@@ -166,6 +166,9 @@ type PayoutHistory = { status: string; lastGatewayError: string | null };
 function retryBlock(history: PayoutHistory[]): string | undefined {
   if (history.some((p) => p.lastGatewayError?.startsWith(BATCH_EXISTS_FLAG))) {
     return "PayPal reported a batch for an earlier try, so money may have left.";
+  }
+  if (history.some((p) => p.lateSuccessOpen)) {
+    return "PayPal later reported SUCCESS for an earlier try that was marked failed, so the vet may already be paid.";
   }
   if (history.some((p) => p.status === "rejected")) {
     return "An earlier payout for this booking was rejected on review.";
@@ -182,8 +185,11 @@ async function payoutHistory(bookingId: string, kind: "deposit" | "balance") {
       status: payouts.status,
       lastGatewayError: payouts.lastGatewayError,
       amount: payouts.amount,
+      // A question about a late SUCCESS that no caretaker has closed yet.
+      lateSuccessOpen: sql<boolean>`coalesce(${reviewRequests.status} = 'open', false)`,
     })
     .from(payouts)
+    .leftJoin(reviewRequests, eq(reviewRequests.id, payouts.lateSuccessReviewId))
     .where(and(eq(payouts.bookingId, bookingId), eq(payouts.kind, kind)))
     .orderBy(desc(payouts.createdAt));
 }

@@ -7,6 +7,7 @@ import { getLedger } from "../src/server/impact";
 import { getCaretakerQueue } from "../src/server/caretaker/queue";
 import { conservation, ledgerTotals } from "../src/lib/impact";
 import { recordCapture } from "../src/server/paypal/orders";
+import { applyCaptureReversal } from "../src/server/paypal/reversals";
 import { clearPayPalTokenCache } from "../src/server/paypal/payouts";
 import { truncateAll } from "./helpers/db";
 import {
@@ -297,5 +298,44 @@ describe("a reversal (chargeback) and a denial", () => {
     expect((await send(ev)).status).toBe(200);
     expect(await reversals()).toHaveLength(0);
     expect(await reviews()).toHaveLength(1);
+  });
+});
+
+describe("a refund and a capture committing together", () => {
+  it("the refund waits for the donation row", async () => {
+    const u = await makeDonor();
+    const { orderId } = await makePendingOrder(u.id);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const lockedP = new Promise<void>((r) => (locked = r));
+    // Another transaction holds the donation row the way recordCapture's update does (it does not touch the key).
+    const holder = db.transaction(async (tx) => {
+      await tx.select().from(donations).where(eq(donations.paypalOrderId, orderId)).for("no key update");
+      locked();
+      await held;
+    });
+    await lockedP;
+    let done = false;
+    const refund = db
+      .transaction((tx) =>
+        applyCaptureReversal(tx, "refund", {
+          id: "RF-RACE",
+          status: "COMPLETED",
+          seller_payable_breakdown: {
+            gross_amount: { currency_code: "PHP", value: "10.00" },
+            paypal_fee: { currency_code: "PHP", value: "0.00" },
+            net_amount: { currency_code: "PHP", value: "10.00" },
+          },
+          supplementary_data: { related_ids: { order_id: orderId } },
+        }),
+      )
+      .then(() => (done = true));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(done).toBe(false);
+    release();
+    await holder;
+    await refund;
+    expect(done).toBe(true);
   });
 });

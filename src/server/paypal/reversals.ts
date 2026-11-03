@@ -67,7 +67,7 @@ function captureIdOf(kind: ReversalKind, resource: Record<string, unknown>): str
 }
 
 /** A question for the caretaker desk, once per distinct reason while it is open. */
-async function askCaretaker(tx: Tx, subject: string, reason: string): Promise<string> {
+export async function askCaretaker(tx: Tx, subject: string, reason: string): Promise<string> {
   const [open] = await tx
     .select({ id: reviewRequests.id })
     .from(reviewRequests)
@@ -125,8 +125,9 @@ export async function applyCaptureReversal(tx: Tx, kind: ReversalKind, resource:
   const orderId = str(related?.order_id);
   if (!captureId && !orderId) throw new UnknownCapture(`${kind} ${ref}`);
 
-  let [donation] = captureId ? await tx.select().from(donations).where(eq(donations.paypalCaptureId, captureId)) : [];
-  if (!donation && orderId) [donation] = await tx.select().from(donations).where(eq(donations.paypalOrderId, orderId));
+  // Locked, so a capture of this donation committing at the same moment waits, or is waited for, and neither misses the other.
+  let [donation] = captureId ? await tx.select().from(donations).where(eq(donations.paypalCaptureId, captureId)).for("update") : [];
+  if (!donation && orderId) [donation] = await tx.select().from(donations).where(eq(donations.paypalOrderId, orderId)).for("update");
   if (!donation) throw new UnknownCapture(`${kind} ${ref} on ${captureId ?? orderId}`);
 
   const [seen] = await tx.select({ id: donationReversals.id }).from(donationReversals).where(eq(donationReversals.paypalRef, ref));

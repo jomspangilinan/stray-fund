@@ -164,6 +164,12 @@ describe("events", () => {
     expect(res.status).toBe(200);
   });
 
+  it.each(["constructor", "toString", "__proto__", "hasOwnProperty"])("treats the event type %s as unknown, not as a handler", async (type) => {
+    const res = await send(JSON.stringify({ id: `EV-${type}`, event_type: type, resource: { id: "X" } }));
+    expect(res.status).toBe(200);
+    expect(await eventRows()).toHaveLength(1);
+  });
+
   it("logs and acknowledges a capture for an unknown order, with no donation row", async () => {
     const res = await send(JSON.stringify(captureEvent("EV-1", "NO-SUCH-ORDER")));
     expect(res.status).toBe(200);

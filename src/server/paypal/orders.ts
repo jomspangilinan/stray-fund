@@ -70,6 +70,14 @@ export class ForbiddenOrder extends Error {
   }
 }
 
+/** PayPal has no such order (404). Nothing was ever captured under it. */
+export class OrderNotFound extends Error {
+  constructor() {
+    super("PayPal has no such order");
+    this.name = "OrderNotFound";
+  }
+}
+
 /** PayPal answered 429. The caller should stop asking for a while. */
 export class PayPalRateLimited extends Error {
   constructor() {
@@ -86,7 +94,7 @@ export interface OrdersGateway {
   createOrder(amount: number, requestId: string): Promise<{ orderId: string }>;
   /** Returns PayPal's capture response body, parsed. Idempotent per order id. */
   captureOrder(orderId: string): Promise<unknown>;
-  /** Returns the order as PayPal holds it (GET /v2/checkout/orders/{id}), parsed. Throws PayPalRateLimited on 429. */
+  /** Returns the order as PayPal holds it (GET /v2/checkout/orders/{id}), parsed. Throws PayPalRateLimited on 429, OrderNotFound on 404. */
   getOrder(orderId: string): Promise<unknown>;
 }
 
@@ -130,7 +138,9 @@ export const sdkOrdersGateway: OrdersGateway = {
       const res = await sdkClient().getOrder({ id: orderId });
       return JSON.parse(String(res.body)) as unknown;
     } catch (e) {
-      if ((e as { statusCode?: unknown })?.statusCode === 429) throw new PayPalRateLimited();
+      const status = (e as { statusCode?: unknown })?.statusCode;
+      if (status === 429) throw new PayPalRateLimited();
+      if (status === 404) throw new OrderNotFound();
       throw e;
     }
   },
@@ -245,7 +255,8 @@ export function captureFromOrder(body: unknown): PayPalCapture {
 export async function recordCapture(capture: PayPalCapture, tx?: Tx): Promise<Donation> {
   if (!tx) return db.transaction((t) => recordCapture(capture, t));
 
-  const [row] = await tx.select().from(donations).where(eq(donations.paypalOrderId, capture.orderId));
+  // Locked, so a refund for this donation committing at the same moment waits and then sees the capture.
+  const [row] = await tx.select().from(donations).where(eq(donations.paypalOrderId, capture.orderId)).for("update");
   if (!row) throw new UnknownOrder(capture.orderId);
   // Not COMPLETED (pending review, declined): nothing is captured yet. A capture already refunded, in part or whole,
   // was completed first; the poller can meet one when it was never recorded, and its refunds are separate rows.

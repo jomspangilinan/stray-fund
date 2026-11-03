@@ -10,9 +10,11 @@ import {
   guardrails,
   payouts,
   reviewRequests,
+  users,
 } from "../src/server/db/schema";
-import { BATCH_EXISTS_FLAG } from "../src/server/moneyGate";
-import { createAgentTools } from "../src/server/agent/tools";
+import { BATCH_EXISTS_FLAG, applyPayoutStatus } from "../src/server/moneyGate";
+import { resolveReview } from "../src/server/agent/review";
+import { createAgentTools, payoutRetryBlocked } from "../src/server/agent/tools";
 import { runAgent, SYSTEM_PROMPT, MAX_ITERATIONS } from "../src/server/agent/run";
 import { syncCatForPayout } from "../src/server/catTransitions";
 import { loadToolkitTools, toolkitToClaudeTools } from "../src/server/paypal/toolkit";
@@ -478,6 +480,44 @@ describe("pay_vet_deposit", () => {
     expect(body.code).toBe("REVIEW_REQUIRED");
     expect(gw.calls).toHaveLength(0);
     expect(await db.select().from(payouts)).toHaveLength(1);
+  });
+
+  describe("a SUCCESS PayPal reports for a payout we called failed", () => {
+    async function late(earlierFlag: boolean) {
+      const w = await bookedWorld();
+      const row = await addPayout(w, { amount: 45000, status: "failed", batchId: "B-LATE" });
+      const earlier = `${BATCH_EXISTS_FLAG}: HTTP 400 DUPLICATE_BATCH`;
+      if (earlierFlag) await db.update(payouts).set({ lastGatewayError: earlier }).where(eq(payouts.id, row.id));
+      await applyPayoutStatus("B-LATE", { itemStatus: "SUCCESS", fee: 100 });
+      return { w, row, earlier };
+    }
+
+    it.each([true, false])("blocks any retry, with no new row and no send (earlier BATCH_EXISTS flag: %s)", async (flag) => {
+      const { call, gw } = setup();
+      const { w, row, earlier } = await late(flag);
+
+      const { isError, body } = await call("pay_vet_deposit", { booking_id: w.booking.id, reason: "Try again." });
+
+      expect(isError).toBe(true);
+      expect(body.code).toBe("REVIEW_REQUIRED");
+      expect(gw.calls).toHaveLength(0);
+      expect(await db.select().from(payouts)).toHaveLength(1);
+      // The earlier evidence is never overwritten.
+      expect((await db.select().from(payouts).where(eq(payouts.id, row.id)))[0].lastGatewayError).toBe(flag ? earlier : null);
+      expect(await payoutRetryBlocked(w.booking.id, "deposit")).toBe(true);
+    });
+
+    it("stays blocked for the other payout type's own history only, and lifts once a caretaker resolves the question", async () => {
+      const { gw } = setup();
+      const { w } = await late(false);
+      const [q] = await db.select().from(reviewRequests);
+      expect(q.status).toBe("open");
+      expect(await payoutRetryBlocked(w.booking.id, "balance")).toBe(false);
+      const [caretaker] = await db.insert(users).values({ username: "care-late", role: "caretaker" }).returning();
+      await db.transaction((tx) => resolveReview(tx, q.id, caretaker.id, "Checked at PayPal; settled by hand."));
+      expect(await payoutRetryBlocked(w.booking.id, "deposit")).toBe(false);
+      expect(gw.calls).toHaveLength(0);
+    });
   });
 
   it("a plain failed payout may be retried once, and a second failure goes to review", async () => {
