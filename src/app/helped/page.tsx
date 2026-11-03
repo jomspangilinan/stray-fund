@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { CatRow } from "@/components/CatRow";
+import { CatTile } from "@/components/CatTile";
 import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
 import { SignIn } from "@/components/SignIn";
@@ -10,7 +10,7 @@ import { CelebrationNote } from "@/components/CelebrationNote";
 import { streakLabel } from "@/lib/streak";
 import { getStreak } from "@/server/streak";
 import { getBadgesFor } from "@/server/thanks";
-import { celebrationText, findCelebration, milestoneLabel } from "@/server/milestones";
+import { celebrationText, findCelebration } from "@/server/milestones";
 import { getHelpedEntries, getUnallocated } from "@/server/public";
 import { getSession } from "@/server/session";
 
@@ -51,28 +51,26 @@ async function Helped() {
       )}
       {unallocated > 0 && (
         <p className="note note-ok mt-6">
-          <strong>Your donation is waiting in the pool.</strong> {formatPeso(unallocated)} has not been matched to a
-          cat yet. It will show up here when it is.
+          <strong>Your gift is in the shared fund.</strong> It reaches a cat soon.
         </p>
       )}
       {entries.length === 0 ? (
         <div className="card mt-6">
-          <p className="font-bold">You have not helped a cat yet.</p>
-          <p className="mt-1 soft">Once a donation of yours goes to a cat, the cat shows up here.</p>
+          <p className="font-bold">Your first cat shows up here.</p>
           <Link href="/donate" className="btn-pop mt-4">
-            Donate to help a cat
+            Help a cat
           </Link>
         </div>
       ) : (
-        <ul className="list mt-6">
+        <ul className="tiles mt-6">
           {entries.map((e) => (
-            <CatRow
+            <CatTile
               key={e.cat.id}
               cat={e.cat}
-              footer={
-                <p className="small">
-                  {milestoneLabel(e.cat)}. You put <strong>{formatPeso(e.amount)}</strong> toward {e.cat.name}.
-                </p>
+              line={
+                <>
+                  You gave <strong>{formatPeso(e.amount)}</strong>
+                </>
               }
             />
           ))}
@@ -84,8 +82,8 @@ async function Helped() {
 
 export default function HelpedPage() {
   return (
-    <main>
-      <PageHead title="Cats I've helped">The cats your donations have gone to.</PageHead>
+    <main className="play">
+      <PageHead title="Cats I've helped" />
       <Suspense fallback={<ListSkeleton rows={3} label="Loading your cats" />}>
         <Helped />
       </Suspense>

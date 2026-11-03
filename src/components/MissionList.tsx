@@ -32,8 +32,8 @@ export function MissionList({ missions }: { missions: Mission[] }) {
       {missions.map((m) => (
         <li key={`${m.kind}-${m.catId}`}>
           <div className="row">
-            <Link href={`/cats/${m.catId}`} className="relative h-14 w-14 flex-none overflow-hidden rounded-in" aria-label={`Open ${nameOf(m)}'s card`}>
-              <CatPhoto url={m.photoUrl} name={nameOf(m)} sizes="56px" />
+            <Link href={`/cats/${m.catId}`} className="relative h-20 w-20 flex-none overflow-hidden rounded-out" aria-label={`Open ${nameOf(m)}'s card`}>
+              <CatPhoto url={m.photoUrl} name={nameOf(m)} sizes="80px" />
             </Link>
             <div className="min-w-0 flex-1">
               <p className="font-bold leading-tight">{m.title}</p>

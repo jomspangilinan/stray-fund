@@ -37,7 +37,7 @@ async function Impact() {
           </p>
         )}
         <p className="small soft mt-3">
-          Held for cats counts money already on its way to a vet
+          Held for cats is money on its way to a vet
           {impact.pool.reservedPayouts > 0 ? ` (${formatPeso(impact.pool.reservedPayouts)} right now)` : ""}.
         </p>
         <Link href="/ledger" className="link mt-1">
@@ -59,7 +59,7 @@ async function Impact() {
         </dl>
         <p className="mt-3 soft">
           {impact.alreadyNeutered.toLocaleString("en-US")} more {impact.alreadyNeutered === 1 ? "cat was" : "cats were"}{" "}
-          already neutered when found. They are not counted as the fund&apos;s work.
+          already neutered when found. Not counted as the fund&apos;s work.
         </p>
       </section>
 
@@ -73,7 +73,7 @@ async function Impact() {
 export default function ImpactPage() {
   return (
     <main>
-      <PageHead title="Impact">What the fund has done, and proof that the money adds up.</PageHead>
+      <PageHead title="Impact" />
       <Suspense fallback={<BlockSkeleton label="Loading impact" />}>
         <Impact />
       </Suspense>

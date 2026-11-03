@@ -32,11 +32,11 @@ export class RateLimited extends Error {
 }
 
 const MESSAGES: Record<SpotState, string> = {
-  new_cat: "This looks like a cat we have not met, so we started a card for them. A caretaker will check the details.",
-  matched: "This looks like a cat we already know. We added your photo to their card.",
-  needs_review: "Thanks. A caretaker will take a look.",
+  new_cat: "Thanks for spotting! We started a card for this cat.",
+  matched: "Thanks for spotting! We added your photo to their card.",
+  needs_review: "Thanks for spotting! A caretaker will take a look.",
   rejected:
-    "We could not see a cat clearly in that photo. Try again closer, with the whole cat in the middle of the frame and good light.",
+    "Thanks for trying! We could not see a cat clearly. Try again a little closer, in good light.",
   queued_for_ai: "Saved. We'll finish this soon.",
 };
 

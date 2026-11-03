@@ -153,8 +153,7 @@ export function DonateForm({ clientId, username }: { clientId: string; username:
       </fieldset>
 
       <p className="note">
-        PayPal takes a fee from every donation. In our test payment, ₱100.00 became ₱81.60 after a ₱18.40
-        fee. We show the real figure once you have paid.
+        Test money only. PayPal takes a fee, shown after you pay.
       </p>
 
       <div aria-live="polite" className="grid gap-3">

@@ -626,3 +626,84 @@ input[type="checkbox"] {
     transition: none;
   }
 }
+
+/* Playful pages: big cat pictures and a soft spring on tap. Money pages (donate, ledger, impact) stay calm. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem 0.75rem;
+}
+@media (min-width: 640px) {
+  .tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.hero {
+  padding: 0.75rem 0.75rem 1.25rem;
+}
+.hero > :not(.hero-mosaic) {
+  margin-left: 0.5rem;
+  margin-right: 0.5rem;
+}
+.hero-mosaic {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.hero-mosaic li {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--r-in);
+}
+.hero-mosaic li:first-child {
+  border-top-left-radius: calc(var(--r-out) - 0.75rem + var(--r-in));
+}
+.hero-mosaic li:nth-child(2) {
+  border-top-right-radius: calc(var(--r-out) - 0.75rem + var(--r-in));
+}
+.hero-mosaic.one {
+  grid-template-columns: 1fr;
+}
+.hero-mosaic.one li {
+  aspect-ratio: 16 / 10;
+}
+.play .press,
+.play .btn,
+.play .btn-quiet,
+.play .btn-pop,
+.play .chip {
+  transition:
+    transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    background-color 120ms var(--ease-out),
+    color 120ms var(--ease-out);
+}
+.play .press:active,
+.play .btn:active:not(:disabled),
+.play .btn-quiet:active:not(:disabled),
+.play .btn-pop:active:not(:disabled),
+.play .chip:active {
+  transform: scale(0.96);
+  transition-duration: 80ms, 120ms, 120ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .play .press,
+  .play .btn,
+  .play .btn-quiet,
+  .play .btn-pop,
+  .play .chip {
+    transition:
+      background-color 120ms linear,
+      color 120ms linear;
+  }
+  .play .press:active,
+  .play .btn:active:not(:disabled),
+  .play .btn-quiet:active:not(:disabled),
+  .play .btn-pop:active:not(:disabled),
+  .play .chip:active {
+    transform: none;
+  }
+}

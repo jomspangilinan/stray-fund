@@ -375,7 +375,7 @@ describe("rendered public HTML", () => {
       renderToStaticMarkup(createElement(CatDetail, { card: card! }));
     expectClean(html);
     expect(html).toContain("Brgy. San Antonio, near the market");
-    expect(html).toMatch(/exact spots are private/i);
+    expect(html).toMatch(/exact spot kept private/i);
     expect(html).toMatch(/do not post/i);
     expect(html).not.toContain("—");
     const list = await listCats("all");

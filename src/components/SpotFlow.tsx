@@ -34,8 +34,8 @@ const SEXES: { value: Sex; label: string }[] = [
 const HEADINGS: Record<Done["state"], string> = {
   new_cat: "A new card",
   matched: "Seen before",
-  needs_review: "Thanks, we have it",
-  rejected: "We could not use that one",
+  needs_review: "Thanks for spotting",
+  rejected: "Try once more",
   queued_for_ai: "Saved",
 };
 
@@ -168,7 +168,7 @@ export function SpotFlow({ username }: { username: string | null }) {
     }
     return (
       <div className="mt-6 grid gap-5" role="status">
-        <div className={`note ${done.state === "rejected" ? "note-bad" : "note-ok"}`}>
+        <div className="note note-ok">
           <h2 className="h2">{HEADINGS[done.state]}</h2>
           <p className="mt-2">{done.message}</p>
         </div>
@@ -185,8 +185,7 @@ export function SpotFlow({ username }: { username: string | null }) {
   return (
     <>
       <p className="small soft mt-5 max-w-[52ch]">
-        Photos come only from the live camera, never from your gallery. That stops an old photo being reused to
-        trigger funding.
+        Live camera only, so old photos cannot be reused.
       </p>
       {fullscreen && (
         <LiveCamera

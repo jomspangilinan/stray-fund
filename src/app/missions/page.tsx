@@ -41,7 +41,7 @@ async function Missions() {
 
 export default function MissionsPage() {
   return (
-    <main>
+    <main className="play">
       <PageHead title="Missions" />
       <Suspense fallback={<ListSkeleton rows={3} label="Loading missions" />}>
         <Missions />

@@ -17,9 +17,7 @@ async function Form() {
 export default function DonatePage() {
   return (
     <main>
-      <PageHead title="Donate">
-        Donations go into one shared fund that pays vets to neuter the colony&apos;s stray cats.
-      </PageHead>
+      <PageHead title="Donate">One shared fund pays vets to neuter strays.</PageHead>
       <Suspense fallback={<BlockSkeleton label="Loading the donation form" />}>
         <Form />
       </Suspense>

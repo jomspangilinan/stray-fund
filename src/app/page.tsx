@@ -1,12 +1,11 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
-import { CatRow } from "@/components/CatRow";
 import { BlockSkeleton } from "@/components/Loading";
-import { StatusFilter } from "@/components/StatusFilter";
 import { formatPesoShort } from "@/lib/money";
 import { HomeYou } from "@/components/HomeYou";
-import { GoalCard } from "@/components/GoalCard";
+import { CatTile } from "@/components/CatTile";
+import { HeroGoal } from "@/components/HeroGoal";
 import { getGoalProgress, getHomeData } from "@/server/public";
 
 async function Home() {
@@ -14,15 +13,16 @@ async function Home() {
   const [{ poolAvailable, latestAction, cats, catCount }, goal] = await Promise.all([getHomeData(), getGoalProgress()]);
   return (
     <>
-      <section aria-labelledby="pool-title" className="on-main mt-2 rounded-out bg-main p-5 text-white">
+      <HeroGoal goal={goal} cats={cats} />
+      <section aria-labelledby="pool-title" className="on-main mt-3 rounded-out bg-main p-5 text-white">
         <h2 id="pool-title" className="sr-only">
-          The pool
+          The fund
         </h2>
         <p className="balance">
           {formatPesoShort(poolAvailable)}
         </p>
         <p className="mt-1.5 text-base font-semibold">
-          {poolAvailable > 0 ? "ready for the next cat" : "in the pool. The next donation funds the next cat."}
+          {poolAvailable > 0 ? "ready for the next cat" : "in the fund"}
         </p>
         <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-1">
           <Link href="/donate" className="btn-pop w-full sm:w-auto">
@@ -34,29 +34,21 @@ async function Home() {
         </div>
       </section>
 
-      <div className="mt-3 grid gap-2">
-        <GoalCard goal={goal} />
-        <Link href="/missions" className="press card flex items-center justify-between font-bold">
-          <span>Missions</span>
-          <span className="link !min-h-0">Help a cat</span>
-        </Link>
-      </div>
-
       <Suspense fallback={null}>
         <HomeYou />
       </Suspense>
 
+      {latestAction && (
       <section className="mt-8" aria-labelledby="latest-title">
         <div className="flex items-baseline justify-between gap-4">
           <h2 id="latest-title" className="h2">
-            Treasurer&apos;s latest
+            Latest decision
           </h2>
           <Link href="/agent" className="link">
             All decisions
           </Link>
         </div>
-        {latestAction ? (
-          <div className="card mt-2">
+        <div className="card mt-2">
             <p>
               <strong>{latestAction.cat ? `${latestAction.action}: ${latestAction.cat}.` : `${latestAction.action}.`}</strong>{" "}
               {latestAction.reason}
@@ -69,11 +61,9 @@ async function Home() {
                 Why
               </Link>
             </p>
-          </div>
-        ) : (
-          <p className="note mt-2">Nothing yet. The treasurer posts here as soon as money moves.</p>
-        )}
+        </div>
       </section>
+      )}
 
       <section className="mt-8" aria-labelledby="cats-title">
         <div className="flex items-baseline justify-between gap-4">
@@ -86,21 +76,17 @@ async function Home() {
             </Link>
           )}
         </div>
-        <div className="mt-2">
-          <StatusFilter current={null} />
-        </div>
         {cats.length === 0 ? (
           <div className="card mt-3">
             <p className="font-bold">No cats yet.</p>
-            <p className="mt-1 soft">Spot one with the camera and it gets a card here.</p>
             <Link href="/spot" className="btn mt-4">
               Spot a cat
             </Link>
           </div>
         ) : (
-          <ul className="list mt-3">
-            {cats.map((c) => (
-              <CatRow key={c.id} cat={c} />
+          <ul className="tiles mt-3">
+            {cats.slice(0, 4).map((c) => (
+              <CatTile key={c.id} cat={c} />
             ))}
           </ul>
         )}
@@ -111,8 +97,8 @@ async function Home() {
 
 export default function HomePage() {
   return (
-    <main>
-      <Suspense fallback={<BlockSkeleton label="Loading the pool" />}>
+    <main className="play">
+      <Suspense fallback={<BlockSkeleton label="Loading the fund" />}>
         <Home />
       </Suspense>
     </main>

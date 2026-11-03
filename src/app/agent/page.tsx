@@ -17,8 +17,7 @@ export default function AgentPage() {
   return (
     <main>
       <PageHead title="Treasurer">
-        An AI decides which cat is helped next and pays the vet. Fixed rules in our code can refuse it, and a person
-        checks anything unclear. Every decision is written here.
+        An AI picks the next cat. Rules can refuse it, and a person checks anything unclear.
       </PageHead>
       <Suspense fallback={<ListSkeleton rows={3} label="Loading decisions" />}>
         <Feed />

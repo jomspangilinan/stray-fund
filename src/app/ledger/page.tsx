@@ -17,12 +17,9 @@ async function Ledger() {
 export default function LedgerPage() {
   return (
     <main>
-      <PageHead title="Ledger">
-        Every donation in and every payout to a vet, with the reason and the PayPal sandbox reference. Search, sort or
-        filter it, and download it as a spreadsheet.
-      </PageHead>
+      <PageHead title="Ledger">Every donation and vet payout. Test money.</PageHead>
       <Link href="/impact" className="link">
-        How the money adds up
+        Proof it adds up
       </Link>
       <Suspense fallback={<ListSkeleton rows={4} label="Loading the ledger" />}>
         <Ledger />

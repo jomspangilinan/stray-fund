@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
-import { CatRow } from "@/components/CatRow";
+import { CatTile } from "@/components/CatTile";
 import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
 import { StatusFilter } from "@/components/StatusFilter";
@@ -34,9 +34,9 @@ async function Grid({ searchParams }: { searchParams: Promise<{ status?: string 
           </Link>
         </div>
       ) : (
-        <ul className="list mt-4">
+        <ul className="tiles mt-4">
           {cats.map((c) => (
-            <CatRow key={c.id} cat={c} />
+            <CatTile key={c.id} cat={c} />
           ))}
         </ul>
       )}
@@ -46,8 +46,8 @@ async function Grid({ searchParams }: { searchParams: Promise<{ status?: string 
 
 export default function CatsPage({ searchParams }: PageProps<"/cats">) {
   return (
-    <main>
-      <PageHead title="Cats">Every stray we know by name. Exact spots stay private to protect the cats.</PageHead>
+    <main className="play">
+      <PageHead title="Cats">Exact spots stay private.</PageHead>
       <Suspense fallback={<ListSkeleton label="Loading the cats" />}>
         <Grid searchParams={searchParams} />
       </Suspense>

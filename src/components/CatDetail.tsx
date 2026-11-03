@@ -13,7 +13,7 @@ export function CatDetail({ card, thanks = [] }: { card: CatCardData; thanks?: T
         <Link href="/cats" className="link -ml-1 px-1">
           All cats
         </Link>
-        <div className="relative mt-1 aspect-[4/3] overflow-hidden rounded-out">
+        <div className="relative mt-1 aspect-[4/5] overflow-hidden rounded-out">
           <CatPhoto url={cat.photoUrl} name={cat.name} sizes="(min-width: 576px) 36rem, 100vw" caption />
         </div>
         <h1 className="title mt-4">{cat.name}</h1>
@@ -39,8 +39,7 @@ export function CatDetail({ card, thanks = [] }: { card: CatCardData; thanks?: T
         </h2>
         <p className="mt-1 font-semibold">{cat.area}</p>
         <p className="small soft mt-1 max-w-[52ch]">
-          Exact spots are private to protect the cats. If you spot or meet this cat, please do not post its exact
-          location anywhere else.
+          Exact spot kept private. Please do not post it.
         </p>
       </section>
 

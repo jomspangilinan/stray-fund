@@ -14,10 +14,8 @@ async function Flow() {
 
 export default function SpotPage() {
   return (
-    <main>
-      <PageHead title="Spot a cat">
-        Take a photo of a cat you see around the neighbourhood. We start a card, or add to one we already have.
-      </PageHead>
+    <main className="play">
+      <PageHead title="Spot a cat" />
       <Suspense fallback={<BlockSkeleton label="Loading the camera" />}>
         <Flow />
       </Suspense>

@@ -19,7 +19,7 @@ async function Card({ params }: { params: Promise<{ id: string }> }) {
 
 export default function CatPage({ params }: PageProps<"/cats/[id]">) {
   return (
-    <main className="pt-2">
+    <main className="play pt-2">
       <Suspense fallback={<BlockSkeleton label="Loading the cat" />}>
         <Card params={params} />
       </Suspense>
