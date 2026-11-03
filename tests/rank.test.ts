@@ -17,6 +17,24 @@ function cat(over: Partial<RankableCat> = {}): RankableCat {
   };
 }
 
+describe("a neighbour's sex answer", () => {
+  it("ranks like unknown until a caretaker confirms it, including the pregnant case", () => {
+    const unconfirmedFemale = cat({ name: "f?", sex: "female", sexUnconfirmed: true });
+    const unconfirmedMalePregnant = cat({ name: "m?", sex: "male", sexUnconfirmed: true, flags: ["pregnant"] });
+    const unknownPregnant = cat({ name: "u", sex: "unknown", flags: ["pregnant"] });
+    const sick = cat({ name: "sick", flags: ["sick"] });
+    const ranked = rankWaitingCats([unconfirmedFemale, unconfirmedMalePregnant, unknownPregnant, sick], NOW);
+    const tier = (n: string) => ranked.find((r) => r.cat.name === n)!.tier;
+    expect(tier("f?")).toBe(5);
+    expect(tier("m?")).toBe(2);
+    expect(tier("u")).toBe(2);
+    expect(tier("sick")).toBe(3);
+    // Confirmed, the same answers count.
+    expect(rankWaitingCats([cat({ sex: "female", sexUnconfirmed: false })], NOW)[0].tier).toBe(1);
+    expect(rankWaitingCats([cat({ sex: "male", flags: ["pregnant"], sexUnconfirmed: false })], NOW)[0].tier).toBe(5);
+  });
+});
+
 describe("rankWaitingCats", () => {
   it("orders one cat of each tier as specified", () => {
     const other = cat({ name: "other" });

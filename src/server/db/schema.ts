@@ -55,6 +55,9 @@ export const cats = pgTable(
     // True once a caretaker approved or typed the name. The finder can no longer ask for another one.
     nameLocked: boolean("name_locked").notNull().default(false),
     sex: text("sex").notNull().default("unknown"),
+    // True while the sex came from a neighbour's answer and no caretaker has confirmed it. It shows on the card,
+    // but funding order and anything else that decides money treats the cat as sex unknown until it is false.
+    sexUnconfirmed: boolean("sex_unconfirmed").notNull().default(false),
     status: text("status").notNull().default("spotted"),
     earTipped: boolean("ear_tipped"),
     flags: text("flags").array().notNull().default(sql`'{}'::text[]`),

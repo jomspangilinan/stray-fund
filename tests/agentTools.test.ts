@@ -321,6 +321,25 @@ describe("read tools", () => {
     expect(text).not.toContain("secret bio");
   });
 
+  it("an unconfirmed neighbour answer does not move a cat in the funding order or show as its sex; a caretaker's confirmation does", async () => {
+    const { call } = setup();
+    const f = await makeCat({ name: "Said female", sex: "female", sexUnconfirmed: true });
+    const m = await makeCat({ name: "Said male", sex: "male", sexUnconfirmed: true, flags: ["pregnant"] });
+    await makeCat({ name: "Sick", flags: ["sick"] });
+    const read = async () => (await call("list_waiting_cats", {})).body.cats as { name: string; tier: number; sex: string }[];
+    let list = await read();
+    expect(list.map((c) => [c.name, c.tier, c.sex])).toEqual([
+      ["Said male", 2, "unknown"],
+      ["Sick", 3, "unknown"],
+      ["Said female", 5, "unknown"],
+    ]);
+    await db.update(cats).set({ sexUnconfirmed: false }).where(eq(cats.id, f.id));
+    list = await read();
+    expect(list[0]).toMatchObject({ name: "Said female", tier: 1, sex: "female" });
+    await db.update(cats).set({ sexUnconfirmed: false }).where(eq(cats.id, m.id));
+    expect((await read()).find((c) => c.name === "Said male")).toMatchObject({ tier: 5, sex: "male" });
+  });
+
   it("list_open_bookings gives what is owed, with no vet identity or gateway text", async () => {
     const { call } = setup();
     const w = await bookedWorld();

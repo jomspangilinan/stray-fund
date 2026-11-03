@@ -461,6 +461,7 @@ function Cats({ cats }: { cats: CaretakerQueue["catChoices"] }) {
             </ActionForm>
             <ActionForm action="cat_set_details" submitLabel="Save sex and flags" quiet>
               <Hidden name="catId" value={c.id} />
+              {c.sexUnconfirmed && <p className="small soft">A neighbour said {c.sex}. Saving confirms it.</p>}
               <label className="grid gap-1">
                 <span className="font-bold">Sex</span>
                 <select name="sex" className="field" defaultValue={c.sex}>

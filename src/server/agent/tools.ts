@@ -14,7 +14,7 @@ import { restPayoutGateway, type PayoutGateway } from "../paypal/payouts";
 import { manilaDate } from "../public";
 import { isPlainText } from "../plainText";
 import { fileReview } from "./review";
-import { rankWaitingCats } from "./rank";
+import { effectiveSex, rankWaitingCats } from "./rank";
 
 export const FUND_ACTION = "fund_cat";
 const MAX_REASON = 500;
@@ -67,7 +67,7 @@ async function loadLimits(tx: Tx | typeof db) {
   return limits;
 }
 
-type WaitingRow = Pick<typeof cats.$inferSelect, "id" | "name" | "sex" | "flags" | "queuedAt" | "createdAt">;
+type WaitingRow = Pick<typeof cats.$inferSelect, "id" | "name" | "sex" | "sexUnconfirmed" | "flags" | "queuedAt" | "createdAt">;
 
 async function loadWaiting(tx: Tx | typeof db): Promise<WaitingRow[]> {
   return tx
@@ -75,6 +75,7 @@ async function loadWaiting(tx: Tx | typeof db): Promise<WaitingRow[]> {
       id: cats.id,
       name: cats.name,
       sex: cats.sex,
+      sexUnconfirmed: cats.sexUnconfirmed,
       flags: cats.flags,
       queuedAt: cats.queuedAt,
       createdAt: cats.createdAt,
@@ -308,7 +309,7 @@ export function createAgentTools(deps: AgentToolDeps = {}) {
             rank: i + 1,
             catId: r.cat.id,
             name: r.cat.name,
-            sex: r.cat.sex,
+            sex: effectiveSex(r.cat),
             flags: r.cat.flags,
             tier: r.tier,
             waitDays: r.waitDays,

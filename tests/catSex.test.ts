@@ -71,6 +71,26 @@ describe("POST /api/cats/[id]/sex", () => {
     expect(await sexOf(cat.id)).toBe("unknown");
   });
 
+  it("marks the answer unconfirmed, and a caretaker saving the card confirms it, even with the same sex", async () => {
+    const cat = await makeCat();
+    const care = await makeUser("caretaker");
+    await signIn(await makeUser());
+    await post(cat.id, { answer: "female" });
+    const flag = async () => (await db.select().from(cats).where(eq(cats.id, cat.id)))[0].sexUnconfirmed;
+    expect(await flag()).toBe(true);
+    expect((await runAction("cat_set_details", care.id, { catId: cat.id, sex: "female", flags: [] })).ok).toBe(true);
+    expect(await flag()).toBe(false);
+    expect(await sexOf(cat.id)).toBe("female");
+  });
+
+  it("still shows the answer on the card and gives the ribbon while unconfirmed", async () => {
+    const cat = await makeCat();
+    await signIn(await makeUser());
+    await post(cat.id, { answer: "female" });
+    expect((await getCatCard(cat.id))!.cat.sex).toBe("Female");
+    expect((await getYard(null)).cats.find((c) => c.id === cat.id)!.female).toBe(true);
+  });
+
   it("does not overwrite: a later different answer leaves the first, and says what the sex is", async () => {
     const cat = await makeCat();
     await signIn(await makeUser());

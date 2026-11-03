@@ -73,7 +73,7 @@ export type CaretakerQueue = {
   /** Ideas for a cat's real name, oldest first. Who sent each is not kept here. */
   nameSuggestions: { id: string; catId: string; catName: string; name: string; /** The newest sighting of the cat, for its photo. */ photoSightingId: string | null; date: string }[];
   /** For the merge menu. */
-  catChoices: { id: string; name: string; status: string; sex: string; flags: string[] }[];
+  catChoices: { id: string; name: string; status: string; sex: string; sexUnconfirmed: boolean; flags: string[] }[];
 };
 
 const exactOf = (lat: number | null, lng: number | null, approximate = false): ExactSpot =>
@@ -120,7 +120,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
   ]);
 
   const allCats = await db
-    .select({ id: cats.id, name: cats.name, status: cats.status, sex: cats.sex, flags: cats.flags })
+    .select({ id: cats.id, name: cats.name, status: cats.status, sex: cats.sex, sexUnconfirmed: cats.sexUnconfirmed, flags: cats.flags })
     .from(cats)
     .orderBy(desc(cats.createdAt))
     .limit(200);

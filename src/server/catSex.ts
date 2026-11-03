@@ -7,7 +7,9 @@ import { RATE_LIMIT_PER_MINUTE, RateLimited } from "./spot";
 /*
  * Anyone signed in may say whether a cat is a girl or a boy, but only while the card does not say. The
  * first answer sets it and a later, different one is ignored. A caretaker's record (cat_set_details) writes
- * the column directly and always wins, before or after.
+ * the column directly and always wins, before or after, and saving the card confirms the sex. Until then the
+ * answer is marked unconfirmed: it shows on the card and gives the ribbon, but funding order and every other
+ * money or agent decision treats the cat as sex unknown (see effectiveSex).
  */
 
 export type SexAnswer = "female" | "male";
@@ -38,7 +40,7 @@ export async function answerSex(catId: string, userId: string, answer: SexAnswer
   return withColonyLock(async (tx) => {
     const [row] = await tx
       .update(cats)
-      .set({ sex: answer })
+      .set({ sex: answer, sexUnconfirmed: true })
       .where(and(eq(cats.id, catId), eq(cats.sex, "unknown")))
       .returning({ sex: cats.sex });
     if (!row) {

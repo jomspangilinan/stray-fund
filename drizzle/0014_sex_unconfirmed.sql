@@ -1,0 +1,1 @@
+ALTER TABLE "cats" ADD COLUMN "sex_unconfirmed" boolean DEFAULT false NOT NULL;

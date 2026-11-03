@@ -107,7 +107,7 @@ export const catSetDetails: Handler = async (caretakerId, body) => {
   return withColonyLock(async (tx) => {
     const [cat] = await tx.select().from(cats).where(eq(cats.id, catId)).for("update");
     if (!cat) throw new Refusal(404, "There is no such cat.");
-    await tx.update(cats).set({ sex, flags }).where(eq(cats.id, catId));
+    await tx.update(cats).set({ sex, sexUnconfirmed: false, flags }).where(eq(cats.id, catId));
     await audit(tx, {
       action: "cat_updated",
       caretakerId,

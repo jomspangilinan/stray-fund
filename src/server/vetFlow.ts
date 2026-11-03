@@ -12,6 +12,7 @@ import { CONFIRMED_BOOKING } from "./guardrails";
 import { CAPTURED, returnSurplus, toInt, unspentForCat } from "./ledger";
 import { storeOriginal } from "./photos";
 import { isPlainText } from "./plainText";
+import { effectiveSex } from "./agent/rank";
 import { manilaDate } from "./public";
 import { StoredObjectMissing, getStorage } from "./storage";
 import { enqueueWakeup } from "./wakeups";
@@ -807,6 +808,7 @@ export async function listVetDashboard(vetId: string): Promise<VetDashboard> {
       id: cats.id,
       name: cats.name,
       sex: cats.sex,
+      sexUnconfirmed: cats.sexUnconfirmed,
       areaName: cats.areaName,
       exactLat: cats.exactLat,
       exactLng: cats.exactLng,
@@ -822,7 +824,7 @@ export async function listVetDashboard(vetId: string): Promise<VetDashboard> {
     .where(eq(bookings.vetId, vetId))
     .orderBy(desc(bookings.createdAt));
   return {
-    fundedCats: funded.map((c) => ({ id: c.id, name: c.name, sex: c.sex, area: c.areaName, exact: exactOf(c) })),
+    fundedCats: funded.map((c) => ({ id: c.id, name: c.name, sex: effectiveSex(c), area: c.areaName, exact: exactOf(c) })),
     bookings: mine.map(toVetBooking),
   };
 }
