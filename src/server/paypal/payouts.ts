@@ -38,13 +38,13 @@ const AMBIGUOUS_4XX = new Set([408, 409, 429]);
 /** Treat a token as expired this long before PayPal would. */
 const TOKEN_MARGIN_MS = 60_000;
 
-type Credentials = { clientId: string; clientSecret: string; baseUrl: string };
+export type Credentials = { clientId: string; clientSecret: string; baseUrl: string };
 
 /** An error whose message is known to hold no secrets or personal data. */
 class SafeGatewayError extends Error {}
 
 /** Read at call time so importing this file needs no configuration. */
-function credentials(): Credentials {
+export function credentials(): Credentials {
   const clientId = process.env.PAYPAL_CLIENT_ID;
   const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
@@ -63,7 +63,7 @@ export function clearPayPalTokenCache(): void {
   cachedToken = undefined;
 }
 
-async function accessToken(c: Credentials, signal: AbortSignal): Promise<string> {
+export async function accessToken(c: Credentials, signal: AbortSignal): Promise<string> {
   const key = `${c.baseUrl}|${c.clientId}|${c.clientSecret}`;
   if (cachedToken?.key === key && Date.now() < cachedToken.expiresAt) {
     return cachedToken.token;

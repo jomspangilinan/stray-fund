@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { db, withColonyLock, type Tx } from "./db/client";
-import { agentActions, payouts, users, wakeups } from "./db/schema";
+import { agentActions, payouts, users } from "./db/schema";
+import { enqueueWakeup } from "./wakeups";
 import { checkSpend, type GuardrailCode, type SpendRequest } from "./guardrails";
 import {
   describeGatewayError,
@@ -93,17 +94,14 @@ async function enqueueStatusChange(
   status: PayoutStatus,
   extra: { code?: GuardrailCode; alert?: string; lateBatchId?: string } = {},
 ): Promise<void> {
-  await tx.insert(wakeups).values({
-    kind: "payout_status_changed",
-    payload: {
-      payoutId: payout.id,
-      catId: payout.catId,
-      bookingId: payout.bookingId,
-      kind: payout.kind,
-      status,
-      previousStatus: payout.status,
-      ...extra,
-    },
+  await enqueueWakeup(tx, "payout_status_changed", {
+    payoutId: payout.id,
+    catId: payout.catId,
+    bookingId: payout.bookingId,
+    kind: payout.kind,
+    status,
+    previousStatus: payout.status,
+    ...extra,
   });
 }
 
@@ -651,50 +649,57 @@ async function findPayout(
 
 /** Idempotent. The wakeup commits with the status change, and only on a real change. */
 export async function applyPayoutStatus(batchId: string, u: PayoutStatusUpdate): Promise<void> {
-  await withColonyLock(async (tx) => {
-    const payout = await findPayout(tx, batchId, u.senderBatchId);
-    if (!payout) return;
+  await withColonyLock((tx) => applyPayoutStatusIn(tx, batchId, u));
+}
 
-    if (payout.paypalPayoutBatchId !== batchId) {
-      // The sender id and batch id name different payouts, so this event settles neither.
-      if (await isBatchOnAnotherPayout(tx, batchId, payout.id)) {
-        console.error(`Batch ${batchId} is on another payout, not applying it to ${payout.id}`);
-        return;
-      }
-      if (payout.paypalPayoutBatchId) {
-        console.error(`Payout ${payout.id} keeps batch ${payout.paypalPayoutBatchId}, ignoring ${batchId}`);
-      }
-    }
+/** Same as applyPayoutStatus inside the caller's transaction, which must hold the colony lock. */
+export async function applyPayoutStatusIn(
+  tx: Tx,
+  batchId: string,
+  u: PayoutStatusUpdate,
+): Promise<void> {
+  const payout = await findPayout(tx, batchId, u.senderBatchId);
+  if (!payout) return;
 
-    // A row whose send has no recorded result gets its real batch id from PayPal.
-    const attach =
-      payout.paypalPayoutBatchId === null &&
-      (payout.status === "queued" || payout.status === "needs_review");
-    const paypalPayoutBatchId = attach ? batchId : payout.paypalPayoutBatchId;
-    const status = nextStatus(payout, u.itemStatus);
-    if (!status) {
-      if (paypalPayoutBatchId !== payout.paypalPayoutBatchId) {
-        await tx.update(payouts).set({ paypalPayoutBatchId }).where(eq(payouts.id, payout.id));
-      }
+  if (payout.paypalPayoutBatchId !== batchId) {
+    // The sender id and batch id name different payouts, so this event settles neither.
+    if (await isBatchOnAnotherPayout(tx, batchId, payout.id)) {
+      console.error(`Batch ${batchId} is on another payout, not applying it to ${payout.id}`);
       return;
     }
+    if (payout.paypalPayoutBatchId) {
+      console.error(`Payout ${payout.id} keeps batch ${payout.paypalPayoutBatchId}, ignoring ${batchId}`);
+    }
+  }
 
-    await tx
-      .update(payouts)
-      .set({
-        status,
-        paypalPayoutBatchId,
-        paypalItemId: u.itemId ?? payout.paypalItemId,
-        // A bad fee must not cost us the status it came with.
-        fee: status === "succeeded" && isCentavos(u.fee) ? u.fee : payout.fee,
-      })
-      .where(eq(payouts.id, payout.id));
-    await tx
-      .update(agentActions)
-      .set({ status, paypalRef: paypalPayoutBatchId })
-      .where(eq(agentActions.id, payout.actionId));
-    await enqueueStatusChange(tx, payout, status);
-  });
+  // A row whose send has no recorded result gets its real batch id from PayPal.
+  const attach =
+    payout.paypalPayoutBatchId === null &&
+    (payout.status === "queued" || payout.status === "needs_review");
+  const paypalPayoutBatchId = attach ? batchId : payout.paypalPayoutBatchId;
+  const status = nextStatus(payout, u.itemStatus);
+  if (!status) {
+    if (paypalPayoutBatchId !== payout.paypalPayoutBatchId) {
+      await tx.update(payouts).set({ paypalPayoutBatchId }).where(eq(payouts.id, payout.id));
+    }
+    return;
+  }
+
+  await tx
+    .update(payouts)
+    .set({
+      status,
+      paypalPayoutBatchId,
+      paypalItemId: u.itemId ?? payout.paypalItemId,
+      // A bad fee must not cost us the status it came with.
+      fee: status === "succeeded" && isCentavos(u.fee) ? u.fee : payout.fee,
+    })
+    .where(eq(payouts.id, payout.id));
+  await tx
+    .update(agentActions)
+    .set({ status, paypalRef: paypalPayoutBatchId })
+    .where(eq(agentActions.id, payout.actionId));
+  await enqueueStatusChange(tx, payout, status);
 }
 
 /**

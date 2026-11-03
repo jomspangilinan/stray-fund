@@ -33,10 +33,15 @@ export const db: Db = new Proxy({} as Db, {
 /** Arbitrary constant key for the single colony-wide money lock. */
 const COLONY_LOCK_KEY = 7_301_001;
 
+/** Takes the colony advisory lock until the transaction ends. Safe to call twice. */
+export async function lockColony(tx: Tx): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(${COLONY_LOCK_KEY})`);
+}
+
 /** Runs fn in a transaction holding the colony advisory lock until commit. */
 export async function withColonyLock<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(${COLONY_LOCK_KEY})`);
+    await lockColony(tx);
     return fn(tx);
   });
 }

@@ -31,3 +31,10 @@ export function formatPeso(c: number): string {
   const frac = String(abs % 100).padStart(2, "0");
   return `${c < 0 ? "-" : ""}₱${whole}.${frac}`;
 }
+
+/** Pesos typed by a person ("1,500", "99.5") to centavos, or null if it is not an amount. */
+export function parsePesoInput(text: string): number | null {
+  const m = /^(\d{1,7})(?:\.(\d{1,2}))?$/.exec(text.trim().replace(/,/g, ""));
+  if (!m) return null;
+  return Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0"));
+}

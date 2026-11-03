@@ -13,8 +13,11 @@
   },
   "dependencies": {
     "@paypal/agent-toolkit": "^1.11.0",
+    "@paypal/paypal-server-sdk": "^1.1.0",
+    "@paypal/react-paypal-js": "^10.6.1",
     "dotenv": "^18.0.9",
     "drizzle-orm": "^0.45.4",
+    "jose": "^6.2.15",
     "next": "16.4.4",
     "pg": "^8.23.1",
     "react": "19.3.0",

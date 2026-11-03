@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "users_username_lower_idx" ON "users" USING btree (lower("username"));--> statement-breakpoint
+ALTER TABLE "donations" ADD CONSTRAINT "donations_breakdown_check" CHECK ("donations"."status" = 'pending' or "donations"."gross" = "donations"."paypal_fee" + "donations"."net");

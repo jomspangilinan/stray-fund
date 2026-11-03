@@ -1,0 +1,227 @@
+import {
+  CheckoutPaymentIntent,
+  Client,
+  Environment,
+  OrdersController,
+} from "@paypal/paypal-server-sdk";
+import { and, eq } from "drizzle-orm";
+import { CURRENCY, MAX_DONATION, MIN_DONATION } from "@/lib/config";
+import { fromPayPalValue, toPayPalValue } from "@/lib/money";
+import { db, type Tx } from "../db/client";
+import { donations } from "../db/schema";
+import { CAPTURED } from "../ledger";
+import { enqueueWakeup } from "../wakeups";
+
+export type Donation = typeof donations.$inferSelect;
+
+export const PENDING = "pending";
+
+type Money = { currency_code?: unknown; value?: unknown };
+
+/** The parts of a PayPal capture we rely on, in PayPal's own field names. */
+export type RawCapture = {
+  id?: unknown;
+  status?: unknown;
+  amount?: Money;
+  seller_receivable_breakdown?: {
+    gross_amount?: Money;
+    paypal_fee?: Money;
+    net_amount?: Money;
+  };
+};
+
+/** A capture plus the order it belongs to. The order id comes from outside the capture. */
+export type PayPalCapture = RawCapture & { orderId: string };
+
+export class InvalidAmount extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidAmount";
+  }
+}
+export class CaptureMismatch extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CaptureMismatch";
+  }
+}
+export class UnknownOrder extends Error {
+  constructor(readonly orderId: string) {
+    super("Capture for an order we have no record of");
+    this.name = "UnknownOrder";
+  }
+}
+export class ForbiddenOrder extends Error {
+  constructor() {
+    super("This order belongs to someone else");
+    this.name = "ForbiddenOrder";
+  }
+}
+
+export interface OrdersGateway {
+  /** Amount in centavos. Returns the PayPal order id. */
+  createOrder(amount: number): Promise<{ orderId: string }>;
+  /** Returns PayPal's capture response body, parsed. Idempotent per order id. */
+  captureOrder(orderId: string): Promise<unknown>;
+}
+
+function sdkClient(): OrdersController {
+  const clientId = process.env.PAYPAL_CLIENT_ID;
+  const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+  if (!clientId || !clientSecret) throw new Error("PayPal credentials are not set");
+  return new OrdersController(
+    new Client({
+      clientCredentialsAuthCredentials: { oAuthClientId: clientId, oAuthClientSecret: clientSecret },
+      environment: process.env.PAYPAL_ENV === "production" ? Environment.Production : Environment.Sandbox,
+      timeout: 30_000,
+    }),
+  );
+}
+
+export const sdkOrdersGateway: OrdersGateway = {
+  async createOrder(amount) {
+    const res = await sdkClient().createOrder({
+      body: {
+        intent: CheckoutPaymentIntent.Capture,
+        purchaseUnits: [
+          {
+            amount: { currencyCode: CURRENCY, value: toPayPalValue(amount) },
+            description: "Donation to Stray Fund",
+          },
+        ],
+      },
+    });
+    const orderId = res.result.id;
+    if (!orderId) throw new Error("PayPal returned no order id");
+    return { orderId };
+  },
+  async captureOrder(orderId) {
+    const res = await sdkClient().captureOrder({ id: orderId, paypalRequestId: `capture-${orderId}` });
+    return JSON.parse(String(res.body)) as unknown;
+  },
+};
+
+export function validateDonationAmount(amount: unknown): number {
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount)) {
+    throw new InvalidAmount("Amount must be a whole number of centavos");
+  }
+  if (amount < MIN_DONATION) throw new InvalidAmount("Amount is below the minimum donation");
+  if (amount > MAX_DONATION) throw new InvalidAmount("Amount is above the maximum donation");
+  return amount;
+}
+
+/** Creates the PayPal order, then a pending row owned by the donor. Fee and net stay 0 until capture. */
+export async function createDonationOrder(
+  userId: string,
+  amount: unknown,
+  gw: OrdersGateway = sdkOrdersGateway,
+): Promise<{ orderId: string }> {
+  const gross = validateDonationAmount(amount);
+  const { orderId } = await gw.createOrder(gross);
+  await db.insert(donations).values({
+    userId,
+    gross,
+    paypalFee: 0,
+    net: 0,
+    currency: CURRENCY,
+    paypalOrderId: orderId,
+    status: PENDING,
+  });
+  return { orderId };
+}
+
+function money(m: Money | undefined, what: string): number {
+  if (!m || m.currency_code !== CURRENCY || typeof m.value !== "string") {
+    throw new CaptureMismatch(`${what} is missing or not in ${CURRENCY}`);
+  }
+  try {
+    return fromPayPalValue(m.value);
+  } catch {
+    throw new CaptureMismatch(`${what} is not a valid amount`);
+  }
+}
+
+/** Picks the capture out of an order-capture response. */
+export function captureFromOrder(body: unknown): PayPalCapture {
+  const order = body as {
+    id?: unknown;
+    purchase_units?: { payments?: { captures?: RawCapture[] } }[];
+  };
+  const capture = order?.purchase_units?.[0]?.payments?.captures?.[0];
+  if (typeof order?.id !== "string" || !capture) {
+    throw new CaptureMismatch("Capture response had no capture");
+  }
+  return { ...capture, orderId: order.id };
+}
+
+/**
+ * The single idempotent writer for the capture response and the webhook. Fee and
+ * net come only from seller_receivable_breakdown and must add up to gross. Only the
+ * first writer flips the row to captured and queues the wakeup. Pass tx to join a
+ * caller's transaction (the webhook does, so dedupe and effect commit together).
+ */
+export async function recordCapture(capture: PayPalCapture, tx?: Tx): Promise<Donation> {
+  if (!tx) return db.transaction((t) => recordCapture(capture, t));
+
+  const [row] = await tx.select().from(donations).where(eq(donations.paypalOrderId, capture.orderId));
+  if (!row) throw new UnknownOrder(capture.orderId);
+  // Not COMPLETED (pending review, declined): nothing is captured yet.
+  if (capture.status !== "COMPLETED") return row;
+
+  if (typeof capture.id !== "string" || !capture.id) throw new CaptureMismatch("Capture has no id");
+  const b = capture.seller_receivable_breakdown;
+  const gross = money(b?.gross_amount, "gross_amount");
+  const fee = money(b?.paypal_fee, "paypal_fee");
+  const net = money(b?.net_amount, "net_amount");
+  if (gross !== fee + net) {
+    throw new CaptureMismatch(`gross ${gross} is not fee ${fee} plus net ${net}`);
+  }
+  if (gross !== row.gross) {
+    throw new CaptureMismatch(`captured ${gross} but the order was for ${row.gross}`);
+  }
+
+  // The conditional update is the atomic first-write test: a concurrent writer
+  // waits on this row, then sees it is no longer pending.
+  const [first] = await tx
+    .update(donations)
+    .set({ status: CAPTURED, paypalFee: fee, net, paypalCaptureId: capture.id })
+    .where(and(eq(donations.id, row.id), eq(donations.status, PENDING)))
+    .returning();
+  if (!first) {
+    const [current] = await tx.select().from(donations).where(eq(donations.id, row.id));
+    if (current.paypalCaptureId && current.paypalCaptureId !== capture.id) {
+      console.error(`Order ${capture.orderId} already has capture ${current.paypalCaptureId}, ignoring ${capture.id}`);
+    }
+    return current;
+  }
+  await enqueueWakeup(tx, "donation_captured", {
+    donationId: first.id,
+    userId: first.userId,
+    gross: first.gross,
+    net: first.net,
+  });
+  return first;
+}
+
+/** Captures the donor's own order at PayPal, then records it. 403 for another user's order. */
+export async function captureDonation(
+  userId: string,
+  orderId: string,
+  gw: OrdersGateway = sdkOrdersGateway,
+): Promise<Donation> {
+  const [row] = await db.select().from(donations).where(eq(donations.paypalOrderId, orderId));
+  if (!row) throw new UnknownOrder(orderId);
+  if (row.userId !== userId) throw new ForbiddenOrder();
+  if (row.status !== PENDING) return row;
+
+  let body: unknown;
+  try {
+    body = await gw.captureOrder(orderId);
+  } catch (e) {
+    // The webhook may have won the race and PayPal refuses a second capture.
+    const [again] = await db.select().from(donations).where(eq(donations.paypalOrderId, orderId));
+    if (again?.status === CAPTURED) return again;
+    throw e;
+  }
+  return recordCapture(captureFromOrder(body));
+}

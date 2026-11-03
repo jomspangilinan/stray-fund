@@ -36,6 +36,8 @@ export const users = pgTable(
       "users_role_check",
       sql`${t.role} in ('donor', 'caretaker', 'vet', 'foster')`,
     ),
+    // Usernames are unique ignoring case.
+    uniqueIndex("users_username_lower_idx").on(sql`lower(${t.username})`),
   ],
 );
 
@@ -113,6 +115,11 @@ export const donations = pgTable(
     check("donations_gross_check", sql`${t.gross} >= 0`),
     check("donations_fee_check", sql`${t.paypalFee} >= 0`),
     check("donations_net_check", sql`${t.net} >= 0`),
+    // A pending order has no fee or net yet. Every other row must add up.
+    check(
+      "donations_breakdown_check",
+      sql`${t.status} = 'pending' or ${t.gross} = ${t.paypalFee} + ${t.net}`,
+    ),
   ],
 );
 

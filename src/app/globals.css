@@ -1,26 +1,177 @@
 @import "tailwindcss";
 
+/*
+ * Stray Fund design tokens. Later UI tasks reuse these, so add to them rather
+ * than introducing new colours or fonts.
+ *
+ * Direction: street-level and trustworthy with money. A pavement-grey page, ink
+ * text, and one loud accent borrowed from jeepney signage. Money is always
+ * shown on a "ticket": a white slip with hard ink edges and a perforated bottom.
+ *
+ * Colour
+ *   pavement  page background (cool grey, not cream)
+ *   paper     surfaces that hold money or forms
+ *   ink       text and all borders
+ *   dusk      secondary text
+ *   sign      the one accent (jeepney yellow): primary actions, the selected amount
+ *   sampaguita  money that arrived, confirmations
+ *   chili     errors and refusals only
+ *   line      quiet dividers
+ * Type
+ *   font-display  Bricolage Grotesque, headings and amounts
+ *   font-sans     Figtree, everything else. Body 17px, lines under 70 characters.
+ * Shape
+ *   Controls and tickets have 2px ink borders, 6px radius, and a hard 3px offset
+ *   shadow (no blur). Classes: .btn, .btn-quiet, .field, .ticket, .chip, .note.
+ * Motion
+ *   Only responses to a tap: buttons press into their shadow. Reduced motion
+ *   turns that off.
+ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --pavement: #e7e9e6;
+  --paper: #fbfbf9;
+  --ink: #1c2230;
+  --dusk: #566070;
+  --sign: #ffc21a;
+  --sampaguita: #0b6b52;
+  --chili: #b8321f;
+  --line: #c9ceca;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-pavement: var(--pavement);
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-dusk: var(--dusk);
+  --color-sign: var(--sign);
+  --color-sampaguita: var(--sampaguita);
+  --color-chili: var(--chili);
+  --color-line: var(--line);
+  --font-display: var(--font-bricolage);
+  --font-sans: var(--font-figtree);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--pavement);
+  color: var(--ink);
+  font-family: var(--font-figtree), system-ui, sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-bricolage), system-ui, sans-serif;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.btn,
+.btn-quiet,
+.chip {
+  min-height: 3rem;
+  padding: 0.5rem 1.1rem;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 80ms ease, box-shadow 80ms ease;
+}
+
+.btn {
+  background: var(--sign);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+.btn-quiet {
+  background: var(--paper);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+.btn:active,
+.btn-quiet:active,
+.chip:active {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 var(--ink);
+}
+.btn:disabled {
+  background: var(--line);
+  color: var(--dusk);
+  border-color: var(--dusk);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* A preset amount. Selected state is carried by colour and the check mark, not colour alone. */
+.chip {
+  background: var(--paper);
+  font-family: var(--font-bricolage), system-ui, sans-serif;
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+}
+.chip[aria-checked="true"] {
+  background: var(--sign);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+.field {
+  min-height: 3rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  font: inherit;
+}
+
+.ticket {
+  position: relative;
+  padding: 1.25rem 1.25rem 1.75rem;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+/* Perforated bottom edge */
+.ticket::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.5rem;
+  border-bottom: 2px dashed var(--line);
+}
+
+.note {
+  padding: 0.75rem 1rem;
+  border-left: 6px solid var(--ink);
+  background: var(--paper);
+}
+.note-ok {
+  border-left-color: var(--sampaguita);
+}
+.note-bad {
+  border-left-color: var(--chili);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .btn-quiet,
+  .chip {
+    transition: none;
+  }
+  .btn:active,
+  .btn-quiet:active,
+  .chip:active {
+    transform: none;
+  }
 }

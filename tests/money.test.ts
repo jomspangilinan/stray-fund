@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatPeso, fromPayPalValue, toPayPalValue } from "../src/lib/money";
+import { formatPeso, fromPayPalValue, parsePesoInput, toPayPalValue } from "../src/lib/money";
 
 describe("money", () => {
   it("parses PayPal values to centavos", () => {
@@ -33,5 +33,19 @@ describe("money", () => {
     expect(formatPeso(5)).toBe("₱0.05");
     expect(formatPeso(-150000)).toBe("-₱1,500.00");
     expect(formatPeso(123456789)).toBe("₱1,234,567.89");
+  });
+});
+
+describe("parsePesoInput", () => {
+  it("parses whole and decimal pesos to centavos", () => {
+    expect(parsePesoInput("500")).toBe(50_000);
+    expect(parsePesoInput("1,500")).toBe(150_000);
+    expect(parsePesoInput("99.5")).toBe(9_950);
+    expect(parsePesoInput(" 100.25 ")).toBe(10_025);
+  });
+  it("rejects anything else", () => {
+    for (const bad of ["", "abc", "-5", "1.234", "1e3", "12345678"]) {
+      expect(parsePesoInput(bad)).toBeNull();
+    }
   });
 });

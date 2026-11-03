@@ -8,3 +8,13 @@ export const COLONY = {
   // Invented placeholder coordinates, not a real location.
   centre: { lat: 10.1234, lng: 120.5678 },
 } as const;
+
+/** Read at call time so tests and deploys can change it. */
+export function isDemoMode(): boolean {
+  return process.env.DEMO_MODE === "true";
+}
+
+/** Smallest donation, in centavos (PHP 100). */
+export const MIN_DONATION = 10_000;
+/** Largest single donation, in centavos (PHP 100,000). A sanity cap. */
+export const MAX_DONATION = 10_000_000;

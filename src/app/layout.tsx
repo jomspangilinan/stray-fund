@@ -1,29 +1,40 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
+import { Bricolage_Grotesque, Figtree } from "next/font/google";
 import "./globals.css";
+import { APP_NAME } from "@/lib/config";
+import { Brand, DemoBar, HeaderSession } from "@/components/SiteChrome";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const bricolage = Bricolage_Grotesque({
+  variable: "--font-bricolage",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const figtree = Figtree({
+  variable: "--font-figtree",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "Stray Fund",
+  title: APP_NAME,
   description: "Community funding for neighbourhood stray cat care",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="en" className={`${bricolage.variable} ${figtree.variable} h-full antialiased`}>
+      <body className="min-h-full flex flex-col">
+        <Suspense fallback={null}>
+          <DemoBar />
+        </Suspense>
+        <header className="mx-auto flex w-full max-w-xl items-center justify-between gap-4 px-4 py-4">
+          <Brand />
+          <Suspense fallback={null}>
+            <HeaderSession />
+          </Suspense>
+        </header>
+        <div className="mx-auto w-full max-w-xl flex-1 px-4 pb-16">{children}</div>
+      </body>
     </html>
   );
 }
