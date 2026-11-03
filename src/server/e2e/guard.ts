@@ -2,21 +2,28 @@
  * E2E_FAKES swaps PayPal and the AI for local fakes, at the seams that already exist: the orders gateway,
  * the payout gateway, the webhook check and AiTransport. Nothing else changes. It exists for the end-to-end
  * test and must never run where real money or real people are involved, so a production server refuses to
- * start with it set at all, whatever the value.
+ * start with it set at all, whatever the value. The same goes for any process pointed at live PayPal, because the worker
+ * runs under tsx and may have no NODE_ENV at all.
  */
 
 type Env = Record<string, string | undefined>;
 
 export class FakesInProduction extends Error {
   constructor() {
-    super("E2E_FAKES must not be set when NODE_ENV is production. Unset it and start again.");
+    super("E2E_FAKES must not be set when NODE_ENV is production or PAYPAL_ENV is live. Unset it and start again.");
     this.name = "FakesInProduction";
   }
 }
 
-/** Throws when E2E_FAKES is set to anything at all on a production server. */
+/** True when PAYPAL_ENV points at live PayPal. "production" is what the PayPal clients read; "live" is refused too, to be safe. */
+export function paypalIsLive(env: Env = process.env): boolean {
+  const v = (env.PAYPAL_ENV ?? "").trim().toLowerCase();
+  return v === "production" || v === "live";
+}
+
+/** Throws when E2E_FAKES is set to anything at all on a production server or against live PayPal. */
 export function assertE2eFakesSafe(env: Env = process.env): void {
-  if (env.NODE_ENV === "production" && env.E2E_FAKES !== undefined && env.E2E_FAKES !== "") {
+  if ((env.NODE_ENV === "production" || paypalIsLive(env)) && env.E2E_FAKES !== undefined && env.E2E_FAKES !== "") {
     throw new FakesInProduction();
   }
 }

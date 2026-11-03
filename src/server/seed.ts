@@ -16,7 +16,7 @@ import {
   users,
 } from "./db/schema";
 import { DEMO_CLINIC_NAME, ensureDemoPersonas } from "./demoPersonas";
-import { assertE2eFakesSafe } from "./e2e/guard";
+import { assertE2eFakesSafe, paypalIsLive } from "./e2e/guard";
 import { fuzzLocation } from "./location";
 
 /*
@@ -45,9 +45,28 @@ type Env = Record<string, string | undefined>;
 export function assertSeedAllowed(env: Env = process.env): void {
   assertE2eFakesSafe(env);
   if (!env.DATABASE_URL) throw new SeedRefused("DATABASE_URL is not set, so there is no database to seed.");
+  // The sample story leaves a confirmed booking with no deposit and a queued cat. On real PayPal credentials the
+  // worker could start a real deposit for them, so the seed is for demos only.
+  if (env.DEMO_MODE !== "true") throw new SeedRefused("Seeding is for demos only. Set DEMO_MODE=true to seed. Nothing was changed.");
+  if (paypalIsLive(env)) throw new SeedRefused("Seeding is refused while PAYPAL_ENV is live: the worker could start a real deposit for the sample booking. Nothing was changed.");
   if (env.SEED_CONFIRM !== "yes") {
     throw new SeedRefused(
       "Seeding empties every table in the database first. Nothing was changed. To go ahead, run it again with SEED_CONFIRM=yes.",
+    );
+  }
+}
+
+const isSampleId = (id: string | null) => id === null || id.startsWith(SAMPLE_PREFIX) || id.startsWith("E2E-");
+
+/** Throws when the database holds a PayPal id that is not SAMPLE- or E2E-, unless SEED_WIPE_REAL=yes. Reads only. */
+export async function assertNoRealLedger(env: Env = process.env): Promise<void> {
+  if (env.SEED_WIPE_REAL === "yes") return;
+  const orders = await db.select({ id: donations.paypalOrderId }).from(donations);
+  const batches = await db.select({ id: payouts.paypalPayoutBatchId }).from(payouts);
+  const real = orders.filter((r) => !isSampleId(r.id)).length + batches.filter((r) => !isSampleId(r.id)).length;
+  if (real > 0) {
+    throw new SeedRefused(
+      `This database holds ${real} PayPal id${real === 1 ? "" : "s"} that are not sample or test ids, so it looks like a real ledger. Seeding would empty it. Nothing was changed. If you really mean it, run again with SEED_WIPE_REAL=yes.`,
     );
   }
 }
@@ -95,7 +114,8 @@ const SEED_CATS: SeedCat[] = [
 const SEED_DONORS = ["demo_ate_lorna", "demo_kuya_ben", "demo_lola_nena", "demo_tito_jun"] as const;
 
 /** Resets the database the app is pointed at and writes the sample story. Caller has checked assertSeedAllowed. */
-export async function seed(): Promise<{ cats: number; donors: number }> {
+export async function seed(env: Env = process.env): Promise<{ cats: number; donors: number }> {
+  await assertNoRealLedger(env);
   await db.transaction(async (tx) => {
     const { rows } = await tx.execute(sql`select tablename from pg_tables where schemaname = 'public'`);
     const names = (rows as { tablename: string }[]).map((r) => `"${r.tablename}"`).join(", ");

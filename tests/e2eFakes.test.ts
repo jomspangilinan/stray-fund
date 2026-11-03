@@ -36,6 +36,18 @@ describe("E2E_FAKES is refused in production", () => {
     expect(() => assertE2eFakesSafe({ E2E_FAKES: "true" })).not.toThrow();
   });
 
+  it("is also refused when PAYPAL_ENV is live, whatever NODE_ENV says (the worker runs under tsx and may have no NODE_ENV)", () => {
+    for (const live of ["production", "live", "LIVE", " Production "]) {
+      expect(() => assertE2eFakesSafe({ PAYPAL_ENV: live, E2E_FAKES: "true" })).toThrow(FakesInProduction);
+      expect(() => assertE2eFakesSafe({ NODE_ENV: "development", PAYPAL_ENV: live, E2E_FAKES: "true" })).toThrow(FakesInProduction);
+      expect(() => e2eFakesEnabled({ PAYPAL_ENV: live, E2E_FAKES: "true" })).toThrow(FakesInProduction);
+    }
+    for (const safe of [undefined, "", "sandbox"]) {
+      expect(() => assertE2eFakesSafe({ PAYPAL_ENV: safe, E2E_FAKES: "true" })).not.toThrow();
+    }
+    expect(() => assertE2eFakesSafe({ PAYPAL_ENV: "live" })).not.toThrow();
+  });
+
   it("is on only for the exact value true", () => {
     expect(e2eFakesEnabled({ E2E_FAKES: "true" })).toBe(true);
     for (const value of [undefined, "", "false", "1", "TRUE"]) expect(e2eFakesEnabled({ E2E_FAKES: value })).toBe(false);
