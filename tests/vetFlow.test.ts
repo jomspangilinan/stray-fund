@@ -27,7 +27,7 @@ import { applyPayoutStatus, requestPayout } from "../src/server/moneyGate";
 import { storeOriginal } from "../src/server/photos";
 import { getCatCard, manilaDate } from "../src/server/public";
 import { SESSION_COOKIE, signSession, type Role } from "../src/server/session";
-import { getStorage } from "../src/server/storage";
+import { StoredObjectMissing, createLocalStorage, createS3Storage, getStorage } from "../src/server/storage";
 import { truncateAll } from "./helpers/db";
 import { FakeGateway, addPayout, fundCat, makeBooking, makeVet, setGuardrails } from "./helpers/payoutFixtures";
 
@@ -46,7 +46,8 @@ import {
   finishEvidence,
   getVetBooking,
   listVetDashboard,
-  receiptDateCandidates,
+  normalizeReceiptNumber,
+  receiptDate,
   retryPendingEvidence,
   submitEvidence,
 } from "../src/server/vetFlow";
@@ -129,7 +130,9 @@ describe("decideVerification", () => {
     ["a date on the booking day", { parsed: { date: "November 8, 2026" } }],
     ["a date today", { parsed: { date: "2026-11-10 09:12" } }],
     ["a day-first date", { parsed: { date: "25/11/2026" }, now: new Date("2026-11-30T00:00:00Z") }],
-    ["an ambiguous date where both readings pass", { parsed: { date: "11/09/2026" }, now: new Date("2026-11-10T00:00:00Z"), booking: { scheduledFor: new Date("2026-09-01T00:00:00Z") } }],
+    ["a month-first date that could also read day-first", { parsed: { date: "11/03/2026" }, now: new Date("2026-11-03T04:00:00Z"), booking: { scheduledFor: new Date("2026-11-02T16:00:00Z") } }],
+    ["a day-month-year date with dashes", { parsed: { date: "08-Nov-2026" } }],
+    ["the letter P as the currency", { parsed: { currency: "P" } }],
     ["a receipt dated today in Manila but tomorrow in UTC terms", { parsed: { date: "2026-11-11" }, now: new Date("2026-11-10T16:30:00Z") }],
   ];
   it.each(verified)("verifies with %s", (_n, over) => {
@@ -150,7 +153,8 @@ describe("decideVerification", () => {
     ["a date before the booking", { parsed: { date: "2026-11-07" } }, "date_before_booking"],
     ["a date in the future", { parsed: { date: "2026-11-11" } }, "date_in_future"],
     ["a date in the future by Manila's clock", { parsed: { date: "2026-11-12" }, now: new Date("2026-11-10T16:30:00Z") }, "date_in_future"],
-    ["an ambiguous date with one reading before the booking", { parsed: { date: "11/09/2026" }, booking: { scheduledFor: new Date("2026-10-01T00:00:00Z") } }, "date_before_booking"],
+    ["a month-first date before the booking", { parsed: { date: "11/07/2026" } }, "date_before_booking"],
+    ["a month-first date in the future", { parsed: { date: "12/01/2026" } }, "date_in_future"],
     ["a booking with no date", { booking: { scheduledFor: null } }, "date_before_booking"],
     ["a total unreadable", { parsed: { total_centavos: null } }, "total_unreadable"],
     ["a total ₱1.01 above the package", { parsed: { total_centavos: 150101 } }, "total_above_package"],
@@ -207,14 +211,28 @@ describe("decideVerification", () => {
 
 describe("date helpers", () => {
   it("reads the printed forms a clinic uses", () => {
-    expect(receiptDateCandidates("2026-11-03")).toEqual(["2026-11-03"]);
-    expect(receiptDateCandidates("Nov. 3, 2026")).toEqual(["2026-11-03"]);
-    expect(receiptDateCandidates("3rd November 2026")).toEqual(["2026-11-03"]);
-    expect(receiptDateCandidates("11/25/26")).toEqual(["2026-11-25"]);
-    expect(receiptDateCandidates("25-11-2026")).toEqual(["2026-11-25"]);
-    expect(receiptDateCandidates("03/11/2026")).toEqual(["2026-03-11", "2026-11-03"]);
-    expect(receiptDateCandidates("02/30/2026")).toEqual([]);
-    expect(receiptDateCandidates(null)).toEqual([]);
+    expect(receiptDate("2026-11-03")).toBe("2026-11-03");
+    expect(receiptDate("Nov. 3, 2026")).toBe("2026-11-03");
+    expect(receiptDate("3rd November 2026")).toBe("2026-11-03");
+    expect(receiptDate("03-Nov-2026")).toBe("2026-11-03");
+    expect(receiptDate("3 Nov 26")).toBe("2026-11-03");
+    expect(receiptDate("Nov-03-2026")).toBe("2026-11-03");
+    expect(receiptDate("11/25/26")).toBe("2026-11-25");
+    expect(receiptDate(null)).toBeNull();
+  });
+
+  it("reads a numeric date month first, and day first only when the first field is above 12", () => {
+    expect(receiptDate("03/11/2026")).toBe("2026-03-11");
+    expect(receiptDate("11/03/2026")).toBe("2026-11-03");
+    expect(receiptDate("25-11-2026")).toBe("2026-11-25");
+    expect(receiptDate("02/30/2026")).toBeNull();
+    expect(receiptDate("13/13/2026")).toBeNull();
+  });
+
+  it("normalizes receipt numbers down to letters and digits", () => {
+    for (const v of ["OR-1001", " or 1001 ", "OR#1001", "or.1001"]) expect(normalizeReceiptNumber(v)).toBe("or1001");
+    expect(normalizeReceiptNumber("---")).toBeNull();
+    expect(normalizeReceiptNumber(null)).toBeNull();
   });
 
   it("adds calendar months without sliding into the next month", () => {
@@ -281,9 +299,9 @@ async function makeClinicVet(clinicName: string | null = CLINIC) {
   return vet;
 }
 
-async function addReference(catId: string) {
+async function addReference(catId: string, state = "matched") {
   const { key } = await storeOriginal(await image());
-  await db.insert(sightings).values({ catId, originalKey: key, state: "matched" });
+  await db.insert(sightings).values({ catId, originalKey: key, state });
 }
 
 /** A cat in care with a confirmed booking and a deposit that succeeded. */
@@ -294,12 +312,12 @@ async function careWorld(opts: { references?: number; catStatus?: string; deposi
     .values({ name: `Cat${++seq}`, areaName: "Brgy 1", status: opts.catStatus ?? "in_care", exactLat: 10.1, exactLng: 120.1 })
     .returning();
   await fundCat(cat.id, opts.funded ?? 150000);
+  for (let i = 0; i < (opts.references ?? 1); i++) await addReference(cat.id);
   const [booking] = await db
     .insert(bookings)
     .values({ catId: cat.id, vetId: vet.id, packagePrice: 150000, status: "confirmed", scheduledFor: new Date(`${today()}T00:00:00+08:00`) })
     .returning();
   await addPayout({ cat, vet, booking }, { amount: 45000, status: opts.deposit ?? "succeeded", batchId: `dep-${++seq}` });
-  for (let i = 0; i < (opts.references ?? 1); i++) await addReference(cat.id);
   return { vet, cat, booking };
 }
 type World = Awaited<ReturnType<typeof careWorld>>;
@@ -490,6 +508,50 @@ describe("submitEvidence verified", () => {
     expect(rows.every((t) => (t.product ?? "").length > 0)).toBe(true);
   });
 
+  it("a receipt printed 11/03/2026 style for today's booking verifies", async () => {
+    const w = await careWorld();
+    const [y, m, d] = today().split("-");
+    script.receipt = goodReceipt({ date: `${m}/${d}/${y}` });
+    expect(await submit(w)).toEqual({ verification: "verified", reasons: [] });
+    expect((await treatmentRows(w.cat.id))[0].date).toBe(today());
+  });
+
+  it("compares only with confirmed sightings from before the booking", async () => {
+    const w = await careWorld({ references: 1 });
+    // Before the booking but never confirmed as this cat.
+    const { key } = await storeOriginal(await image());
+    await db.insert(sightings).values({ catId: w.cat.id, originalKey: key, state: "needs_review", createdAt: new Date(Date.now() - 86_400_000) });
+    // After the booking, so it could be the post-op photo passed off as a reference.
+    await addReference(w.cat.id);
+    await submit(w);
+    expect(calls.earImages).toBe(2); // The photo and the one good reference.
+  });
+
+  it("with only later or unconfirmed sightings there are no references, so a person decides", async () => {
+    const w = await careWorld({ references: 0 });
+    await addReference(w.cat.id);
+    await addReference(w.cat.id, "needs_review");
+    const out = await submit(w);
+    expect(out.verification).toBe("needs_review");
+    expect(out.reasons).toContain("no_reference_photos");
+  });
+
+  it("a trailing amount with decimals and no currency mark stays off the public record", async () => {
+    const w = await careWorld();
+    script.receipt = goodReceipt({ items: ["Neuter, feline ........ 1,000.00"] });
+    await submit(w);
+    const by = Object.fromEntries((await treatmentRows(w.cat.id)).map((t) => [t.type, t.product]));
+    expect(by.neuter).toBe("Neuter, feline");
+  });
+
+  it("keeps a dose that is not a trailing price", async () => {
+    const w = await careWorld();
+    script.receipt = goodReceipt({ items: ["Anti-rabies vaccine 1.0 ml"] });
+    await submit(w);
+    const by = Object.fromEntries((await treatmentRows(w.cat.id)).map((t) => [t.type, t.product]));
+    expect(by.vaccine).toBe("Anti-rabies vaccine 1.0 ml");
+  });
+
   it("drops line item prices from the public product text", async () => {
     const w = await careWorld();
     script.receipt = goodReceipt({
@@ -563,7 +625,7 @@ describe("reused receipt for a different cat is rejected", () => {
     expect(await db.select().from(reviewRequests)).toHaveLength(1);
   });
 
-  it.each(["OR-1001", " or-1001 ", "Or-1001"])("by receipt number %j in a new image", async (printed) => {
+  it.each(["OR-1001", " or-1001 ", "Or-1001", "OR 1001", "OR#1001"])("by receipt number %j in a new image", async (printed) => {
     const a = await careWorld();
     const b = await careWorld();
     await submit(a);
@@ -879,19 +941,57 @@ describe("AI unavailable: evidence stored, verification pending, retried by work
     expect(calls.receipt).toBe(0);
   });
 
-  it("one receipt that throws does not stop the rest", async () => {
+  const GONE = "originals/00000000-0000-4000-8000-00000000dead.jpg";
+
+  it.each(["fileKey", "earTipPhotoKey"] as const)("a pending row whose %s is gone goes to review, and does not stop the rest", async (column) => {
     const [a, b] = [await careWorld(), await careWorld()];
     script.receipt = new Error("down");
     await submit(a);
     await submit(b);
     await age();
-    // A's file is gone. That is not an outage, so B must still get its turn.
     const [ra] = await receiptRows(a.booking.id);
-    await db.update(receipts).set({ fileKey: "originals/missing.jpg" }).where(eq(receipts.id, ra.id));
+    await db.update(receipts).set({ [column]: GONE }).where(eq(receipts.id, ra.id));
     script.receipt = goodReceipt();
-    expect(await retryPendingEvidence()).toEqual({ examined: 2, completed: 1 });
-    expect((await receiptRows(a.booking.id))[0].verification).toBe("pending");
+
+    expect(await retryPendingEvidence()).toEqual({ examined: 2, completed: 2 });
+
+    const [row] = await receiptRows(a.booking.id);
+    expect(row.verification).toBe("needs_review");
+    expect(row.reasons).toEqual(["evidence_file_missing"]);
+    const reviews = await db.select().from(reviewRequests);
+    expect(reviews.map((r) => r.subject).join()).toContain(a.booking.id);
+    expect(await treatmentRows(a.cat.id)).toHaveLength(0);
     expect((await receiptRows(b.booking.id))[0].verification).toBe("verified");
+
+    // The vet is not stuck: a new submission is accepted and can verify.
+    script.receipt = goodReceipt({ receipt_number: "OR-5555" });
+    expect((await submit(a)).verification).toBe("verified");
+  });
+
+  it("a missing file on a row being finished answers needs_review, not an error", async () => {
+    const w = await careWorld();
+    script.receipt = new Error("down");
+    await submit(w);
+    const [r] = await receiptRows(w.booking.id);
+    await db.update(receipts).set({ fileKey: GONE }).where(eq(receipts.id, r.id));
+    expect(await finishEvidence(r.id)).toEqual({ verification: "needs_review", reasons: ["evidence_file_missing"] });
+  });
+
+  it("every storage driver reports a missing object the same way, and an outage differently", async () => {
+    const { mkdtemp } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const local = createLocalStorage(await mkdtemp(join(tmpdir(), "vetflow-")));
+    await expect(local.getPrivate(GONE)).rejects.toBeInstanceOf(StoredObjectMissing);
+    await expect(getStorage().getPrivate(GONE)).rejects.toBeInstanceOf(StoredObjectMissing);
+
+    const failing = (name: string) =>
+      createS3Storage({
+        privateBucket: "b",
+        client: { send: async () => { throw Object.assign(new Error("x"), { name }); } } as never,
+      });
+    await expect(failing("NoSuchKey").getPrivate(GONE)).rejects.toBeInstanceOf(StoredObjectMissing);
+    await expect(failing("ServiceUnavailable").getPrivate(GONE)).rejects.not.toBeInstanceOf(StoredObjectMissing);
   });
 
   it("a storage failure on submission still answers pending, not an error", async () => {

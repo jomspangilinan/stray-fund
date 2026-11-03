@@ -145,6 +145,17 @@ describe("checkSpend", () => {
       expect(await check(balance(receipt.id))).toEqual({ verdict: "allow" });
     });
 
+    it.each([[false], [null]])("denies a verified receipt when ear_tipped is %s", async (earTipped) => {
+      await addPayout(w, { amount: 45000, status: "succeeded" });
+      const receipt = await addReceipt(w.booking.id);
+      await db.update(cats).set({ earTipped }).where(eq(cats.id, w.cat.id));
+      expect(await check(balance(receipt.id))).toEqual(denied("EAR_TIP_NOT_CONFIRMED"));
+    });
+
+    it("does not ask a deposit for a confirmed ear-tip", async () => {
+      expect(await check(depositRequest(w))).toEqual({ verdict: "allow" });
+    });
+
     it("denies without a receipt", async () => {
       await addPayout(w, { amount: 45000, status: "succeeded" });
       expect(await check(balance())).toEqual(denied("RECEIPT_NOT_VERIFIED"));

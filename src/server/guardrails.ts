@@ -3,6 +3,7 @@ import type { Tx } from "./db/client";
 import {
   allowedPayees,
   bookings,
+  cats,
   guardrails,
   receipts,
   users,
@@ -15,6 +16,7 @@ export type GuardrailCode =
   | "OVER_DAY_CAP"
   | "OVER_ALLOCATION"
   | "RECEIPT_NOT_VERIFIED"
+  | "EAR_TIP_NOT_CONFIRMED"
   | "DEPOSIT_NOT_PAID"
   | "DUPLICATE_PAYOUT"
   | "BOOKING_NOT_CONFIRMED";
@@ -117,6 +119,11 @@ export async function checkSpend(
     `);
     if (deposits.length === 0) {
       return deny("DEPOSIT_NOT_PAID", "A balance needs a deposit that succeeded for this booking.");
+    }
+    // Verification already requires this. The gate holds the rule on its own as well.
+    const [cat] = await tx.select({ earTipped: cats.earTipped }).from(cats).where(eq(cats.id, r.catId));
+    if (cat?.earTipped !== true) {
+      return deny("EAR_TIP_NOT_CONFIRMED", "A balance needs a confirmed ear-tip on this cat.");
     }
   }
 

@@ -14,7 +14,7 @@ import { CAPTURED, returnSurplus, toInt, unspentForCat } from "./ledger";
 import { storeOriginal } from "./photos";
 import { isPlainText } from "./plainText";
 import { manilaDate } from "./public";
-import { getStorage } from "./storage";
+import { StoredObjectMissing, getStorage } from "./storage";
 import { enqueueWakeup } from "./wakeups";
 
 export type Booking = typeof bookings.$inferSelect;
@@ -67,6 +67,7 @@ const REASON_MESSAGES = {
   booking_not_open: "This booking is no longer open.",
   cat_not_in_care: "This cat is not in care.",
   deposit_not_paid: "The deposit for this booking has not been paid.",
+  evidence_file_missing: "We could not find the photos you sent. Please send them again.",
   surplus_unavailable: "The money held for this cat does not match the receipt, so a caretaker has to look at it.",
   duplicate_receipt_image: "This receipt image has already been used. Take a new photo of the correct receipt.",
   duplicate_receipt_number: "This receipt number has already been used.",
@@ -96,34 +97,28 @@ const fullYear = (raw: string) => (raw.length === 2 ? 2000 + Number(raw) : Numbe
 const monthOf = (name: string): number | undefined => MONTHS[name.toLowerCase().slice(0, 3)];
 
 /**
- * Every date a printed string could mean, month first as clinics here usually print it.
- * 03/11/2026 gives two answers, and a caller must accept only if both pass. Never uses
- * Date parsing, whose result depends on the machine's time zone and locale.
+ * The date a printed string means, or null. A numeric date is month first, as clinics here
+ * print it, and day first only when the first field cannot be a month. So a stale day-first
+ * receipt can pass this one check, an accepted trade-off since number, clinic, total and
+ * ear-tip still apply. Never uses Date parsing, which depends on the machine's zone and locale.
  */
-export function receiptDateCandidates(raw: string | null): string[] {
-  if (!raw) return [];
+export function receiptDate(raw: string | null): string | null {
+  if (!raw) return null;
   const text = raw.trim();
   let m = /\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/.exec(text);
-  if (m) return [isoDate(Number(m[1]), Number(m[2]), Number(m[3]))].filter((d): d is string => d !== null);
+  if (m) return isoDate(Number(m[1]), Number(m[2]), Number(m[3]));
 
   m = /\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})\b/.exec(text);
   if (m) {
-    const y = fullYear(m[3]);
-    const both = [isoDate(y, Number(m[1]), Number(m[2])), isoDate(y, Number(m[2]), Number(m[1]))];
-    return [...new Set(both.filter((d): d is string => d !== null))];
+    const [first, second] = [Number(m[1]), Number(m[2])];
+    return first <= 12 ? isoDate(fullYear(m[3]), first, second) : isoDate(fullYear(m[3]), second, first);
   }
 
-  m = /\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b/.exec(text);
-  if (m && monthOf(m[1])) {
-    const d = isoDate(Number(m[3]), monthOf(m[1])!, Number(m[2]));
-    return d ? [d] : [];
-  }
-  m = /\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})\b/.exec(text);
-  if (m && monthOf(m[2])) {
-    const d = isoDate(Number(m[3]), monthOf(m[2])!, Number(m[1]));
-    return d ? [d] : [];
-  }
-  return [];
+  m = /\b([A-Za-z]{3,9})\.?[\s-]+(\d{1,2})(?:st|nd|rd|th)?,?[\s-]+(\d{4}|\d{2})\b/.exec(text);
+  if (m && monthOf(m[1])) return isoDate(fullYear(m[3]), monthOf(m[1])!, Number(m[2]));
+  m = /\b(\d{1,2})(?:st|nd|rd|th)?[\s-]+([A-Za-z]{3,9})\.?,?[\s-]+(\d{4}|\d{2})\b/.exec(text);
+  if (m && monthOf(m[2])) return isoDate(fullYear(m[3]), monthOf(m[2])!, Number(m[1]));
+  return null;
 }
 
 /** Adds whole years and months to a calendar date. A day that does not exist becomes the month's last. */
@@ -169,13 +164,13 @@ function clinicMatches(printed: string | null, registered: string | null): boole
 
 export const normalizeReceiptNumber = (raw: unknown): string | null => {
   if (typeof raw !== "string") return null;
-  const n = raw.normalize("NFKC").trim().toLowerCase();
+  const n = raw.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
   return n === "" ? null : n;
 };
 
 function currencyMatches(printed: string | null): boolean {
   const c = printed?.trim().toUpperCase();
-  return c === CURRENCY || (c === "₱" && CURRENCY === "PHP");
+  return c === CURRENCY || ((c === "₱" || c === "P") && CURRENCY === "PHP");
 }
 
 // ---------- The decision ----------
@@ -221,14 +216,13 @@ export function decideVerification(
   } else {
     if (!clinicMatches(parsed.clinic, vet.clinicName)) reasons.push("clinic_mismatch");
 
-    const dates = receiptDateCandidates(parsed.date);
-    if (dates.length === 0) {
+    const printed = receiptDate(parsed.date);
+    if (printed === null) {
       reasons.push("date_unreadable");
     } else {
       const booked = booking.scheduledFor ? manilaDate(booking.scheduledFor) : null;
-      const today = manilaDate(now);
-      if (booked === null || dates.some((d) => d < booked)) reasons.push("date_before_booking");
-      if (dates.some((d) => d > today)) reasons.push("date_in_future");
+      if (booked === null || printed < booked) reasons.push("date_before_booking");
+      if (printed > manilaDate(now)) reasons.push("date_in_future");
     }
 
     const total = parsed.total_centavos;
@@ -485,11 +479,21 @@ type Run = { result: EvidenceResult; stop?: Stop };
 /** What the ear-tip column holds: the model's report, and how many reference photos it actually saw. */
 const StoredEarTip = EarTipSchema.extend({ reference_count: z.number().int().min(0) });
 
-async function referencePhotos(catId: string): Promise<Buffer[]> {
+/**
+ * Sightings confirmed as this cat, from before the booking. A later one could be the post-op
+ * photo itself passed off as a reference, and an unconfirmed one may be another cat.
+ */
+async function referencePhotos(catId: string, bookingId: string): Promise<Buffer[]> {
   const shots = await db
     .select({ key: sightings.originalKey })
     .from(sightings)
-    .where(eq(sightings.catId, catId))
+    .where(
+      and(
+        eq(sightings.catId, catId),
+        inArray(sightings.state, ["matched", "new_cat"]),
+        sql`${sightings.createdAt} < (select created_at from ${bookings} where ${bookings.id} = ${bookingId})`,
+      ),
+    )
     .orderBy(desc(sightings.createdAt))
     .limit(MAX_REFERENCES);
   const storage = getStorage();
@@ -513,6 +517,27 @@ async function runEvidence(receiptId: string): Promise<Run> {
   if (r.verification !== "pending") {
     return { result: { verification: r.verification as Verification, reasons: r.reasons } };
   }
+  try {
+    return await checkPending(r);
+  } catch (e) {
+    if (e instanceof StoredObjectMissing) return { result: await markEvidenceLost(r.id, r.bookingId) };
+    throw e;
+  }
+}
+
+/** A stored image is gone for good, and retrying cannot bring it back, so the vet is asked again. */
+async function markEvidenceLost(receiptId: string, bookingId: string): Promise<EvidenceResult> {
+  return withColonyLock(async (tx) => {
+    const [row] = await tx.select().from(receipts).where(eq(receipts.id, receiptId)).for("update");
+    if (row.verification !== "pending") return { verification: row.verification as Verification, reasons: row.reasons };
+    const reasons: ReasonCode[] = ["evidence_file_missing"];
+    await tx.update(receipts).set({ verification: "needs_review", reasons }).where(eq(receipts.id, receiptId));
+    await fileEvidenceReview(tx, bookingId, "needs_review");
+    return { verification: "needs_review", reasons };
+  });
+}
+
+async function checkPending(r: typeof receipts.$inferSelect): Promise<Run> {
   const [booking] = await db.select().from(bookings).where(eq(bookings.id, r.bookingId));
   const pending: EvidenceResult = { verification: "pending", reasons: [] };
   const storage = getStorage();
@@ -541,9 +566,10 @@ async function runEvidence(receiptId: string): Promise<Run> {
     earTip = storedEar.data;
     referenceCount = storedEar.data.reference_count;
   } else {
-    const references = await referencePhotos(booking.catId);
+    const references = await referencePhotos(booking.catId, booking.id);
     referenceCount = references.length;
-    const check = await verifyEarTip(await storage.getPrivate(r.earTipPhotoKey!), references);
+    if (!r.earTipPhotoKey) throw new StoredObjectMissing();
+    const check = await verifyEarTip(await storage.getPrivate(r.earTipPhotoKey), references);
     if (!check.ok && isStop(check.reason)) return { result: pending, stop: check.reason };
     earTip = check.ok ? check.data : null;
     if (earTip) {
@@ -632,7 +658,7 @@ async function applyEvidence(
     }
 
     // parsed and its date are non-null here, since the decision verified them.
-    const treatedOn = receiptDateCandidates(parsed!.date)[0];
+    const treatedOn = receiptDate(parsed!.date)!;
     await tx
       .insert(treatments)
       .values(treatmentRows(parsed!, treatedOn, { catId: cat.id, vetId: booking.vetId, receiptId: r.id }))
@@ -655,7 +681,7 @@ const PRODUCT_CHARS = /^[\p{L}\p{N} .,'()/%-]+$/u;
 const INSTRUCTION_WORDS = /\b(approve|approved|pay|paid|payment|transfer|send|ignore|instruction|instructions|system|prompt|admin|release|verified|assistant)\b/i;
 
 /** Clinics print the price on the same line. A public health record has no use for it. */
-const TRAILING_PRICE = /[\s.:-]*(?:PHP|Php|₱|P)\s*[\d,]+(?:\.\d{1,2})?\s*$/;
+const TRAILING_PRICE = /[\s.:-]*(?:(?:PHP|Php|₱|P)\s*[\d,]+(?:\.\d{1,2})?|[\d,]*\d\.\d{2})\s*$/;
 
 /** Treatments are public, and an item is text from an image. Anything but a short plain label gives way to generic words. */
 function productFor(type: keyof typeof PRODUCT_WORDS, items: string[]): string {

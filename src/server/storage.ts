@@ -3,6 +3,14 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
+/** The object is gone, as opposed to storage being unreachable. Retrying will not help. */
+export class StoredObjectMissing extends Error {
+  constructor() {
+    super("No such stored object");
+    this.name = "StoredObjectMissing";
+  }
+}
+
 /**
  * Photo storage. Originals live in a private area that has no public route anywhere.
  * Only scrubbed copies go to the public area.
@@ -51,7 +59,7 @@ export function createMemoryStorage(): MemoryStorage {
     },
     async getPrivate(key) {
       const b = priv.get(key);
-      if (!b) throw new Error(`No private object ${key}`);
+      if (!b) throw new StoredObjectMissing();
       return Buffer.from(b);
     },
     publicUrl: (key) => `/memory-photos/${key}`,
@@ -99,8 +107,12 @@ export function createS3Storage(opts: S3Options = {}): Storage {
       );
     },
     async getPrivate(key) {
-      const res = await getClient().send(new GetObjectCommand({ Bucket: privateBucket(), Key: key }));
-      if (!res.Body) throw new Error(`No private object ${key}`);
+      const res = await getClient()
+        .send(new GetObjectCommand({ Bucket: privateBucket(), Key: key }))
+        .catch((e: unknown) => {
+          throw e instanceof Error && e.name === "NoSuchKey" ? new StoredObjectMissing() : e;
+        });
+      if (!res.Body) throw new StoredObjectMissing();
       return Buffer.from(await res.Body.transformToByteArray());
     },
     publicUrl(key) {
@@ -127,7 +139,10 @@ export function createLocalStorage(dir: string = LOCAL_DATA_DIR): Storage {
   return {
     putPrivate: async (key, buf) => write(localPath(dir, "private", key), buf),
     putPublic: async (key, buf) => write(localPath(dir, "public", key), buf),
-    getPrivate: async (key) => readFile(localPath(dir, "private", key)),
+    getPrivate: async (key) =>
+      readFile(localPath(dir, "private", key)).catch((e: NodeJS.ErrnoException) => {
+        throw e.code === "ENOENT" ? new StoredObjectMissing() : e;
+      }),
     publicUrl: (key) => `/api/dev-photos/${key}`,
   };
 }

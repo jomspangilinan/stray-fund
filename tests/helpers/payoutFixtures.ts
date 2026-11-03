@@ -90,6 +90,12 @@ export async function addReceipt(bookingId: string, verification = "verified") {
     .insert(receipts)
     .values({ bookingId, fileKey: "k", sha256: `sha-${next()}`, verification })
     .returning();
+  // A verified receipt always comes with a confirmed ear-tip, as in applyEvidence.
+  if (verification === "verified") {
+    await db.execute(sql`
+      update cats set ear_tipped = true where id = (select cat_id from bookings where id = ${bookingId})
+    `);
+  }
   return receipt;
 }
 
