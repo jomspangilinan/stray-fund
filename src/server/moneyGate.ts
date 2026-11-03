@@ -1,8 +1,12 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { db, withColonyLock, type Tx } from "./db/client";
 import { agentActions, payouts, users, wakeups } from "./db/schema";
 import { checkSpend, type GuardrailCode, type SpendRequest } from "./guardrails";
-import type { PayoutCreateResult, PayoutGateway } from "./paypal/payouts";
+import {
+  describeGatewayError,
+  type PayoutCreateResult,
+  type PayoutGateway,
+} from "./paypal/payouts";
 
 export type PayoutStatus =
   | "awaiting_approval"
@@ -24,7 +28,17 @@ export type GateResult = {
   message?: string;
 };
 
-export type PayoutStatusUpdate = { itemStatus?: string; itemId?: string; fee?: number };
+export type PayoutStatusUpdate = {
+  itemStatus?: string;
+  itemId?: string;
+  fee?: number;
+  /** The payout row id, when PayPal's event carries it. Finds a row with no batch id yet. */
+  senderBatchId?: string;
+};
+
+export type ReviewResolution =
+  | { outcome: "paid"; paypalRef: string }
+  | { outcome: "not_paid"; note: string };
 
 type Payout = typeof payouts.$inferSelect;
 
@@ -55,11 +69,37 @@ const mergedInputs = (extra: object) =>
 function deniedAction(r: PayoutRequest, code: GuardrailCode) {
   return {
     action: `payout_${r.kind}`,
-    inputs: { ...r.inputs, code },
+    inputs: {
+      ...r.inputs,
+      code,
+      bookingId: r.bookingId,
+      catId: r.catId,
+      payeeId: r.payeeId,
+    },
     reason: r.reason,
     amount: r.amount,
     status: "denied",
   };
+}
+
+async function enqueueStatusChange(
+  tx: Tx,
+  payout: Payout,
+  status: PayoutStatus,
+  extra: { code?: GuardrailCode } = {},
+): Promise<void> {
+  await tx.insert(wakeups).values({
+    kind: "payout_status_changed",
+    payload: {
+      payoutId: payout.id,
+      catId: payout.catId,
+      bookingId: payout.bookingId,
+      kind: payout.kind,
+      status,
+      previousStatus: payout.status,
+      ...extra,
+    },
+  });
 }
 
 async function currentStatus(payoutId: string): Promise<PayoutStatus> {
@@ -71,8 +111,10 @@ async function currentStatus(payoutId: string): Promise<PayoutStatus> {
 }
 
 /**
- * Commits a queued payout's move to its next status, unless a newer attempt has
- * started or the row has moved on. Returns the status the row ends up in.
+ * Commits a payout's move to its next status and returns the status it ends up in.
+ * A batch id is good news from any attempt, and also clears a needs_review that
+ * a newer attempt caused. Bad news only counts from the latest attempt on a
+ * queued row.
  */
 async function settle(
   payout: Payout,
@@ -82,13 +124,17 @@ async function settle(
   const moved = await db.transaction(async (tx) => {
     const rows = await tx
       .update(payouts)
-      .set({ status, paypalPayoutBatchId: fields.batchId })
+      .set({
+        status,
+        paypalPayoutBatchId: fields.batchId,
+        lastGatewayError: fields.error,
+      })
       .where(
         and(
           eq(payouts.id, payout.id),
-          eq(payouts.status, "queued"),
-          // A batch id is good news from any attempt. Bad news only counts from the latest.
-          status === "sent" ? undefined : eq(payouts.attempts, payout.attempts),
+          status === "sent"
+            ? inArray(payouts.status, ["queued", "needs_review"])
+            : and(eq(payouts.status, "queued"), eq(payouts.attempts, payout.attempts)),
         ),
       )
       .returning({ id: payouts.id });
@@ -101,12 +147,16 @@ async function settle(
         ...(fields.error ? { inputs: mergedInputs({ gatewayError: fields.error }) } : {}),
       })
       .where(eq(agentActions.id, payout.actionId));
+    if (status !== "sent") await enqueueStatusChange(tx, payout, status);
     return true;
   });
   return moved ? status : currentStatus(payout.id);
 }
 
-function applyCreateResult(payout: Payout, result: PayoutCreateResult): Promise<PayoutStatus> {
+async function applyCreateResult(
+  payout: Payout,
+  result: PayoutCreateResult,
+): Promise<PayoutStatus> {
   switch (result.kind) {
     case "sent":
       return settle(payout, "sent", { batchId: result.batchId });
@@ -120,7 +170,17 @@ function applyCreateResult(payout: Payout, result: PayoutCreateResult): Promise<
       if (payout.attempts >= MAX_ATTEMPTS) {
         return settle(payout, "needs_review", { error: result.error });
       }
-      return Promise.resolve("queued");
+      await db
+        .update(payouts)
+        .set({ lastGatewayError: result.error })
+        .where(
+          and(
+            eq(payouts.id, payout.id),
+            eq(payouts.status, "queued"),
+            eq(payouts.attempts, payout.attempts),
+          ),
+        );
+      return currentStatus(payout.id);
   }
 }
 
@@ -305,10 +365,16 @@ export async function approvePayout(
           inputs: mergedInputs({ code: verdict.code }),
         })
         .where(eq(agentActions.id, payout.actionId));
+      await enqueueStatusChange(tx, payout, "rejected", { code: verdict.code });
       return { ...base, status: "rejected", code: verdict.code, message: verdict.message };
     }
 
-    await tx.update(payouts).set({ status: "queued" }).where(eq(payouts.id, payoutId));
+    // Stamped now, not at the claim, so the next approval's day cap already counts
+    // this one today. It also keeps the sweep off the send about to start.
+    await tx
+      .update(payouts)
+      .set({ status: "queued", lastAttemptAt: sql`now()` })
+      .where(eq(payouts.id, payoutId));
     await tx
       .update(agentActions)
       .set({ status: "queued", approvedBy: caretakerId })
@@ -341,7 +407,72 @@ export async function rejectPayout(
         inputs: mergedInputs({ rejectionReason: reason, rejectedBy: caretakerId }),
       })
       .where(eq(agentActions.id, payout.actionId));
+    await enqueueStatusChange(tx, payout, "rejected");
     return { ...base, status: "rejected" };
+  });
+}
+
+/**
+ * A caretaker's ruling on a payout nobody could settle automatically. Only acts
+ * from needs_review, so a second resolve is a no-op. The original action keeps
+ * its record and a new action row holds the ruling.
+ */
+export async function resolveNeedsReview(
+  payoutId: string,
+  caretakerId: string,
+  r: ReviewResolution,
+): Promise<GateResult> {
+  const evidence = (r.outcome === "paid" ? r.paypalRef : r.note).trim();
+  if (!evidence) {
+    throw new Error(
+      r.outcome === "paid" ? "A paid resolution needs a PayPal reference" : "A not_paid resolution needs a note",
+    );
+  }
+
+  return withColonyLock(async (tx): Promise<GateResult> => {
+    const payout = await loadForDecision(tx, payoutId, caretakerId);
+    const base = { payoutId, actionId: payout.actionId };
+    if (payout.status !== "needs_review") {
+      return { ...base, status: payout.status as PayoutStatus };
+    }
+
+    if (r.outcome === "paid") {
+      // Status lookups go by batch id, so one reference cannot serve two payouts.
+      const [other] = await tx
+        .select({ id: payouts.id })
+        .from(payouts)
+        .where(and(eq(payouts.paypalPayoutBatchId, evidence), ne(payouts.id, payoutId)));
+      if (other) throw new Error("That PayPal reference is already on another payout");
+    }
+
+    const status: PayoutStatus = r.outcome === "paid" ? "succeeded" : "failed";
+    await tx
+      .update(payouts)
+      .set({
+        status,
+        ...(r.outcome === "paid" ? { paypalPayoutBatchId: evidence } : {}),
+      })
+      .where(eq(payouts.id, payoutId));
+    await tx
+      .update(agentActions)
+      .set({ status, ...(r.outcome === "paid" ? { paypalRef: evidence } : {}) })
+      .where(eq(agentActions.id, payout.actionId));
+    await tx.insert(agentActions).values({
+      action: "payout_review_resolved",
+      inputs: {
+        payoutId,
+        outcome: r.outcome,
+        ...(r.outcome === "paid" ? { paypalRef: evidence } : { note: evidence }),
+        previousBatchId: payout.paypalPayoutBatchId,
+      },
+      reason: r.outcome === "paid" ? "Caretaker confirmed payment" : "Caretaker confirmed no payment",
+      amount: payout.amount,
+      status,
+      approvedBy: caretakerId,
+      paypalRef: r.outcome === "paid" ? evidence : null,
+    });
+    await enqueueStatusChange(tx, payout, status);
+    return { ...base, status };
   });
 }
 
@@ -353,70 +484,99 @@ function nextStatus(payout: Payout, itemStatus: string | undefined): PayoutStatu
       ? "failed"
       : undefined;
   if (!target) return undefined;
-  if (payout.status === "sent") return target;
+  // A real PayPal status settles a review that nobody could settle before.
+  if (payout.status === "sent" || payout.status === "needs_review") return target;
   if (payout.status === "succeeded" && ITEM_UNDOES_SUCCESS.has(itemStatus)) return "failed";
   return undefined;
+}
+
+const isCentavos = (fee: number | undefined): fee is number =>
+  fee !== undefined && Number.isSafeInteger(fee) && fee >= 0;
+
+/** We minted the sender batch id, so it is tried first. It may be any string from outside. */
+async function findPayout(
+  tx: Tx,
+  batchId: string,
+  senderBatchId: string | undefined,
+): Promise<Payout | undefined> {
+  if (senderBatchId) {
+    const [bySender] = await tx
+      .select()
+      .from(payouts)
+      .where(sql`${payouts.id}::text = ${senderBatchId}`);
+    if (bySender) return bySender;
+  }
+  const [byBatch] = await tx
+    .select()
+    .from(payouts)
+    .where(eq(payouts.paypalPayoutBatchId, batchId));
+  return byBatch;
 }
 
 /** Idempotent. The wakeup commits with the status change, and only on a real change. */
 export async function applyPayoutStatus(batchId: string, u: PayoutStatusUpdate): Promise<void> {
   await withColonyLock(async (tx) => {
-    const [payout] = await tx
-      .select()
-      .from(payouts)
-      .where(eq(payouts.paypalPayoutBatchId, batchId));
+    const payout = await findPayout(tx, batchId, u.senderBatchId);
     if (!payout) return;
+
+    // A row whose send has no recorded result gets its real batch id from PayPal.
+    const attach = payout.status === "queued" || payout.status === "needs_review";
+    const paypalPayoutBatchId = attach ? batchId : payout.paypalPayoutBatchId;
     const status = nextStatus(payout, u.itemStatus);
-    if (!status) return;
+    if (!status) {
+      if (paypalPayoutBatchId !== payout.paypalPayoutBatchId) {
+        await tx.update(payouts).set({ paypalPayoutBatchId }).where(eq(payouts.id, payout.id));
+      }
+      return;
+    }
 
     await tx
       .update(payouts)
       .set({
         status,
+        paypalPayoutBatchId,
         paypalItemId: u.itemId ?? payout.paypalItemId,
-        fee: status === "succeeded" ? (u.fee ?? payout.fee) : payout.fee,
+        // A bad fee must not cost us the status it came with.
+        fee: status === "succeeded" && isCentavos(u.fee) ? u.fee : payout.fee,
       })
       .where(eq(payouts.id, payout.id));
     await tx
       .update(agentActions)
-      .set({ status })
+      .set({ status, paypalRef: paypalPayoutBatchId })
       .where(eq(agentActions.id, payout.actionId));
-    await tx.insert(wakeups).values({
-      kind: "payout_status_changed",
-      payload: {
-        payoutId: payout.id,
-        catId: payout.catId,
-        bookingId: payout.bookingId,
-        kind: payout.kind,
-        status,
-        previousStatus: payout.status,
-      },
-    });
+    await enqueueStatusChange(tx, payout, status);
   });
 }
 
-/** Polls every sent payout. A failed poll is left for the next run. */
+/**
+ * Polls every sent payout, and every payout under review with a batch id to ask
+ * about. A failed row is logged and left for the next run.
+ */
 export async function reconcilePayouts(gw: PayoutGateway): Promise<void> {
-  const sent = await db
+  const rows = await db
     .select({ batchId: payouts.paypalPayoutBatchId })
     .from(payouts)
-    .where(eq(payouts.status, "sent"));
+    .where(
+      and(
+        inArray(payouts.status, ["sent", "needs_review"]),
+        isNotNull(payouts.paypalPayoutBatchId),
+      ),
+    );
 
-  for (const { batchId } of sent) {
+  for (const { batchId } of rows) {
     if (!batchId) continue;
-    let remote: Awaited<ReturnType<PayoutGateway["get"]>>;
     try {
-      remote = await gw.get(batchId);
-    } catch {
-      continue;
+      const remote = await gw.get(batchId);
+      // A dead batch moved no money, unless its item says otherwise.
+      const dead = BATCH_DEAD.has(remote.batchStatus) && remote.itemStatus !== "SUCCESS";
+      await applyPayoutStatus(batchId, {
+        itemStatus: dead ? "FAILED" : remote.itemStatus,
+        itemId: remote.itemId,
+        fee: remote.fee,
+      });
+    } catch (e) {
+      console.error(`Payout poll failed for batch ${batchId}: ${describeGatewayError(e)}`);
     }
-    // A dead batch moved no money, unless its item says otherwise.
-    const dead = BATCH_DEAD.has(remote.batchStatus) && remote.itemStatus !== "SUCCESS";
-    await applyPayoutStatus(batchId, {
-      itemStatus: dead ? "FAILED" : remote.itemStatus,
-      itemId: remote.itemId,
-      fee: remote.fee,
-    });
   }
 }
 
@@ -440,11 +600,15 @@ export async function retryUnknownPayouts(gw: PayoutGateway): Promise<void> {
     .orderBy(payouts.createdAt);
 
   for (const payout of stale) {
-    if (payout.attempts >= MAX_ATTEMPTS) {
-      // The last sender died before recording a result. Retries are used up.
-      await settle(payout, "needs_review", { error: "Retries exhausted" });
-    } else {
-      await send(payout.id, payout.attempts, gw);
+    try {
+      if (payout.attempts >= MAX_ATTEMPTS) {
+        // The last sender died before recording a result. Retries are used up.
+        await settle(payout, "needs_review", { error: "Retries exhausted" });
+      } else {
+        await send(payout.id, payout.attempts, gw);
+      }
+    } catch (e) {
+      console.error(`Payout retry failed for ${payout.id}: ${describeGatewayError(e)}`);
     }
   }
 }

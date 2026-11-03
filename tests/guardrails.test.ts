@@ -222,6 +222,27 @@ describe("checkSpend", () => {
       expect(await check(depositRequest(w, 45001))).toEqual(denied("OVER_DAY_CAP"));
     });
 
+    it("counts a payout on its last attempt's day, not the day it was created", async () => {
+      const w2 = await makeWorld();
+      const w3 = await makeWorld();
+      const longAgo = new Date(Date.now() - 3 * 86_400_000);
+      await addPayout(w2, {
+        amount: 100000,
+        status: "sent",
+        createdAt: longAgo,
+        lastAttemptAt: new Date(),
+      });
+      await addPayout(w3, {
+        amount: 500000,
+        status: "sent",
+        createdAt: new Date(),
+        lastAttemptAt: longAgo,
+      });
+      await setGuardrails({ maxPerDay: 145000 });
+      expect(await check(depositRequest(w, 45000))).toEqual({ verdict: "allow" });
+      expect(await check(depositRequest(w, 45001))).toEqual(denied("OVER_DAY_CAP"));
+    });
+
     it("ignores failed and rejected payouts today", async () => {
       const w2 = await makeWorld();
       const w3 = await makeWorld();

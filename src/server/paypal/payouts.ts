@@ -31,6 +31,8 @@ export interface PayoutGateway {
 }
 
 const TIMEOUT_MS = 30_000;
+/** Timeout, conflict and rate limit responses do not prove the batch was refused. */
+const AMBIGUOUS_4XX = new Set([408, 409, 429]);
 /** Treat a token as expired this long before PayPal would. */
 const TOKEN_MARGIN_MS = 60_000;
 
@@ -99,7 +101,7 @@ async function withDeadline<T>(fn: (signal: AbortSignal) => Promise<T>): Promise
 }
 
 /** Foreign error messages may echo the request, so only the error type is kept. */
-function describe(e: unknown): string {
+export function describeGatewayError(e: unknown): string {
   if (e instanceof SafeGatewayError) return e.message;
   return e instanceof Error ? e.name : "Error";
 }
@@ -131,7 +133,7 @@ export const restPayoutGateway: PayoutGateway = {
           signal,
         });
 
-        if (res.status >= 400 && res.status < 500) {
+        if (res.status >= 400 && res.status < 500 && !AMBIGUOUS_4XX.has(res.status)) {
           if (res.status === 401) clearPayPalTokenCache();
           const body = (await res.json().catch(() => null)) as { name?: unknown } | null;
           // The name is a PayPal enum. Messages and details can echo the receiver.
@@ -150,7 +152,7 @@ export const restPayoutGateway: PayoutGateway = {
         }
         return { kind: "sent", batchId, status: body.batch_header?.batch_status ?? "" };
       } catch (e) {
-        return { kind: "unknown", error: describe(e) };
+        return { kind: "unknown", error: describeGatewayError(e) };
       }
     });
   },
@@ -182,7 +184,14 @@ export const restPayoutGateway: PayoutGateway = {
       const status: PayoutBatchStatus = { batchStatus };
       if (item?.payout_item_id) status.itemId = item.payout_item_id;
       if (item?.transaction_status) status.itemStatus = item.transaction_status;
-      if (fee !== undefined) status.fee = fromPayPalValue(fee);
+      if (fee !== undefined) {
+        // A fee we cannot read must not stop the status it arrived with.
+        try {
+          status.fee = fromPayPalValue(fee);
+        } catch {
+          console.warn(`Unreadable PayPal fee on batch ${batchId}`);
+        }
+      }
       return status;
     });
   },

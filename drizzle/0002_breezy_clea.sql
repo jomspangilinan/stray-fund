@@ -1,0 +1,1 @@
+ALTER TABLE "payouts" ADD COLUMN "last_gateway_error" text;

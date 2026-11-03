@@ -133,7 +133,7 @@ export async function checkSpend(
     tx,
     sql`select coalesce(sum(amount), 0)::bigint as total from payouts
         where status not in ('failed', 'rejected')
-          and (created_at at time zone 'Asia/Manila')::date
+          and (coalesce(last_attempt_at, created_at) at time zone 'Asia/Manila')::date
             = (now() at time zone 'Asia/Manila')::date
           ${notExcluded}`,
   );

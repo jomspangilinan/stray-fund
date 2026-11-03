@@ -15,6 +15,13 @@
       "when": 1793684390176,
       "tag": "0001_moaning_miek",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793685192645,
+      "tag": "0002_breezy_clea",
+      "breakpoints": true
     }
   ]
 }

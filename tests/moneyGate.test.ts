@@ -10,6 +10,7 @@ import {
   reconcilePayouts,
   rejectPayout,
   requestPayout,
+  resolveNeedsReview,
   retryUnknownPayouts,
 } from "../src/server/moneyGate";
 import { closeTestPool, createTestPool, truncateAll } from "./helpers/db";
@@ -62,6 +63,23 @@ async function actionRow(id: string) {
 }
 const reserved = () => withColonyLock(async (tx) => (await getPoolStatus(tx)).reservedPayouts);
 const allWakeups = () => db.select().from(wakeups);
+const YESTERDAY = () => new Date(Date.now() - 86_400_000);
+
+async function blockWakeups(fn: () => Promise<void>) {
+  await db.execute(sql`alter table wakeups add constraint no_writes check (kind <> 'payout_status_changed') not valid`);
+  try {
+    await fn();
+  } finally {
+    await db.execute(sql`alter table wakeups drop constraint no_writes`);
+  }
+}
+
+async function expectOneWakeup(payoutId: string, status: string, previousStatus: string) {
+  const rows = await allWakeups();
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ kind: "payout_status_changed", status: "pending" });
+  expect(rows[0].payload).toMatchObject({ payoutId, status, previousStatus });
+}
 
 describe("money gate", () => {
   let w: World;
@@ -145,7 +163,13 @@ describe("money gate", () => {
 
         const action = await actionRow(res.actionId);
         expect(action.status).toBe("denied");
-        expect(action.inputs).toMatchObject({ source: "test", code });
+        expect(action.inputs).toMatchObject({
+          source: "test",
+          code,
+          bookingId: request.bookingId,
+          catId: request.catId,
+          payeeId: request.payeeId,
+        });
         expect(action.reason).toBe("kapon deposit");
         expect(action.amount).toBe(request.amount);
       },
@@ -223,6 +247,21 @@ describe("money gate", () => {
       expect((await actionRow(res.actionId)).status).toBe("failed");
       expect(await reserved()).toBe(0);
       expect(gw.calls).toHaveLength(1);
+      await expectOneWakeup(res.payoutId!, "failed", "queued");
+      expect((await payoutRow(res.payoutId!)).lastGatewayError).toBe(REJECTED.error);
+    });
+
+    it("a move to sent enqueues no wakeup", async () => {
+      await requestPayout(ask(w), new FakeGateway());
+      expect(await allWakeups()).toEqual([]);
+    });
+
+    it("an approved payout rejected by the gateway fails with a wakeup", async () => {
+      const first = new FakeGateway();
+      const res = await requestPayout(ask(w, 200001), first);
+      const approved = await approvePayout(res.payoutId!, caretakerId, new FakeGateway([REJECTED]));
+      expect(approved.status).toBe("failed");
+      await expectOneWakeup(res.payoutId!, "failed", "queued");
     });
   });
 
@@ -285,6 +324,53 @@ describe("money gate", () => {
       expect(gw.calls).toEqual([]);
     });
 
+    it("approving an old payout counts it against today, so the next one is over the cap", async () => {
+      const a = await makeWorld();
+      const b = await makeWorld();
+      const pa = await addPayout(a, { amount: 150000, status: "awaiting_approval", createdAt: YESTERDAY() });
+      const pb = await addPayout(b, { amount: 150000, status: "awaiting_approval", createdAt: YESTERDAY() });
+      await setGuardrails({ maxPerDay: 200000 });
+      const gw = new FakeGateway();
+
+      expect((await approvePayout(pa.id, caretakerId, gw)).status).toBe("sent");
+      const second = await approvePayout(pb.id, caretakerId, gw);
+      expect(second).toMatchObject({ status: "rejected", code: "OVER_DAY_CAP" });
+      expect(gw.calls).toHaveLength(1);
+    });
+
+    it("an approve-time denial enqueues a wakeup carrying the code", async () => {
+      const gw = new FakeGateway();
+      const res = await requestPayout(ask(w, 200001), gw);
+      await setGuardrails({ maxPerCat: 200000 });
+      await approvePayout(res.payoutId!, caretakerId, gw);
+      await expectOneWakeup(res.payoutId!, "rejected", "awaiting_approval");
+      expect((await allWakeups())[0].payload).toMatchObject({ code: "OVER_CAT_CAP" });
+    });
+
+    it("a caretaker's reject enqueues a wakeup, and a repeat does not", async () => {
+      const gw = new FakeGateway();
+      const res = await requestPayout(ask(w, 200001), gw);
+      await rejectPayout(res.payoutId!, caretakerId, "too much");
+      await rejectPayout(res.payoutId!, caretakerId, "too much");
+      await expectOneWakeup(res.payoutId!, "rejected", "awaiting_approval");
+    });
+
+    it("a reject whose wakeup cannot be written does not commit", async () => {
+      const gw = new FakeGateway();
+      const res = await requestPayout(ask(w, 200001), gw);
+      await blockWakeups(async () => {
+        await expect(rejectPayout(res.payoutId!, caretakerId, "no")).rejects.toThrow();
+      });
+      expect((await payoutRow(res.payoutId!)).status).toBe("awaiting_approval");
+    });
+
+    it("a successful approval enqueues no wakeup for the move to sent", async () => {
+      const gw = new FakeGateway();
+      const res = await requestPayout(ask(w, 200001), gw);
+      await approvePayout(res.payoutId!, caretakerId, gw);
+      expect(await allWakeups()).toEqual([]);
+    });
+
     it("rejecting frees the reservation and a later approve is a no-op", async () => {
       const gw = new FakeGateway();
       const res = await requestPayout(ask(w, 200001), gw);
@@ -342,6 +428,50 @@ describe("money gate", () => {
       expect(results.map((r) => r.status).sort()).toEqual(["rejected", "sent"]);
       expect(results.find((r) => r.status === "rejected")?.code).toBe("DUPLICATE_PAYOUT");
       expect(await db.select().from(payouts)).toHaveLength(1);
+    });
+
+    it("the row's ids win over anything a caller put in inputs", async () => {
+      await addPayout(w, { amount: 45000, status: "sent" });
+      const res = await requestPayout(
+        { ...ask(w), inputs: { bookingId: "forged", code: "forged" } },
+        new FakeGateway(),
+      );
+      expect((await actionRow(res.actionId)).inputs).toMatchObject({
+        bookingId: w.booking.id,
+        code: "DUPLICATE_PAYOUT",
+      });
+    });
+
+    it("concurrent approvals of old payouts cannot both fit today's cap", async () => {
+      const a = await makeWorld();
+      const b = await makeWorld();
+      const pa = await addPayout(a, { amount: 150000, status: "awaiting_approval", createdAt: YESTERDAY() });
+      const pb = await addPayout(b, { amount: 150000, status: "awaiting_approval", createdAt: YESTERDAY() });
+      await setGuardrails({ maxPerDay: 200000 });
+      const gw = new FakeGateway();
+      // Holds each claim back, so the second approval's check always runs in the
+      // gap between the first approval's commit and its claim.
+      await db.execute(sql`
+        create function slow_claim() returns trigger language plpgsql as
+        $$ begin perform pg_sleep(0.3); return new; end $$
+      `);
+      await db.execute(sql`
+        create trigger slow_claim before update on payouts for each row
+        when (new.attempts > old.attempts) execute function slow_claim()
+      `);
+      let results;
+      try {
+        results = await Promise.all([
+          approvePayout(pa.id, caretakerId, gw),
+          approvePayout(pb.id, caretakerId, gw),
+        ]);
+      } finally {
+        await db.execute(sql`drop trigger slow_claim on payouts`);
+        await db.execute(sql`drop function slow_claim()`);
+      }
+      expect(gw.calls).toHaveLength(1);
+      expect(results.map((r) => r.status).sort()).toEqual(["rejected", "sent"]);
+      expect(results.find((r) => r.status === "rejected")?.code).toBe("OVER_DAY_CAP");
     });
 
     it("the unique index alone stops a duplicate that passed the check", async () => {
@@ -428,6 +558,98 @@ describe("money gate", () => {
       // The reservation also blocks a replacement payout.
       const again = await requestPayout(ask(w), gw);
       expect(again.code).toBe("DUPLICATE_PAYOUT");
+    });
+
+    it("keeps the last gateway error on the row, and enqueues nothing while still queued", async () => {
+      const gw = new FakeGateway([{ kind: "unknown", error: "first" }, { kind: "unknown", error: "second" }]);
+      const res = await requestPayout(ask(w), gw);
+      expect((await payoutRow(res.payoutId!)).lastGatewayError).toBe("first");
+      await ageQueuedPayouts();
+      await retryUnknownPayouts(gw);
+      expect((await payoutRow(res.payoutId!)).lastGatewayError).toBe("second");
+      expect(await allWakeups()).toEqual([]);
+    });
+
+    it("a late rejection from an older attempt is ignored", async () => {
+      const sweepGw = new FakeGateway([UNKNOWN]);
+      const gw = new FakeGateway([REJECTED]);
+      gw.onCreate = async () => {
+        await ageQueuedPayouts();
+        await retryUnknownPayouts(sweepGw);
+      };
+      const res = await requestPayout(ask(w), gw);
+
+      expect(res.status).toBe("queued");
+      expect(sweepGw.calls[0].senderBatchId).toBe(res.payoutId);
+      expect(await payoutRow(res.payoutId!)).toMatchObject({
+        status: "queued",
+        attempts: 2,
+        lastGatewayError: UNKNOWN.error,
+      });
+      expect(await reserved()).toBe(45000);
+      expect(await allWakeups()).toEqual([]);
+    });
+
+    it("a late unknown from an older attempt does not overwrite the newer error", async () => {
+      const sweepGw = new FakeGateway([{ kind: "unknown", error: "newer" }]);
+      const gw = new FakeGateway([{ kind: "unknown", error: "older" }]);
+      gw.onCreate = async () => {
+        await ageQueuedPayouts();
+        await retryUnknownPayouts(sweepGw);
+      };
+      const res = await requestPayout(ask(w), gw);
+      expect((await payoutRow(res.payoutId!)).lastGatewayError).toBe("newer");
+    });
+
+    it("a late sent from an older attempt is accepted while a newer attempt is unresolved", async () => {
+      const sweepGw = new FakeGateway([UNKNOWN]);
+      const gw = new FakeGateway([SENT("B-late")]);
+      gw.onCreate = async () => {
+        await ageQueuedPayouts();
+        await retryUnknownPayouts(sweepGw);
+      };
+      const res = await requestPayout(ask(w), gw);
+
+      expect(res.status).toBe("sent");
+      expect(await payoutRow(res.payoutId!)).toMatchObject({
+        status: "sent",
+        attempts: 2,
+        paypalPayoutBatchId: "B-late",
+      });
+      expect((await actionRow(res.actionId)).paypalRef).toBe("B-late");
+    });
+
+    it("a late sent is accepted from needs_review and stores its batch id", async () => {
+      const sweepGw = new FakeGateway([REJECTED]);
+      const gw = new FakeGateway([SENT("B-late")]);
+      gw.onCreate = async () => {
+        await ageQueuedPayouts();
+        await retryUnknownPayouts(sweepGw);
+        expect((await payoutRow(gw.calls[0].senderBatchId)).status).toBe("needs_review");
+      };
+      const res = await requestPayout(ask(w), gw);
+
+      expect(res.status).toBe("sent");
+      expect(await payoutRow(res.payoutId!)).toMatchObject({
+        status: "sent",
+        paypalPayoutBatchId: "B-late",
+      });
+      expect(await reserved()).toBe(45000);
+      // One wakeup for the move to needs_review, none for the move to sent.
+      await expectOneWakeup(res.payoutId!, "needs_review", "queued");
+    });
+
+    it("a sent never revives a payout already settled", async () => {
+      const sweepGw = new FakeGateway([REJECTED]);
+      const gw = new FakeGateway([SENT("B-late")]);
+      gw.onCreate = async (i) => {
+        await ageQueuedPayouts();
+        await retryUnknownPayouts(sweepGw);
+        await resolveNeedsReview(i.senderBatchId, caretakerId, { outcome: "not_paid", note: "checked" });
+      };
+      const res = await requestPayout(ask(w), gw);
+      expect(res.status).toBe("failed");
+      expect((await payoutRow(res.payoutId!)).paypalPayoutBatchId).toBeNull();
     });
 
     it("a retry that lands records the batch", async () => {
@@ -553,6 +775,177 @@ describe("money gate", () => {
       expect(gw.calls).toEqual([]);
       expect((await payoutRow(res.payoutId!)).status).toBe("needs_review");
       expect(await reserved()).toBe(45000);
+      await expectOneWakeup(res.payoutId!, "needs_review", "queued");
+    });
+
+    it("a gateway outcome whose wakeup cannot be written does not commit", async () => {
+      const gw = new FakeGateway([REJECTED]);
+      const p = await addPayout(w, { amount: 45000, status: "queued", createdAt: YESTERDAY() });
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      await blockWakeups(() => retryUnknownPayouts(gw));
+      expect((await payoutRow(p.id)).status).toBe("queued");
+      error.mockRestore();
+    });
+
+    it("a retry's rejection enqueues one needs_review wakeup", async () => {
+      const gw = new FakeGateway([UNKNOWN, REJECTED]);
+      const res = await requestPayout(ask(w), gw);
+      await ageQueuedPayouts();
+      await retryUnknownPayouts(gw);
+      await expectOneWakeup(res.payoutId!, "needs_review", "queued");
+      expect((await payoutRow(res.payoutId!)).lastGatewayError).toBe(REJECTED.error);
+    });
+
+    it("retries running out enqueues one needs_review wakeup", async () => {
+      const gw = new FakeGateway(Array.from({ length: 6 }, () => UNKNOWN));
+      const res = await requestPayout(ask(w), gw);
+      for (let retry = 1; retry <= 5; retry++) {
+        await ageQueuedPayouts();
+        await retryUnknownPayouts(gw);
+      }
+      await expectOneWakeup(res.payoutId!, "needs_review", "queued");
+    });
+
+    it("a sender that died on its last attempt enqueues one needs_review wakeup", async () => {
+      const p = await addPayout(w, {
+        amount: 45000,
+        status: "queued",
+        attempts: 6,
+        createdAt: YESTERDAY(),
+      });
+      await retryUnknownPayouts(new FakeGateway());
+      await expectOneWakeup(p.id, "needs_review", "queued");
+    });
+
+    it("a first attempt that fails through the sweep enqueues a wakeup", async () => {
+      const p = await addPayout(w, {
+        amount: 45000,
+        status: "queued",
+        createdAt: YESTERDAY(),
+      });
+      await retryUnknownPayouts(new FakeGateway([REJECTED]));
+      await expectOneWakeup(p.id, "failed", "queued");
+    });
+
+    it("one row failing cannot stop the sweep", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const w2 = await makeWorld();
+      const longAgo = new Date(Date.now() - 7_200_000);
+      const bad = await addPayout(w, { amount: 1, status: "queued", createdAt: longAgo });
+      const good = await addPayout(w2, { amount: 1, status: "queued", createdAt: YESTERDAY() });
+      // Oldest first, and Postgres refuses a NUL in text, so recording this result throws.
+      await db.update(payouts).set({ createdAt: new Date(Date.now() - 2 * 86_400_000) }).where(eq(payouts.id, bad.id));
+      const gw = new FakeGateway([SENT("bad\u0000id"), SENT("B-good")]);
+
+      await expect(retryUnknownPayouts(gw)).resolves.toBeUndefined();
+      expect(gw.calls.map((c) => c.senderBatchId)).toEqual([bad.id, good.id]);
+      expect((await payoutRow(bad.id)).status).toBe("queued");
+      expect((await payoutRow(good.id)).status).toBe("sent");
+      expect(error).toHaveBeenCalledOnce();
+      expect(String(error.mock.calls[0][0])).toContain(bad.id);
+      error.mockRestore();
+    });
+  });
+
+  describe("resolveNeedsReview", () => {
+    async function underReview(world: World = w, batchId?: string) {
+      return addPayout(world, { amount: 45000, status: "needs_review", attempts: 2, batchId });
+    }
+    const auditRows = () =>
+      db.select().from(agentActions).where(eq(agentActions.action, "payout_review_resolved"));
+
+    it("paid sets succeeded, records the reference, keeps the money counted, and audits", async () => {
+      const p = await underReview();
+      const res = await resolveNeedsReview(p.id, caretakerId, { outcome: "paid", paypalRef: " PB-REAL " });
+      expect(res).toMatchObject({ status: "succeeded", payoutId: p.id });
+      expect(await payoutRow(p.id)).toMatchObject({
+        status: "succeeded",
+        paypalPayoutBatchId: "PB-REAL",
+      });
+      expect(await actionRow(p.actionId)).toMatchObject({ status: "succeeded", paypalRef: "PB-REAL" });
+
+      const [audit] = await auditRows();
+      expect(audit).toMatchObject({
+        status: "succeeded",
+        approvedBy: caretakerId,
+        paypalRef: "PB-REAL",
+        amount: 45000,
+      });
+      expect(audit.inputs).toMatchObject({ payoutId: p.id, outcome: "paid", paypalRef: "PB-REAL" });
+
+      const status = await withColonyLock(getPoolStatus);
+      expect(status).toMatchObject({ vetPaid: 45000, reservedPayouts: 0 });
+      await expectOneWakeup(p.id, "succeeded", "needs_review");
+    });
+
+    it("not_paid sets failed, frees the reservation, and audits the note", async () => {
+      const p = await underReview();
+      expect(await reserved()).toBe(45000);
+      const res = await resolveNeedsReview(p.id, caretakerId, { outcome: "not_paid", note: "No batch in PayPal" });
+      expect(res.status).toBe("failed");
+      expect((await payoutRow(p.id)).status).toBe("failed");
+      expect(await reserved()).toBe(0);
+      const [audit] = await auditRows();
+      expect(audit).toMatchObject({ status: "failed", approvedBy: caretakerId });
+      expect(audit.inputs).toMatchObject({ outcome: "not_paid", note: "No batch in PayPal" });
+      await expectOneWakeup(p.id, "failed", "needs_review");
+      expect((await requestPayout(ask(w), new FakeGateway())).status).toBe("sent");
+    });
+
+    it.each(["", "   "])("not_paid with note %j throws and changes nothing", async (note) => {
+      const p = await underReview();
+      await expect(
+        resolveNeedsReview(p.id, caretakerId, { outcome: "not_paid", note }),
+      ).rejects.toThrow(/note/i);
+      expect((await payoutRow(p.id)).status).toBe("needs_review");
+      expect(await auditRows()).toEqual([]);
+    });
+
+    it("paid with an empty reference throws", async () => {
+      const p = await underReview();
+      await expect(
+        resolveNeedsReview(p.id, caretakerId, { outcome: "paid", paypalRef: " " }),
+      ).rejects.toThrow(/reference/i);
+      expect((await payoutRow(p.id)).status).toBe("needs_review");
+    });
+
+    it("refuses a reference already on another payout", async () => {
+      const w2 = await makeWorld();
+      await addPayout(w2, { amount: 1, status: "sent", batchId: "PB-TAKEN" });
+      const p = await underReview();
+      await expect(
+        resolveNeedsReview(p.id, caretakerId, { outcome: "paid", paypalRef: "PB-TAKEN" }),
+      ).rejects.toThrow(/another payout/i);
+      expect((await payoutRow(p.id)).status).toBe("needs_review");
+    });
+
+    it("a second resolve is a no-op", async () => {
+      const p = await underReview();
+      await resolveNeedsReview(p.id, caretakerId, { outcome: "paid", paypalRef: "PB-1" });
+      const again = await resolveNeedsReview(p.id, caretakerId, { outcome: "not_paid", note: "changed my mind" });
+      expect(again.status).toBe("succeeded");
+      expect(await payoutRow(p.id)).toMatchObject({ status: "succeeded", paypalPayoutBatchId: "PB-1" });
+      expect(await auditRows()).toHaveLength(1);
+      expect(await allWakeups()).toHaveLength(1);
+    });
+
+    it.each(["awaiting_approval", "queued", "sent", "succeeded", "failed", "rejected"])(
+      "only acts from needs_review, not %s",
+      async (status) => {
+        const p = await addPayout(w, { amount: 1, status });
+        const res = await resolveNeedsReview(p.id, caretakerId, { outcome: "not_paid", note: "x" });
+        expect(res.status).toBe(status);
+        expect((await payoutRow(p.id)).status).toBe(status);
+        expect(await auditRows()).toEqual([]);
+      },
+    );
+
+    it("only a caretaker can resolve", async () => {
+      const p = await underReview();
+      await expect(
+        resolveNeedsReview(p.id, w.vet.id, { outcome: "not_paid", note: "x" }),
+      ).rejects.toThrow(/caretaker/i);
+      expect((await payoutRow(p.id)).status).toBe("needs_review");
     });
   });
 
@@ -662,15 +1055,84 @@ describe("money gate", () => {
       expect(await allWakeups()).toHaveLength(1);
     });
 
-    it("cannot move a needs_review or rejected payout", async () => {
-      const w2 = await makeWorld();
-      const review = await addPayout(w, { amount: 1, status: "needs_review", batchId: "R-1" });
-      const rejected = await addPayout(w2, { amount: 1, status: "rejected", batchId: "R-2" });
-      await applyPayoutStatus("R-1", { itemStatus: "FAILED" });
+    it("cannot move a rejected payout", async () => {
+      const rejected = await addPayout(w, { amount: 1, status: "rejected", batchId: "R-2" });
       await applyPayoutStatus("R-2", { itemStatus: "SUCCESS" });
-      expect((await payoutRow(review.id)).status).toBe("needs_review");
       expect((await payoutRow(rejected.id)).status).toBe("rejected");
       expect(await allWakeups()).toEqual([]);
+    });
+
+    describe("lookup by sender batch id", () => {
+      it("attaches the real batch id to a needs_review row and settles it on SUCCESS", async () => {
+        const p = await addPayout(w, { amount: 45000, status: "needs_review", attempts: 2 });
+        await applyPayoutStatus("PB-REAL", {
+          senderBatchId: p.id,
+          itemStatus: "SUCCESS",
+          itemId: "I-1",
+          fee: 2500,
+        });
+        expect(await payoutRow(p.id)).toMatchObject({
+          status: "succeeded",
+          paypalPayoutBatchId: "PB-REAL",
+          paypalItemId: "I-1",
+          fee: 2500,
+        });
+        expect((await actionRow(p.actionId)).paypalRef).toBe("PB-REAL");
+        await expectOneWakeup(p.id, "succeeded", "needs_review");
+      });
+
+      it("settles a needs_review row as failed on a failing status, freeing the money", async () => {
+        const p = await addPayout(w, { amount: 45000, status: "needs_review", attempts: 2 });
+        await applyPayoutStatus("PB-REAL", { senderBatchId: p.id, itemStatus: "BLOCKED" });
+        expect(await payoutRow(p.id)).toMatchObject({ status: "failed", paypalPayoutBatchId: "PB-REAL" });
+        expect(await reserved()).toBe(0);
+      });
+
+      it("a pending status attaches the batch id but leaves the review open", async () => {
+        const p = await addPayout(w, { amount: 45000, status: "needs_review", attempts: 2 });
+        await applyPayoutStatus("PB-REAL", { senderBatchId: p.id, itemStatus: "PENDING" });
+        expect(await payoutRow(p.id)).toMatchObject({
+          status: "needs_review",
+          paypalPayoutBatchId: "PB-REAL",
+        });
+        expect(await allWakeups()).toEqual([]);
+        expect(await reserved()).toBe(45000);
+      });
+
+      it("a status that beats the recording of sent attaches the batch id to the queued row", async () => {
+        const p = await addPayout(w, { amount: 45000, status: "queued", attempts: 1 });
+        await applyPayoutStatus("PB-REAL", { senderBatchId: p.id, itemStatus: "SUCCESS" });
+        expect(await payoutRow(p.id)).toMatchObject({ status: "queued", paypalPayoutBatchId: "PB-REAL" });
+        expect(await allWakeups()).toEqual([]);
+      });
+
+      it("does not overwrite the batch id of a settled payout", async () => {
+        const p = await addPayout(w, { amount: 45000, status: "sent", batchId: "PB-1" });
+        await applyPayoutStatus("PB-OTHER", { senderBatchId: p.id, itemStatus: "SUCCESS" });
+        expect(await payoutRow(p.id)).toMatchObject({ status: "succeeded", paypalPayoutBatchId: "PB-1" });
+      });
+
+      it("finds a settled payout whose batch id came from a person, so a return still counts", async () => {
+        const p = await addPayout(w, { amount: 45000, status: "needs_review", attempts: 2 });
+        await resolveNeedsReview(p.id, caretakerId, { outcome: "paid", paypalRef: "TYPED" });
+        await applyPayoutStatus("PB-REAL", { senderBatchId: p.id, itemStatus: "RETURNED" });
+        expect(await payoutRow(p.id)).toMatchObject({ status: "failed", paypalPayoutBatchId: "TYPED" });
+      });
+
+      it("falls back to the batch id when the sender id matches nothing, even if malformed", async () => {
+        const p = await addPayout(w, { amount: 45000, status: "sent", batchId: "PB-1" });
+        await applyPayoutStatus("PB-1", { senderBatchId: "not-a-uuid", itemStatus: "SUCCESS" });
+        expect((await payoutRow(p.id)).status).toBe("succeeded");
+        await expect(
+          applyPayoutStatus("nope", { senderBatchId: "not-a-uuid", itemStatus: "SUCCESS" }),
+        ).resolves.toBeUndefined();
+      });
+    });
+
+    it.each([Number.NaN, 10.5, -1])("a fee of %s cannot block the status change", async (fee) => {
+      const p = await sentPayout();
+      await applyPayoutStatus("B-9", { itemStatus: "SUCCESS", fee });
+      expect(await payoutRow(p.id)).toMatchObject({ status: "succeeded", fee: null });
     });
 
     it("ignores an unknown batch id", async () => {
@@ -680,13 +1142,10 @@ describe("money gate", () => {
 
     it("rolls back the status when the wakeup cannot be written", async () => {
       const p = await sentPayout();
-      await db.execute(sql`alter table wakeups add constraint no_writes check (kind <> 'payout_status_changed') not valid`);
-      try {
+      await blockWakeups(async () => {
         await expect(applyPayoutStatus("B-9", { itemStatus: "SUCCESS" })).rejects.toThrow();
-        expect((await payoutRow(p.id)).status).toBe("sent");
-      } finally {
-        await db.execute(sql`alter table wakeups drop constraint no_writes`);
-      }
+      });
+      expect((await payoutRow(p.id)).status).toBe("sent");
     });
   });
 
@@ -741,7 +1200,48 @@ describe("money gate", () => {
       expect((await payoutRow(p.id)).status).toBe("succeeded");
     });
 
+    it("polls a needs_review row with a batch id and settles it from the real status", async () => {
+      const w2 = await makeWorld();
+      const known = await addPayout(w, { amount: 1, status: "needs_review", attempts: 2, batchId: "A" });
+      const blind = await addPayout(w2, { amount: 1, status: "needs_review", attempts: 2 });
+      const gw = new FakeGateway();
+      const get = vi.spyOn(gw, "get");
+      gw.statuses.set("A", { batchStatus: "SUCCESS", itemStatus: "SUCCESS", fee: 100 });
+      await reconcilePayouts(gw);
+      expect(get.mock.calls.map((c) => c[0])).toEqual(["A"]);
+      expect(await payoutRow(known.id)).toMatchObject({ status: "succeeded", fee: 100 });
+      expect((await payoutRow(blind.id)).status).toBe("needs_review");
+    });
+
+    it("one row that cannot be applied does not stop the others, and is logged", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const w2 = await makeWorld();
+      await addPayout(w, { amount: 1, status: "sent", batchId: "A" });
+      await addPayout(w2, { amount: 1, status: "sent", batchId: "B" });
+      const gw = new FakeGateway();
+      const nul = { batchStatus: "SUCCESS", itemStatus: "SUCCESS", itemId: "bad\u0000id" };
+      gw.statuses.set("A", nul);
+      gw.statuses.set("B", nul);
+      await expect(reconcilePayouts(gw)).resolves.toBeUndefined();
+      expect(error).toHaveBeenCalledTimes(2);
+      expect(String(error.mock.calls[0][0])).toMatch(/batch [AB]/);
+      error.mockRestore();
+    });
+
+    it("a failed poll is logged, with no details from the error", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      await addPayout(w, { amount: 1, status: "sent", batchId: "A" });
+      const gw = new FakeGateway();
+      gw.statuses.set("A", new Error("vet@example.test"));
+      await reconcilePayouts(gw);
+      expect(error).toHaveBeenCalledOnce();
+      expect(String(error.mock.calls[0][0])).toContain("batch A");
+      expect(String(error.mock.calls[0][0])).not.toContain("@");
+      error.mockRestore();
+    });
+
     it("one failed poll does not stop the others", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
       const w2 = await makeWorld();
       const a = await addPayout(w, { amount: 1, status: "sent", batchId: "A" });
       const b = await addPayout(w2, { amount: 1, status: "sent", batchId: "B" });
@@ -754,6 +1254,7 @@ describe("money gate", () => {
       await reconcilePayouts(gw);
       expect((await payoutRow(a.id)).status).toBe("sent");
       expect((await payoutRow(b.id)).status).toBe("succeeded");
+      error.mockRestore();
     });
   });
 });

@@ -91,7 +91,11 @@ describe("restPayoutGateway", () => {
       [201, "sent"],
       [400, "rejected"],
       [403, "rejected"],
+      [404, "rejected"],
       [422, "rejected"],
+      [408, "unknown"],
+      [409, "unknown"],
+      [429, "unknown"],
       [500, "unknown"],
       [503, "unknown"],
     ])("classifies HTTP %i as %s", async (status, kind) => {
@@ -264,6 +268,22 @@ describe("restPayoutGateway", () => {
       expect(String(apiCalls(fn)[0][0])).toBe(
         "https://api-m.sandbox.paypal.com/v1/payments/payouts/PB%2F1",
       );
+    });
+
+    it("omits an unreadable fee and still returns the status", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      stubFetch(() =>
+        json(200, {
+          batch_header: { batch_status: "SUCCESS" },
+          items: [{ transaction_status: "SUCCESS", payout_item_fee: { value: "1.234" } }],
+        }),
+      );
+      expect(await restPayoutGateway.get("PB-1")).toEqual({
+        batchStatus: "SUCCESS",
+        itemStatus: "SUCCESS",
+      });
+      expect(warn).toHaveBeenCalledOnce();
+      warn.mockRestore();
     });
 
     it("handles a batch with no items yet", async () => {

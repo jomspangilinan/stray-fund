@@ -231,6 +231,8 @@ export const payouts = pgTable(
     // Sends begun, committed before each gateway call. Above 1 means a retry.
     attempts: integer("attempts").notNull().default(0),
     lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    // Evidence for a person reviewing the payout. Never exposed publicly.
+    lastGatewayError: text("last_gateway_error"),
     createdAt: createdAt(),
   },
   (t) => [
