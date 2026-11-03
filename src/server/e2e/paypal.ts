@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { CURRENCY } from "@/lib/config";
 import { toPayPalValue } from "@/lib/money";
@@ -27,9 +27,10 @@ export function log(entry: Record<string, unknown>): void {
 }
 
 export const fakeOrdersGateway: OrdersGateway = {
-  async createOrder(amount) {
-    const orderId = `E2E-ORDER-${amount}-${randomUUID().slice(0, 8)}`;
-    log({ call: "createOrder", orderId, amount });
+  async createOrder(amount, requestId) {
+    // The same request id always gives the same order, as PayPal-Request-Id does.
+    const orderId = `E2E-ORDER-${amount}-${createHash("sha256").update(requestId).digest("hex").slice(0, 8)}`;
+    log({ call: "createOrder", orderId, amount, requestId });
     return { orderId };
   },
   async captureOrder(orderId) {

@@ -26,6 +26,7 @@ import {
   makePendingOrder,
 } from "./helpers/donationFixtures";
 
+const ATTEMPT = "11111111-2222-4333-8444-555555555555";
 const wakeupCount = async () =>
   (await db.select().from(wakeups).where(eq(wakeups.kind, "donation_captured"))).length;
 const rows = () => db.select().from(donations);
@@ -44,9 +45,9 @@ describe("createDonationOrder", () => {
   it("inserts a pending row with the gross, and fee and net at 0", async () => {
     const u = await makeDonor();
     const g = gw();
-    const { orderId } = await createDonationOrder(u.id, 50_000, g);
+    const { orderId } = await createDonationOrder(u.id, 50_000, ATTEMPT, g);
     expect(orderId).toBe("PP-ORDER-1");
-    expect(g.createOrder).toHaveBeenCalledWith(50_000);
+    expect(g.createOrder).toHaveBeenCalledWith(50_000, expect.stringContaining(ATTEMPT));
     const [row] = await rows();
     expect(row).toMatchObject({
       userId: u.id,
@@ -69,7 +70,7 @@ describe("createDonationOrder", () => {
   ])("rejects an amount that is %s, without calling PayPal", async (_n, amount) => {
     const u = await makeDonor();
     const g = gw();
-    await expect(createDonationOrder(u.id, amount, g)).rejects.toBeInstanceOf(InvalidAmount);
+    await expect(createDonationOrder(u.id, amount, ATTEMPT, g)).rejects.toBeInstanceOf(InvalidAmount);
     expect(g.createOrder).not.toHaveBeenCalled();
     expect(await rows()).toHaveLength(0);
   });
@@ -79,10 +80,10 @@ describe("createDonationOrder", () => {
     const other = await makeDonor();
     const g = gw();
     for (let i = 0; i < 5; i++) await makePendingOrder(u.id);
-    await expect(createDonationOrder(u.id, 10_000, g)).rejects.toBeInstanceOf(TooManyOrders);
+    await expect(createDonationOrder(u.id, 10_000, ATTEMPT, g)).rejects.toBeInstanceOf(TooManyOrders);
     expect(g.createOrder).not.toHaveBeenCalled();
     // Another user is unaffected.
-    await expect(createDonationOrder(other.id, 10_000, g)).resolves.toBeDefined();
+    await expect(createDonationOrder(other.id, 10_000, ATTEMPT, g)).resolves.toBeDefined();
   });
 
   it("does not count old pending orders or captured ones", async () => {
@@ -97,12 +98,12 @@ describe("createDonationOrder", () => {
     const { orderId } = await makePendingOrder(u.id);
     await recordCapture(captureFor(orderId));
     await makePendingOrder(u.id);
-    await expect(createDonationOrder(u.id, 10_000, gw())).resolves.toBeDefined();
+    await expect(createDonationOrder(u.id, 10_000, ATTEMPT, gw())).resolves.toBeDefined();
   });
 
   it("accepts exactly the minimum", async () => {
     const u = await makeDonor();
-    await expect(createDonationOrder(u.id, 10_000, gw())).resolves.toBeDefined();
+    await expect(createDonationOrder(u.id, 10_000, ATTEMPT, gw())).resolves.toBeDefined();
   });
 });
 

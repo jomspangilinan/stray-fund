@@ -70,8 +70,11 @@ export class ForbiddenOrder extends Error {
 }
 
 export interface OrdersGateway {
-  /** Amount in centavos. Returns the PayPal order id. */
-  createOrder(amount: number): Promise<{ orderId: string }>;
+  /**
+   * Amount in centavos. Returns the PayPal order id. requestId goes out as PayPal-Request-Id, so repeating the
+   * same call with the same id returns the same order instead of making a second one.
+   */
+  createOrder(amount: number, requestId: string): Promise<{ orderId: string }>;
   /** Returns PayPal's capture response body, parsed. Idempotent per order id. */
   captureOrder(orderId: string): Promise<unknown>;
 }
@@ -90,8 +93,9 @@ function sdkClient(): OrdersController {
 }
 
 export const sdkOrdersGateway: OrdersGateway = {
-  async createOrder(amount) {
+  async createOrder(amount, requestId) {
     const res = await sdkClient().createOrder({
+      paypalRequestId: requestId,
       body: {
         intent: CheckoutPaymentIntent.Capture,
         purchaseUnits: [
@@ -126,13 +130,38 @@ export function validateDonationAmount(amount: unknown): number {
   return amount;
 }
 
-/** Creates the PayPal order, then a pending row owned by the donor. Fee and net stay 0 until capture. */
+const ATTEMPT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export class InvalidAttempt extends Error {
+  constructor() {
+    super("The donation attempt id is missing or not valid");
+    this.name = "InvalidAttempt";
+  }
+}
+
+/**
+ * The PayPal-Request-Id for one donation attempt. The page makes a new attempt id for each tap and reuses it only
+ * for a retry of that tap, so a retry gets the same order back and a new tap gets a new one. The donor and the
+ * amount are part of the key, so another donor, or the same donor changing the amount, can never be handed this
+ * order. PayPal keeps an order-create key for 6 hours (the Orders v2 spec); an order also lapses after about 6
+ * hours unapproved, and a retry comes seconds later, so the window is never what decides it.
+ */
+export function orderRequestId(userId: string, attemptId: string, gross: number): string {
+  return `stray-order-${userId}-${attemptId.toLowerCase()}-${gross}`;
+}
+
+/**
+ * Creates the PayPal order, then a pending row owned by the donor. Fee and net stay 0 until capture. Safe to
+ * repeat with the same attemptId: PayPal returns the same order and the row is written once.
+ */
 export async function createDonationOrder(
   userId: string,
   amount: unknown,
+  attemptId: unknown,
   gw: OrdersGateway = ordersGateway(),
 ): Promise<{ orderId: string }> {
   const gross = validateDonationAmount(amount);
+  if (typeof attemptId !== "string" || !ATTEMPT_ID.test(attemptId)) throw new InvalidAttempt();
   const recent = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(donations)
@@ -144,16 +173,22 @@ export async function createDonationOrder(
       ),
     );
   if (recent[0].n >= MAX_PENDING_ORDERS) throw new TooManyOrders();
-  const { orderId } = await gw.createOrder(gross);
-  await db.insert(donations).values({
-    userId,
-    gross,
-    paypalFee: 0,
-    net: 0,
-    currency: CURRENCY,
-    paypalOrderId: orderId,
-    status: PENDING,
-  });
+  const { orderId } = await gw.createOrder(gross, orderRequestId(userId, attemptId, gross));
+  await db
+    .insert(donations)
+    .values({
+      userId,
+      gross,
+      paypalFee: 0,
+      net: 0,
+      currency: CURRENCY,
+      paypalOrderId: orderId,
+      status: PENDING,
+    })
+    .onConflictDoNothing({ target: donations.paypalOrderId });
+  const [row] = await db.select().from(donations).where(eq(donations.paypalOrderId, orderId));
+  // The key holds the donor, so this is the retry of our own order. Anything else is not ours to hand back.
+  if (row.userId !== userId) throw new Error("PayPal returned an order that belongs to someone else");
   return { orderId };
 }
 

@@ -64,15 +64,27 @@ export function DonateForm({ clientId, username, demo = false }: { clientId: str
 
   async function createOrder(): Promise<string> {
     setOutcome({ kind: "idle" });
-    const res = await fetch("/api/donations", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      // Only the amount goes to the server. It works out fee and net itself.
-      body: JSON.stringify({ amount }),
-    });
-    const body = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string };
-    if (!res.ok || !body.orderId) throw new Error(body.error ?? "Could not start the donation");
-    return body.orderId;
+    // One id per tap, reused if this tap has to be sent again, so PayPal hands back the same order instead of a second.
+    const attemptId = crypto.randomUUID();
+    let lastError = "Could not start the donation";
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch("/api/donations", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          // Only the amount goes to the server. It works out fee and net itself.
+          body: JSON.stringify({ amount, attemptId }),
+        });
+        const body = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string };
+        if (res.ok && body.orderId) return body.orderId;
+        lastError = body.error ?? lastError;
+        // Only a server fault is worth sending again; a refusal would be refused again.
+        if (res.status < 500) break;
+      } catch {
+        // The connection dropped; the same attempt id makes the second send safe.
+      }
+    }
+    throw new Error(lastError);
   }
 
   async function onApprove(data: { orderID: string }) {

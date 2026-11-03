@@ -123,7 +123,7 @@ describe("the fakes sit at the real seams and only when asked", () => {
   it("makes a donation the real code records to the centavo", async () => {
     vi.stubEnv("E2E_FAKES", "true");
     const [donor] = await db.insert(users).values({ username: "fake_donor", role: "donor" }).returning();
-    const { orderId } = await createDonationOrder(donor.id, 150_000);
+    const { orderId } = await createDonationOrder(donor.id, 150_000, "11111111-2222-4333-8444-555555555555");
     expect(orderId).toMatch(/^E2E-ORDER-150000-[0-9a-f]{8}$/);
     const d = await captureDonation(donor.id, orderId);
     expect(d).toMatchObject({ status: "captured", gross: 150_000, paypalFee: 5_850, net: 144_150 });
