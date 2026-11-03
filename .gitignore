@@ -10,3 +10,6 @@ test-results/
 *.tsbuildinfo
 next-env.d.ts
 .superpowers/
+
+# Local photo storage for development (STORAGE_DRIVER=local)
+.data/
