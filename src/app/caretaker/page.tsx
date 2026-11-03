@@ -376,6 +376,29 @@ function Photos({ items }: { items: CaretakerQueue["heldPhotos"] }) {
   );
 }
 
+function NameSuggestions({ items }: { items: CaretakerQueue["nameSuggestions"] }) {
+  return (
+    <Section id="names" title="Name suggestions" count={items.length} empty="No name is waiting for you.">
+      {items.map((n) => (
+        <li key={n.id} className="card">
+          {n.photoSightingId && (
+            // eslint-disable-next-line @next/next/no-img-element -- a private photo behind a signed-in route
+            <img src={`/api/caretaker/images/sighting/${n.photoSightingId}`} alt={`${n.catName}`} className="max-h-56 w-full rounded-in object-contain" />
+          )}
+          <p className="small soft mt-3">Now called {n.catName}</p>
+          <h3 className="text-base font-extrabold break-words">{n.name}</h3>
+          <ActionForm action="name_approve" submitLabel="Approve">
+            <Hidden name="suggestionId" value={n.id} />
+          </ActionForm>
+          <ActionForm action="name_dismiss" submitLabel="Dismiss" quiet>
+            <Hidden name="suggestionId" value={n.id} />
+          </ActionForm>
+        </li>
+      ))}
+    </Section>
+  );
+}
+
 const SEX_OPTIONS = ["unknown", "female", "male"] as const;
 const FLAG_OPTIONS = ["pregnant", "injured", "sick", "kitten"] as const;
 
@@ -432,6 +455,10 @@ function Cats({ cats }: { cats: CaretakerQueue["catChoices"] }) {
             <h3 className="text-base font-extrabold">
               {c.name} <span className="font-normal soft">{c.status}</span>
             </h3>
+            <ActionForm action="cat_rename" submitLabel="Save name" quiet>
+              <Hidden name="catId" value={c.id} />
+              <Field label="Name" name="name" defaultValue={c.name} />
+            </ActionForm>
             <ActionForm action="cat_set_details" submitLabel="Save sex and flags" quiet>
               <Hidden name="catId" value={c.id} />
               <label className="grid gap-1">
@@ -557,6 +584,7 @@ async function Desk() {
       <Sightings items={q.sightings} cats={q.catChoices} />
       <EarTipConfirmations items={q.earTipConfirmations} />
       <Receipts items={q.receipts} />
+      <NameSuggestions items={q.nameSuggestions} />
       <Reviews items={q.reviews} />
       <Wakeups items={q.failedWakeups} />
       <Photos items={q.heldPhotos} />

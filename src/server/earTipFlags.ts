@@ -3,6 +3,7 @@ import { fileReview } from "./agent/review";
 import { MoneyAlreadyMoved, markAlreadyNeutered, transitionCat } from "./catTransitions";
 import { db, withColonyLock, type Tx } from "./db/client";
 import { agentActions, cats, earTipFlags } from "./db/schema";
+import { EAR_TIP_ANSWERED } from "./privateActions";
 import { RATE_LIMIT_PER_MINUTE, RateLimited } from "./spot";
 import { enqueueWakeup } from "./wakeups";
 
@@ -78,8 +79,6 @@ export async function applyEarTipRule(tx: Tx, catId: string, changed: EarTipValu
   }
 }
 
-export const FLAG_AUDIT_ACTION = "ear_tip_answered";
-
 async function currentAnswer(tx: Pick<Tx, "select">, catId: string, userId: string): Promise<EarTipValue | null> {
   const [row] = await tx
     .select({ value: earTipFlags.value })
@@ -95,7 +94,7 @@ async function currentAnswer(tx: Pick<Tx, "select">, catId: string, userId: stri
 export async function assertUnderFlagLimit(userId: string): Promise<void> {
   const { rows } = await db.execute(sql`
     select count(*)::int as n from agent_actions
-    where action = ${FLAG_AUDIT_ACTION} and inputs->>'userId' = ${userId} and created_at > now() - interval '1 minute'
+    where action = ${EAR_TIP_ANSWERED} and inputs->>'userId' = ${userId} and created_at > now() - interval '1 minute'
   `);
   if ((rows[0] as { n: number }).n >= RATE_LIMIT_PER_MINUTE) throw new RateLimited();
 }
@@ -117,7 +116,7 @@ export async function setEarTipFlagIn(tx: Tx, catId: string, userId: string, val
       .onConflictDoUpdate({ target: [earTipFlags.catId, earTipFlags.userId], set: { value, createdAt: sql`now()` } });
   }
   await tx.insert(agentActions).values({
-    action: FLAG_AUDIT_ACTION,
+    action: EAR_TIP_ANSWERED,
     inputs: { catId, userId, from: before, to: value },
     reason: "A neighbour answered about a cat's ear-tip.",
     status: "done",

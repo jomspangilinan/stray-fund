@@ -1,4 +1,8 @@
+"use client";
+
 import Link from "next/link";
+import { useState } from "react";
+import { AnotherNameButton } from "./AnotherNameButton";
 import { CatAvatar } from "./CatAvatar";
 import { revealCopy, type RevealState } from "@/lib/spotCopy";
 import type { SpotReveal as Reveal } from "@/server/spotReveal";
@@ -22,7 +26,9 @@ export function SpotReveal({
   locationMissing: boolean;
   onAgain: () => void;
 }) {
-  const { heading, sub } = revealCopy(state, reveal.name);
+  // Another name changes the name in place. The rest of the card is what the server sent.
+  const [name, setName] = useState(reveal.name);
+  const { heading, sub } = revealCopy(state, name);
   const photo = reveal.photoUrl ?? capturedUrl;
   const tags = [reveal.coat, reveal.yourEarTip ? `Your answer: ear-tip ${reveal.yourEarTip}` : null, ...reveal.flags, reveal.probablyFemale ? "Probably female" : null].filter(
     (t): t is string => Boolean(t),
@@ -54,7 +60,8 @@ export function SpotReveal({
             )}
           </div>
           <div className="grid gap-3 p-4">
-            {reveal.name && <p className="text-2xl font-extrabold leading-tight tracking-tight">{reveal.name}</p>}
+            {name && <p className="text-2xl font-extrabold leading-tight tracking-tight">{name}</p>}
+            {reveal.canRename && catId && <AnotherNameButton catId={catId} onNamed={setName} />}
             <ul className="flex flex-wrap gap-2" aria-label="What we noticed">
               {tags.map((t) => (
                 <li key={t} className="tag">

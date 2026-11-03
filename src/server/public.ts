@@ -6,8 +6,9 @@ import { careMarks, pickYard, yardStage, type YardCat, type YardGroup } from "@/
 import { pickMissions, type Mission, type MissionCat } from "@/lib/missions";
 import { db } from "./db/client";
 import { cats, earTipFlags, sightings, treatments, users } from "./db/schema";
-import { FLAG_AUDIT_ACTION, ownFlags } from "./earTipFlags";
+import { ownFlags } from "./earTipFlags";
 import { CAPTURED, getPoolStatus, toInt } from "./ledger";
+import { PRIVATE_ACTIONS } from "./privateActions";
 import type { Session } from "./session";
 import { getStorage } from "./storage";
 
@@ -350,8 +351,8 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
       p.cat_id,
       case when a.inputs->>'catId' ~* ${UUID.source} then (a.inputs->>'catId')::uuid end
     )
-    -- A neighbour's ear-tip answer is private: it leaves an audit row for the rate limit, never a feed row.
-    where a.action <> ${FLAG_AUDIT_ACTION}
+    -- Private actions (a neighbour's ear-tip answer, anything about a cat's name) leave an audit row, never a feed row.
+    where a.action not in (${sql.join(PRIVATE_ACTIONS.map((a) => sql`${a}`), sql`, `)})
     order by a.created_at desc, a.id desc
     limit ${Math.min(Math.max(1, Math.trunc(limit)), MAX_AGENT_ACTIONS)}
   `);

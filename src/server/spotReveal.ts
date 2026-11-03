@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { NEUTRAL_AVATAR, parseAvatar, type Avatar } from "@/lib/avatar";
 import { db } from "./db/client";
 import { cats, sightings } from "./db/schema";
+import { canAskForAnotherName } from "./catNames";
 import { ownFlags, type EarTipValue } from "./earTipFlags";
 import { FLAG_LABEL, STATUS_LABEL } from "./public";
 import { getStorage } from "./storage";
@@ -29,12 +30,16 @@ export type SpotReveal = {
   /** The cat is waiting in the queue for the shared pool. */
   needsFunding: boolean;
   photoUrl: string | null;
+  /** This person found the cat and no caretaker has named it, so Another name is on offer. */
+  canRename: boolean;
 };
 
 export type RevealInput = {
   state: SpotState;
   /** The finder's own flag on this cat. */
   yourEarTip?: EarTipValue | null;
+  /** Decided by the server from who found the cat and whether a caretaker named it. */
+  canRename?: boolean;
   cat: {
     id: string;
     name: string;
@@ -81,6 +86,7 @@ export function buildReveal(i: RevealInput): SpotReveal | null {
       probablyFemale: false,
       needsFunding: false,
       photoUrl: null,
+      canRename: false,
     };
   }
   if ((i.state !== "new_cat" && i.state !== "matched") || !i.cat) return null;
@@ -97,6 +103,7 @@ export function buildReveal(i: RevealInput): SpotReveal | null {
     probablyFemale: i.state === "new_cat" && !finderChose && sighting.coatSaysFemale && cat.sex === "female",
     needsFunding: cat.status === "queued",
     photoUrl: sighting.publicReady && sighting.publicKey ? getStorage().publicUrl(sighting.publicKey) : null,
+    canRename: i.canRename === true,
   };
 }
 
@@ -125,6 +132,7 @@ export async function loadReveal(sightingId: string, state: SpotState): Promise<
           coatPattern: cats.coatPattern,
           avatar: cats.avatar,
           flags: cats.flags,
+          nameLocked: cats.nameLocked,
         })
         .from(cats)
         .where(eq(cats.id, s.catId))
@@ -134,6 +142,7 @@ export async function loadReveal(sightingId: string, state: SpotState): Promise<
   return buildReveal({
     state,
     yourEarTip,
+    canRename: cat && s.finderId ? await canAskForAnotherName(db, cat, s.finderId) : false,
     cat: cat ?? null,
     sighting: {
       publicKey: s.publicKey,

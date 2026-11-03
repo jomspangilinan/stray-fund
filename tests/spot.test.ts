@@ -5,6 +5,7 @@ import { closePool, db } from "../src/server/db/client";
 import { cats, earTipFlags, reviewRequests, sightings, users, wakeups } from "../src/server/db/schema";
 import { truncateAll } from "./helpers/db";
 import { createTestPool } from "./helpers/db";
+import { CAT_NAMES } from "../src/lib/catNames";
 import { COLONY } from "../src/lib/config";
 import { setAiForTests, type AiTransport } from "../src/server/ai/client";
 import { storeOriginal, InvalidPhoto } from "../src/server/photos";
@@ -231,14 +232,18 @@ describe("processSpot: new cats", () => {
     expect(flag).toMatchObject({ userId: u.id, value: "no" });
   });
 
-  it("numbers a name that is already taken and falls back for a blank name", async () => {
+  it("gives a taken name a free built-in name and falls back for a blank name", async () => {
     const u = await makeUser();
     await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     script.assess = () => assessWith({ suggested_name: "   " });
     await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     const names = (await catRows()).map((c) => c.name).sort();
-    expect(names).toEqual(["Little stray", "Muning", "Muning 2"]);
+    expect(names).toHaveLength(3);
+    expect(names).toContain("Little stray");
+    expect(names).toContain("Muning");
+    const third = names.find((n) => n !== "Little stray" && n !== "Muning")!;
+    expect(CAT_NAMES).toContain(third);
   });
 
   it("takes sex from the form, else female only for a calico or tortoiseshell coat, else unknown", async () => {

@@ -2,21 +2,27 @@ import Link from "next/link";
 import { earTipAskable } from "@/lib/catState";
 import type { CatCardData } from "@/server/public";
 import type { Thanks } from "@/server/thanks";
+import type { NameControls } from "@/server/catNames";
 import { CatPhoto } from "./CatPhoto";
 import { EarTipAsk } from "./EarTipAsk";
 import type { EarTipAnswer } from "./EarTipChoice";
 import { Progress } from "./CatRow";
 import { JourneyTimeline, niceDate } from "./JourneyTimeline";
+import { NameSuggest } from "./NameSuggest";
+import { RenameAgain } from "./RenameAgain";
 
 export function CatDetail({
   card,
   thanks = [],
   earTip,
+  names,
 }: {
   card: CatCardData;
   thanks?: Thanks[];
   /** Set only for a signed-in person: their own answer. Nobody else's is ever passed in. */
   earTip?: EarTipAnswer;
+  /** Set only for a signed-in person: whether they may ask for another name, and their own pending suggestion. */
+  names?: NameControls;
 }) {
   const { cat, sightings, health } = card;
   return (
@@ -29,6 +35,11 @@ export function CatDetail({
           <CatPhoto url={cat.photoUrl} name={cat.name} sizes="(min-width: 576px) 36rem, 100vw" caption />
         </div>
         <h1 className="title mt-4">{cat.name}</h1>
+        {names?.canRename && (
+          <div className="mt-3">
+            <RenameAgain catId={cat.id} />
+          </div>
+        )}
         <p className="mt-1 soft">
           {cat.sex}, {cat.statusLabel.toLowerCase()}
         </p>
@@ -44,6 +55,8 @@ export function CatDetail({
         )}
         {cat.bio && <p className="mt-4 max-w-[52ch]">{cat.bio}</p>}
       </header>
+
+      {names && <NameSuggest catId={cat.id} pending={names.pending} />}
 
       {earTip !== undefined && earTipAskable(cat.status) && (
         <EarTipAsk catId={cat.id} initial={earTip} />

@@ -5,7 +5,10 @@ import { applyRequestedEarTip, disagreementSubject, lateYesSubject } from "../ea
 import { IllegalTransition, MoneyAlreadyMoved, markAlreadyNeutered, transitionCat } from "../catTransitions";
 import { AssessmentSchema } from "../ai/schemas";
 import { withColonyLock, type Tx } from "../db/client";
-import { allocations, cats, earTipFlags, payouts, sightings, treatments, wakeups } from "../db/schema";
+import { allocations, cats, earTipFlags, nameSuggestions, payouts, sightings, treatments, wakeups } from "../db/schema";
+import { uniqueName } from "../catNames";
+import { NAME_APPROVED, NAME_DISMISSED, NAME_SET } from "../privateActions";
+import { parseCatName } from "@/lib/catNames";
 import { publishScrubbed, type Box } from "../photos";
 import { StoredObjectMissing } from "../storage";
 import { enqueueWakeup } from "../wakeups";
@@ -114,6 +117,83 @@ export const catSetDetails: Handler = async (caretakerId, body) => {
       inputs: { catId, sex, flags, oldSex: cat.sex, oldFlags: cat.flags },
     });
     return "Saved.";
+  });
+};
+
+// ---------- Names ----------
+
+const NAME_DECIDED = "Someone has already decided this suggestion.";
+
+/** The message after a name is set: says so plainly when the wanted name was taken and another was chosen. */
+const namedMessage = (lead: string, wanted: string, name: string) =>
+  name === wanted ? `${lead} The cat is now called ${name}.` : `${wanted} was already taken, so the cat is now called ${name}.`;
+
+/** Locks the suggestion row and refuses one that is not waiting. */
+async function loadPendingSuggestion(tx: Tx, id: string) {
+  const [s] = await tx.select().from(nameSuggestions).where(eq(nameSuggestions.id, id)).for("update");
+  if (!s) throw new Refusal(404, "There is no such suggestion.");
+  if (s.status !== "pending") throw new Refusal(409, NAME_DECIDED);
+  return s;
+}
+
+export const nameApprove: Handler = async (caretakerId, body) => {
+  const suggestionId = reqUuid(body, "suggestionId", "The suggestion");
+  return withColonyLock(async (tx) => {
+    const s = await loadPendingSuggestion(tx, suggestionId);
+    const [cat] = await tx.select().from(cats).where(eq(cats.id, s.catId)).for("update");
+    if (!cat) throw new Refusal(404, "There is no such cat.");
+    const name = await uniqueName(tx, s.name, cat.id);
+    await tx.update(cats).set({ name, nameLocked: true }).where(eq(cats.id, cat.id));
+    const now = new Date();
+    await tx.update(nameSuggestions).set({ status: "approved", decidedBy: caretakerId, decidedAt: now }).where(eq(nameSuggestions.id, s.id));
+    // The cat has its name now, so the other waiting ideas for it are closed.
+    const others = await tx
+      .update(nameSuggestions)
+      .set({ status: "dismissed", decidedBy: caretakerId, decidedAt: now })
+      .where(and(eq(nameSuggestions.catId, cat.id), eq(nameSuggestions.status, "pending")))
+      .returning({ id: nameSuggestions.id });
+    await audit(tx, {
+      action: NAME_APPROVED,
+      caretakerId,
+      reason: "A caretaker approved a cat's name.",
+      inputs: { catId: cat.id, suggestionId: s.id, from: cat.name, to: name, wanted: s.name, othersDismissed: others.length },
+    });
+    return namedMessage("Approved.", s.name, name);
+  });
+};
+
+export const nameDismiss: Handler = async (caretakerId, body) => {
+  const suggestionId = reqUuid(body, "suggestionId", "The suggestion");
+  return withColonyLock(async (tx) => {
+    const s = await loadPendingSuggestion(tx, suggestionId);
+    await tx.update(nameSuggestions).set({ status: "dismissed", decidedBy: caretakerId, decidedAt: new Date() }).where(eq(nameSuggestions.id, s.id));
+    await audit(tx, {
+      action: NAME_DISMISSED,
+      caretakerId,
+      reason: "A caretaker closed a name suggestion.",
+      inputs: { catId: s.catId, suggestionId: s.id },
+    });
+    return "Dismissed.";
+  });
+};
+
+/** A caretaker types the name. It counts as a caretaker-set name, so the finder can no longer ask for another. */
+export const catRename: Handler = async (caretakerId, body) => {
+  const catId = reqUuid(body, "catId", "The cat");
+  const parsed = parseCatName(body.name);
+  if (!parsed.ok) throw new Refusal(400, parsed.message);
+  return withColonyLock(async (tx) => {
+    const [cat] = await tx.select().from(cats).where(eq(cats.id, catId)).for("update");
+    if (!cat) throw new Refusal(404, "There is no such cat.");
+    const name = await uniqueName(tx, parsed.name, cat.id);
+    await tx.update(cats).set({ name, nameLocked: true }).where(eq(cats.id, catId));
+    await audit(tx, {
+      action: NAME_SET,
+      caretakerId,
+      reason: "A caretaker set a cat's name.",
+      inputs: { catId, from: cat.name, to: name, wanted: parsed.name },
+    });
+    return namedMessage("Saved.", parsed.name, name);
   });
 };
 

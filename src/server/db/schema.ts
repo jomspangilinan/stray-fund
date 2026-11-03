@@ -52,6 +52,8 @@ export const cats = pgTable(
   {
     id: id(),
     name: text("name").notNull(),
+    // True once a caretaker approved or typed the name. The finder can no longer ask for another one.
+    nameLocked: boolean("name_locked").notNull().default(false),
     sex: text("sex").notNull().default("unknown"),
     status: text("status").notNull().default("spotted"),
     earTipped: boolean("ear_tipped"),
@@ -134,6 +136,37 @@ export const earTipFlags = pgTable(
   (t) => [
     check("ear_tip_flags_value_check", sql`${t.value} in ('yes', 'no')`),
     uniqueIndex("ear_tip_flags_cat_user_idx").on(t.catId, t.userId),
+  ],
+);
+
+/**
+ * A neighbour's idea of a cat's real name. One pending row per person and cat; a new one replaces it. The name
+ * is not public until a caretaker approves it, and who asked is never public. Private, like ear_tip_flags.
+ */
+export const nameSuggestions = pgTable(
+  "name_suggestions",
+  {
+    id: id(),
+    catId: uuid("cat_id")
+      .notNull()
+      .references(() => cats.id),
+    requesterId: uuid("requester_id")
+      .notNull()
+      .references(() => users.id),
+    name: text("name").notNull(),
+    status: text("status").notNull().default("pending"),
+    decidedBy: uuid("decided_by").references(() => users.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("name_suggestions_status_check", sql`${t.status} in ('pending', 'approved', 'dismissed')`),
+    uniqueIndex("name_suggestions_pending_idx")
+      .on(t.catId, t.requesterId)
+      .where(sql`${t.status} = 'pending'`),
+    index("name_suggestions_pending_cat_idx")
+      .on(t.catId)
+      .where(sql`${t.status} = 'pending'`),
   ],
 );
 

@@ -48,6 +48,7 @@ describe("buildReveal", () => {
       probablyFemale: false,
       needsFunding: true,
       photoUrl: null,
+      canRename: false,
     });
   });
 
@@ -89,6 +90,7 @@ describe("buildReveal", () => {
       probablyFemale: false,
       needsFunding: false,
       photoUrl: null,
+      canRename: false,
     });
   });
 
@@ -169,6 +171,7 @@ describe("POST /api/spot reveal", () => {
     const reveal = json.reveal as Record<string, unknown>;
     expect(Object.keys(reveal).sort()).toEqual([
       "avatar",
+      "canRename",
       "catId",
       "coat",
       "flags",

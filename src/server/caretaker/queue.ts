@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { AssessmentSchema, ReceiptSchema, type ReceiptReading } from "../ai/schemas";
 import { db } from "../db/client";
-import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, payouts, receipts, reviewRequests, sightings, users, wakeups } from "../db/schema";
+import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reviewRequests, sightings, users, wakeups } from "../db/schema";
 import { depositPaidOn, reasonMessages } from "../vetFlow";
 import { manilaDate } from "../public";
 
@@ -70,6 +70,8 @@ export type CaretakerQueue = {
   earTipPending: { id: string; name: string; yes: number; no: number; exact: ExactSpot }[];
   /** Cats marked neutered with no vet record, no money and no payout, so a caretaker can put a wrong call back. */
   neuteredWithoutRecord: { id: string; name: string }[];
+  /** Ideas for a cat's real name, oldest first. Who sent each is not kept here. */
+  nameSuggestions: { id: string; catId: string; catName: string; name: string; /** The newest sighting of the cat, for its photo. */ photoSightingId: string | null; date: string }[];
   /** For the merge menu. */
   catChoices: { id: string; name: string; status: string; sex: string; flags: string[] }[];
 };
@@ -226,6 +228,20 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     )
     .orderBy(asc(cats.createdAt), asc(cats.id));
 
+  const suggested = await db
+    .select({
+      id: nameSuggestions.id,
+      catId: nameSuggestions.catId,
+      catName: cats.name,
+      name: nameSuggestions.name,
+      createdAt: nameSuggestions.createdAt,
+      photoSightingId: sql<string | null>`(select s.id from sightings s where s.cat_id = ${cats.id} and s.state in ('matched', 'new_cat') order by s.created_at desc, s.id desc limit 1)`,
+    })
+    .from(nameSuggestions)
+    .innerJoin(cats, eq(cats.id, nameSuggestions.catId))
+    .where(eq(nameSuggestions.status, "pending"))
+    .orderBy(asc(nameSuggestions.createdAt), asc(nameSuggestions.id));
+
   return {
     awaitingApproval,
     needsReview,
@@ -246,6 +262,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     })),
     earTipPending: undecided.map((c) => ({ id: c.id, name: c.name, yes: countOf(c.id, "yes"), no: countOf(c.id, "no"), exact: exactOf(c.lat, c.lng, c.approx) })),
     neuteredWithoutRecord: noRecord,
+    nameSuggestions: suggested.map((n) => ({ id: n.id, catId: n.catId, catName: n.catName, name: n.name, photoSightingId: n.photoSightingId, date: manilaDate(n.createdAt) })),
     catChoices: allCats,
   };
 }

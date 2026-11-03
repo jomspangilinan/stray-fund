@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, like, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
 import { catAvatar } from "@/lib/avatar";
 import { COLONY } from "@/lib/config";
 import { assessPhoto, type Assessment } from "./ai/assess";
@@ -7,6 +7,7 @@ import { matchCat } from "./ai/match";
 import { db, lockColony, type Tx } from "./db/client";
 import { applyRequestedEarTip, type EarTipValue } from "./earTipFlags";
 import { cats, guardrails, sightings } from "./db/schema";
+import { catNamesInUse, uniqueName } from "./catNames";
 import { fuzzLocation } from "./location";
 import { publishScrubbed, storeOriginal, type Box } from "./photos";
 import { getStorage } from "./storage";
@@ -139,7 +140,7 @@ async function runSighting(sightingId: string): Promise<Run> {
   if (stored.success) {
     assessment = stored.data;
   } else {
-    const res = await assessPhoto(original);
+    const res = await assessPhoto(original, await catNamesInUse(db));
     if (!res.ok) {
       if (res.reason === "budget" || res.reason === "unavailable") {
         return { result: result("queued_for_ai", s.id), stop: res.reason };
@@ -235,20 +236,6 @@ function cleanName(raw: string): string {
     .slice(0, 30)
     .trim();
   return name || FALLBACK_NAME;
-}
-
-async function uniqueName(tx: Tx, base: string): Promise<string> {
-  const escaped = base.replace(/[\\%_]/g, "\\$&");
-  const rows = await tx
-    .select({ name: cats.name })
-    .from(cats)
-    .where(or(sql`lower(${cats.name}) = lower(${base})`, like(sql`lower(${cats.name})`, `${escaped.toLowerCase()} %`)));
-  const taken = new Set(rows.map((r) => r.name.toLowerCase()));
-  if (!taken.has(base.toLowerCase())) return base;
-  for (let n = 2; ; n++) {
-    const candidate = `${base} ${n}`;
-    if (!taken.has(candidate.toLowerCase())) return candidate;
-  }
 }
 
 /**
