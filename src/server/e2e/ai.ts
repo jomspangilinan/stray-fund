@@ -3,6 +3,7 @@ import sharp from "sharp";
 import type { AiResponse, AiTransport } from "../ai/client";
 import { DEMO_CLINIC_NAME } from "../demoPersonas";
 import { manilaDate } from "../public";
+import { log } from "./paypal";
 
 /*
  * The fake AI for the end-to-end test, as one AiTransport. It answers the three vision requests and the
@@ -134,8 +135,13 @@ function funding(steps: Step[]): AiResponse {
   const pool = [...steps].reverse().find((s) => s.name === "get_pool_status")?.data as { available?: number; packagePrice?: number } | undefined;
   const cats = (last.data.cats as WaitingCat[] | undefined) ?? [];
   if (cats.length === 0) return say("No cat is waiting for funding, so there is nothing to do.");
-  if ((pool?.available ?? 0) < (pool?.packagePrice ?? Infinity)) return say("The pool cannot cover another care package yet, so I am waiting for more gifts.");
   const top = cats[0];
+  if ((pool?.available ?? 0) < (pool?.packagePrice ?? Infinity)) {
+    // A pushy treasurer: it asks for the funding anyway, once, so the test proves the real tool says no
+    // and does not depend on this fake choosing to wait.
+    if (steps.some((s) => s.name === "fund_next_cat")) return say("The pool cannot cover another care package yet, so I am waiting for more gifts.");
+    return call(n, "fund_next_cat", { cat_id: top.catId, reason: `${top.name} is first in line, so ${top.name} is funded now, whatever the pool says.` });
+  }
   return call(n, "fund_next_cat", {
     cat_id: top.catId,
     reason: `${top.name} is first in line and the fund can cover the care, so ${top.name} is funded now.`,
@@ -169,6 +175,9 @@ function treasurer(p: Params): AiResponse {
   const first = p.messages[0]?.content;
   const kind = /^Event: ([a-z_]+)\./.exec(typeof first === "string" ? first : "")?.[1] ?? "";
   const steps = trail(p.messages);
+  // The test reads this to see what the real fund_next_cat answered, so it proves the rule and not the fake's choice.
+  const lastStep = steps.at(-1);
+  if (lastStep?.name === "fund_next_cat") log({ call: "treasurer.fund_next_cat", ok: lastStep.ok, code: lastStep.data.code ?? null });
   if (steps.at(-1)?.ok === false) return say("A step was refused, so I am stopping. A caretaker can look at it.");
   return kind === "donation_captured" || kind === "cat_queued" ? funding(steps) : bookings(steps);
 }

@@ -21,7 +21,7 @@ export const fakeDonationFee = (gross: number): number => Math.round(gross * 0.0
 export const fakePayoutFee = (amount: number): number => Math.min(Math.round(amount * 0.02), 5000);
 
 /** One JSON line per call to the fake, when E2E_FAKE_LOG names a file. The test reads it to prove no payment was repeated. */
-function log(entry: Record<string, unknown>): void {
+export function log(entry: Record<string, unknown>): void {
   const file = process.env.E2E_FAKE_LOG;
   if (file) appendFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
 }

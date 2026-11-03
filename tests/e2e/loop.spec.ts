@@ -21,6 +21,11 @@ const DONATION_2 = { gross: 50_000, fee: 2_950 };
 const DEPOSIT_FEE = 900;
 const BALANCE_FEE = 1_500;
 // The invented place every photo is taken at (playwright.config.ts).
+/** The coordinate rounded to 3, 4, 5 and 6 decimals, plus the full value, so a leak at any precision above 2 is caught. */
+function coordinateForms(value: number): string[] {
+  return [...new Set([String(value), ...[3, 4, 5, 6].map((d) => value.toFixed(d))])];
+}
+
 const EXACT = { lat: "10.4321", lng: "120.8765" };
 
 const fakeSdk = readFileSync(path.join(__dirname, "fake-paypal-sdk.js"), "utf8");
@@ -148,6 +153,13 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     const pool = await (await page.request.get("/api/impact")).json();
     expect(pool.pool).toMatchObject({ grossIn: 150_000, paypalFees: DONATION_1.fee, available: DONATION_1.gross - DONATION_1.fee, heldForCats: 0 });
     expect(DONATION_1.gross - DONATION_1.fee).toBeLessThan(PACKAGE);
+
+    // The fake treasurer asked for the funding anyway. The real tool must have said no, so this proves the rule.
+    const asked = fakePayPalCalls().filter((c) => c.call === "treasurer.fund_next_cat");
+    expect(asked.length).toBeGreaterThan(0);
+    for (const a of asked) expect(a).toMatchObject({ ok: false, code: "INSUFFICIENT_FUNDS" });
+    expect(await db.one("select count(*)::int as n from allocations where cat_id = $1", [catId])).toMatchObject({ n: 0 });
+    expect(await db.one("select count(*)::int as n from agent_actions where action = 'fund_cat'")).toMatchObject({ n: 0 });
   });
 
   await test.step("a second donor gives PHP 500 and the treasurer funds the cat through its real tools", async () => {
@@ -352,6 +364,7 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
 
   // ---------------------------------------------------------------- privacy
   await test.step("no public page or answer holds the exact place, a private key or an email", async () => {
+    const sighting = await db.one<{ exact_lat: number; exact_lng: number }>("select exact_lat, exact_lng from sightings where cat_id = $1", [catId]);
     const cat = await db.one<{ fuzzed_lat: number; fuzzed_lng: number }>("select fuzzed_lat, fuzzed_lng from cats where id = $1", [catId]);
     expect([cat.fuzzed_lat, cat.fuzzed_lng]).not.toEqual([Number(EXACT.lat), Number(EXACT.lng)]);
 
@@ -362,6 +375,10 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
         const res = await anonymous.request.get(p);
         expect(res.status(), p).toBeLessThan(400);
         const body = await res.text();
+        // The exact place rounded to 3 or more decimals must not appear either, in any number format.
+        for (const secret of [...coordinateForms(sighting.exact_lat), ...coordinateForms(sighting.exact_lng)]) {
+          expect(body, `${p} must not contain the coordinate ${secret}`).not.toContain(secret);
+        }
         for (const secret of [EXACT.lat, EXACT.lng, "exact_lat", "exactLat", "exact_lng", "originals/", "demo-vet@e2e.invalid", "paypal_email", "paypalEmail"]) {
           expect(body, `${p} must not contain ${secret}`).not.toContain(secret);
         }
