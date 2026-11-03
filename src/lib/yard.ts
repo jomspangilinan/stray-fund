@@ -23,15 +23,71 @@ export type YardCat = {
   female: boolean;
 };
 
-/**
- * Where a cat's feet rest, as a percent of the yard. Three loose rows, staggered, none on the wall. Each row has
- * four cats about 22 percent apart, so a name tag under a cat has room, and none sits in the far right corner.
- */
-export const YARD_SLOTS: readonly { x: number; y: number }[] = [
-  { x: 13, y: 56 }, { x: 35, y: 54 }, { x: 57, y: 57 }, { x: 79, y: 55 },
-  { x: 24, y: 73 }, { x: 46, y: 71 }, { x: 68, y: 74 }, { x: 88, y: 72 },
-  { x: 13, y: 89 }, { x: 35, y: 87 }, { x: 57, y: 90 }, { x: 79, y: 88 },
+/** At 3 cats or fewer a cat is this many times its size at a full yard. */
+export const YARD_FEW = 3;
+export const YARD_BIG = 1.5;
+
+/** Cats scale with how many there are: largest at 1 to 3, today's size at 12, smooth between. */
+export function yardScale(count: number): number {
+  if (!(count > YARD_FEW)) return YARD_BIG;
+  if (count >= YARD_MAX) return 1;
+  return YARD_BIG - ((YARD_BIG - 1) * (count - YARD_FEW)) / (YARD_MAX - YARD_FEW);
+}
+
+/** Width of a cat as a percent of the yard at a full yard: a little larger toward the front, which reads as nearer. */
+export const widthAt = (y: number): number => 12 + ((y - 50) / 40) * 3;
+
+/** How many cats stand in each row, back to front, for every count from 1 to 12. */
+const ROW_COUNTS: readonly (readonly number[])[] = [
+  [1], [2], [3], [2, 2], [3, 2], [3, 3], [4, 3], [3, 3, 2], [3, 3, 3], [3, 3, 4], [4, 4, 3], [4, 4, 4],
 ];
+/** Where a row's feet rest, as a percent of the yard height: one row, two, or three loose rows, none on the wall. */
+const ROW_Y: readonly (readonly number[])[] = [[83], [56, 90], [53, 65, 92]];
+const ROW_LEFT = 11;
+const ROW_SPAN = 77.5;
+const ROW_STAGGER = 0.475;
+
+/**
+ * Where each cat's feet rest, as a percent of the yard, for a yard holding this many. Rows are staggered so a name
+ * tag under a cat has room, and a count has exactly as many places as cats, so every place is taken.
+ */
+export function yardSlots(count: number): { x: number; y: number }[] {
+  const rows = ROW_COUNTS[Math.min(YARD_MAX, Math.max(1, count)) - 1];
+  const ys = ROW_Y[rows.length - 1];
+  return rows.flatMap((k, r) => {
+    const step = k > 1 ? ROW_SPAN / (k - 1 + ROW_STAGGER) : 0;
+    return Array.from({ length: k }, (_, i) => ({
+      x: k === 1 ? (rows.length === 1 ? 50 : r % 2 ? 65 : 35) : ROW_LEFT + i * step + (r % 2 ? step * ROW_STAGGER : 0),
+      y: ys[r],
+    }));
+  });
+}
+
+/** The yard as a phone shows it (390 x 664), and the part of a drawn cat that is cat. Used to keep cats clear. */
+const PHONE = { w: 390, h: 288, tagW: 50, tagH: 18 } as const;
+/** How far a cat strolls sideways, as a share of its own width (the largest --dx the yard sets). */
+const WANDER = 0.2;
+
+/** A cat's size and where it stands, as percents of the yard width, kept inside with room to stroll. */
+export function placeAt(slot: { x: number; y: number }, scale: number): { x: number; y: number; w: number } {
+  const w = widthAt(slot.y) * scale;
+  const room = w * (0.5 + WANDER);
+  return { x: Math.min(100 - room, Math.max(room, slot.x)), y: slot.y, w };
+}
+
+type Box = { l: number; t: number; r: number; b: number };
+
+/** The pixels the drawn cat and its name tag cover on a phone. */
+export function phoneBoxes(slot: { x: number; y: number }, scale: number): { cat: Box; tag: Box } {
+  const p = placeAt(slot, scale);
+  const size = (p.w / 100) * PHONE.w;
+  const cx = (p.x / 100) * PHONE.w;
+  const feet = (p.y / 100) * PHONE.h;
+  return {
+    cat: { l: cx - size / 2 + 0.2 * size, r: cx - size / 2 + 0.9 * size, t: feet - 0.88 * size, b: feet },
+    tag: { l: cx - PHONE.tagW / 2, r: cx + PHONE.tagW / 2, t: feet - 4, b: feet - 4 + PHONE.tagH },
+  };
+}
 
 /** Longest name a yard tag shows; a longer one is cut with an ellipsis. */
 export const TAG_MAX = 30;
@@ -43,18 +99,20 @@ export const tagName = (name: string): string => {
 
 const hash = hashOf;
 
-export const slotFor = (id: string): number => hash(id) % YARD_SLOTS.length;
+/** A cat's preferred place, from its id alone. Over a yard of fewer cats it wraps onto that yard's places. */
+export const slotFor = (id: string): number => hash(id) % YARD_MAX;
 
 /** A calm per-cat number in [0, 1) for staggering motion, so cats do not move in step. */
 export const jitterFor = (id: string, salt: number): number => (hash(`${id}:${salt}`) % 1000) / 1000;
 
-/** Each cat gets its preferred slot, or the next free one. Order decides who yields, so pass the priority order. */
+/** Each cat gets its preferred place, or the next free one. Order decides who yields, so pass the priority order. */
 export function slotsFor(ids: string[]): Map<string, number> {
+  const places = Math.max(1, ids.length);
   const taken = new Set<number>();
   const out = new Map<string, number>();
   for (const id of ids) {
-    let s = slotFor(id);
-    for (let n = 0; n < YARD_SLOTS.length && taken.has(s); n++) s = (s + 1) % YARD_SLOTS.length;
+    let s = slotFor(id) % places;
+    for (let n = 0; n < places && taken.has(s); n++) s = (s + 1) % places;
     taken.add(s);
     out.set(id, s);
   }

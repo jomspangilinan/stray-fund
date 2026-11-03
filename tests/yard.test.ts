@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { NEUTRAL_AVATAR } from "../src/lib/avatar";
-import { TAG_MAX, YARD_MAX, YARD_SLOTS, careMarks, tagName, pickYard, slotFor, slotsFor, yardStage, type YardCat } from "../src/lib/yard";
+import { TAG_MAX, YARD_MAX, careMarks, phoneBoxes, placeAt, tagName, pickYard, slotFor, slotsFor, yardScale, yardSlots, yardStage, type YardCat } from "../src/lib/yard";
 import { closePool, db } from "../src/server/db/client";
 import { cats, sightings, treatments } from "../src/server/db/schema";
 import { getYard } from "../src/server/public";
@@ -22,30 +22,87 @@ describe("slots", () => {
     for (let i = 0; i < 50; i++) {
       const s = slotFor(`cat-${i}`);
       expect(s).toBeGreaterThanOrEqual(0);
-      expect(s).toBeLessThan(YARD_SLOTS.length);
+      expect(s).toBeLessThan(YARD_MAX);
     }
   });
 
   it("spreads ids over the slots", () => {
     const used = new Set(Array.from({ length: 200 }, (_, i) => slotFor(`id-${i}`)));
-    expect(used.size).toBe(YARD_SLOTS.length);
+    expect(used.size).toBe(YARD_MAX);
   });
 
   it("gives every shown cat its own slot", () => {
     const ids = Array.from({ length: YARD_MAX }, (_, i) => `same-${i}`);
     const slots = slotsFor(ids);
     expect(new Set(slots.values()).size).toBe(YARD_MAX);
-    // A cat keeps its preferred slot when nobody else wants it.
-    expect(slotsFor(["solo"]).get("solo")).toBe(slotFor("solo"));
+    // A cat keeps its preferred place when nobody else wants it, and a lone cat has the one place there is.
+    expect(slotsFor(["solo"]).get("solo")).toBe(0);
+    // The first cat in priority order always gets the place its id points to.
+    expect(slots.get(ids[0])).toBe(slotFor(ids[0]));
   });
 
-  it("keeps slot positions inside the yard, off the wall", () => {
-    for (const s of YARD_SLOTS) {
-      expect(s.x).toBeGreaterThan(5);
-      expect(s.x).toBeLessThan(95);
-      expect(s.y).toBeGreaterThan(40);
-      expect(s.y).toBeLessThan(95);
+  it("keeps slot positions inside the yard, off the wall, for every count", () => {
+    for (let n = 1; n <= YARD_MAX; n++) {
+      const slots = yardSlots(n);
+      expect(slots).toHaveLength(n);
+      for (const s of slots) {
+        expect(s.x).toBeGreaterThan(5);
+        expect(s.x).toBeLessThan(95);
+        expect(s.y).toBeGreaterThan(40);
+        expect(s.y).toBeLessThan(95);
+      }
     }
+  });
+});
+
+describe("yard cat size", () => {
+  it("is largest at 1 to 3, today's size at 12, and shrinks smoothly between", () => {
+    expect(yardScale(1)).toBe(yardScale(3));
+    expect(yardScale(12)).toBe(1);
+    expect(yardScale(3)).toBeGreaterThan(1.4);
+    for (let n = 3; n < 12; n++) {
+      const step = yardScale(n) - yardScale(n + 1);
+      expect(step).toBeGreaterThan(0);
+      expect(step).toBeLessThan(0.1);
+    }
+  });
+
+  it("keeps every cat inside the stage and clear of the others, with its tag, at every count from 1 to 12", () => {
+    const overlap = (a: { l: number; t: number; r: number; b: number }, b: { l: number; t: number; r: number; b: number }) =>
+      a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+    for (let n = 1; n <= YARD_MAX; n++) {
+      const scale = yardScale(n);
+      const boxes = yardSlots(n).map((s) => phoneBoxes(s, scale));
+      for (const [i, a] of boxes.entries()) {
+        // Inside the stage, with room to stroll sideways.
+        const p = placeAt(yardSlots(n)[i], scale);
+        expect(p.x - p.w * 0.7).toBeGreaterThanOrEqual(-1e-9);
+        expect(p.x + p.w * 0.7).toBeLessThanOrEqual(100 + 1e-9);
+        expect(a.cat.t).toBeGreaterThan(90);
+        expect(a.tag.b).toBeLessThanOrEqual(288);
+        for (const [j, b] of boxes.entries()) {
+          if (j <= i) continue;
+          expect(overlap(a.cat, b.cat), `${n} cats: ${i} and ${j} overlap`).toBe(false);
+          expect(overlap(a.tag, b.tag), `${n} cats: tags ${i} and ${j} overlap`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("keeps a name tag off other cats, bar three heads at 11 on a short name", () => {
+    // Tags sit under the feet and a full yard has little room: no tag may cover another cat, except at 11 (three heads).
+    let covered = 0;
+    for (let n = 1; n <= YARD_MAX; n++) {
+      const scale = yardScale(n);
+      const boxes = yardSlots(n).map((s) => phoneBoxes(s, scale));
+      for (const [i, a] of boxes.entries())
+        for (const [j, b] of boxes.entries())
+          if (i !== j && a.tag.l < b.cat.r && b.cat.l < a.tag.r && a.tag.t < b.cat.b && b.cat.t < a.tag.b) {
+            covered++;
+            expect(n).toBe(11);
+          }
+    }
+    expect(covered).toBeLessThanOrEqual(3);
   });
 });
 
@@ -56,14 +113,6 @@ describe("name tags", () => {
     const cut = tagName("Maria Clara Isabella Santos-Reyes de la Cruz");
     expect(Array.from(cut)).toHaveLength(TAG_MAX);
     expect(cut.endsWith("\u2026")).toBe(true);
-  });
-
-  it("keeps cats in a row at least 20 percent apart and out of the right edge", () => {
-    for (const row of [0, 4, 8]) {
-      const xs = YARD_SLOTS.slice(row, row + 4).map((s) => s.x);
-      for (let i = 1; i < xs.length; i++) expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(20);
-      expect(Math.max(...xs)).toBeLessThanOrEqual(90);
-    }
   });
 });
 

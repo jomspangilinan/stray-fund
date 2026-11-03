@@ -1,12 +1,9 @@
 import Link from "next/link";
 import type { PublicYard } from "@/server/public";
-import { YARD_SLOTS, jitterFor, slotsFor, tagName } from "@/lib/yard";
+import { jitterFor, placeAt, slotsFor, tagName, yardScale, yardSlots } from "@/lib/yard";
 import { CatAvatar } from "./CatAvatar";
 import { YardScene } from "./YardScene";
 import { YardStage } from "./YardStage";
-
-/** Width of a cat as a percent of the yard: a little larger toward the front, which reads as nearer. */
-const widthAt = (y: number) => 12 + ((y - 50) / 40) * 3;
 
 /**
  * The home picture: one made-up courtyard. Cats stand where a hash of their id puts them and every cat is a
@@ -15,6 +12,8 @@ const widthAt = (y: number) => 12 + ((y - 50) / 40) * 3;
 export function Yard({ yard, intro = false }: { yard: PublicYard; intro?: boolean }) {
   const { cats, total, stage, goal } = yard;
   const slots = slotsFor(cats.map((c) => c.id));
+  const places = yardSlots(cats.length);
+  const scale = yardScale(cats.length);
   return (
     <section aria-labelledby="yard-title" className="yard on-main">
       <div className="yard-goal">
@@ -52,13 +51,13 @@ export function Yard({ yard, intro = false }: { yard: PublicYard; intro?: boolea
         ) : (
           <ul className="yard-cats" aria-label="Cats in the yard">
             {cats.map((c) => {
-              const slot = YARD_SLOTS[slots.get(c.id) ?? 0];
+              const spot = placeAt(places[slots.get(c.id) ?? 0], scale);
               const dir = jitterFor(c.id, 1) < 0.5 ? -1 : 1;
               const style = {
-                left: `${slot.x}%`,
-                top: `${slot.y}%`,
-                width: `${widthAt(slot.y).toFixed(2)}%`,
-                zIndex: Math.round(slot.y),
+                left: `${spot.x.toFixed(2)}%`,
+                top: `${spot.y.toFixed(2)}%`,
+                width: `${spot.w.toFixed(2)}%`,
+                zIndex: Math.round(spot.y),
                 "--dx": `${(dir * (10 + jitterFor(c.id, 2) * 10)).toFixed(0)}%`,
                 "--dur": `${(22 + jitterFor(c.id, 3) * 14).toFixed(1)}s`,
                 "--off": `${(-jitterFor(c.id, 4) * 30).toFixed(1)}s`,
