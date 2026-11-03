@@ -11,6 +11,18 @@ function haversine(a: { lat: number; lng: number }, b: { lat: number; lng: numbe
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+/** Small seeded generator (mulberry32) so the statistical checks never flake. */
+function seeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 describe("fuzzLocation", () => {
   for (const [lat, lng] of [
     [14.6, 121.0],
@@ -18,10 +30,11 @@ describe("fuzzLocation", () => {
     [-33.9, 151.2],
   ]) {
     it(`offsets 300 to 700 m at latitude ${lat} over 1000 runs`, () => {
+      const rng = seeded(1234);
       let min = Infinity;
       let max = 0;
       for (let i = 0; i < 1000; i++) {
-        const out = fuzzLocation(lat, lng);
+        const out = fuzzLocation(lat, lng, rng);
         const d = haversine({ lat, lng }, out);
         min = Math.min(min, d);
         max = Math.max(max, d);
@@ -34,9 +47,10 @@ describe("fuzzLocation", () => {
   }
 
   it("covers every bearing", () => {
+    const rng = seeded(42);
     const quadrants = new Set<string>();
     for (let i = 0; i < 200; i++) {
-      const o = fuzzLocation(14.6, 121);
+      const o = fuzzLocation(14.6, 121, rng);
       quadrants.add(`${Math.sign(o.lat - 14.6)}${Math.sign(o.lng - 121)}`);
     }
     expect(quadrants.size).toBe(4);
@@ -51,8 +65,11 @@ describe("fuzzLocation", () => {
   });
 
   it("returns degrees with at most 6 decimals", () => {
-    const o = fuzzLocation(14.5995, 120.9842);
-    for (const v of [o.lat, o.lng]) expect(String(v).split(".")[1]?.length ?? 0).toBeLessThanOrEqual(6);
+    const rng = seeded(7);
+    for (let i = 0; i < 50; i++) {
+      const o = fuzzLocation(14.5995, 120.9842, rng);
+      for (const v of [o.lat, o.lng]) expect(String(v).split(".")[1]?.length ?? 0).toBeLessThanOrEqual(6);
+    }
   });
 
   it("rejects invalid coordinates", () => {
