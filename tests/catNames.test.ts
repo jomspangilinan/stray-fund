@@ -199,13 +199,16 @@ describe("Another name", () => {
   it("never lands on a name another cat holds, tap after tap", async () => {
     const finder = await makeUser();
     const cat = await catFoundBy(finder);
+    const holder = await makeCat({ name: CAT_NAMES[0] });
     const { anotherName } = await import("../src/server/catNames");
-    const seen = new Set<string>();
     for (let i = 0; i < 6; i++) {
+      const before = (await catRow(cat.id)).name;
       const n = await anotherName(finder.id, cat.id);
-      expect(seen.has(n.toLowerCase())).toBe(false);
-      seen.add(n.toLowerCase());
+      expect(n.toLowerCase()).not.toBe(holder.name.toLowerCase());
+      expect(n.toLowerCase()).not.toBe(before.toLowerCase());
+      expect((await catRow(cat.id)).name).toBe(n);
     }
+    expect((await catRow(holder.id)).name).toBe(CAT_NAMES[0]);
   });
 
   it("refuses someone who is not the finder with 403, and changes nothing", async () => {

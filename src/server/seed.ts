@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { catAvatar } from "@/lib/avatar";
 import { COLONY } from "@/lib/config";
 import { db } from "./db/client";
@@ -56,14 +56,22 @@ export function assertSeedAllowed(env: Env = process.env): void {
   }
 }
 
-const isSampleId = (id: string | null) => id === null || id.startsWith(SAMPLE_PREFIX) || id.startsWith("E2E-");
+const isSampleId = (id: string) => id.startsWith(SAMPLE_PREFIX) || id.startsWith("E2E-");
 
-/** Throws when the database holds a PayPal id that is not SAMPLE- or E2E-, unless SEED_WIPE_REAL=yes. Reads only. */
+/**
+ * Throws when the database holds a PayPal id that is not SAMPLE- or E2E-, unless SEED_WIPE_REAL=yes. Reads only.
+ * A payout with no batch id yet is real, unless its action says "Sample data.", which is how the seed marks its own.
+ */
 export async function assertNoRealLedger(env: Env = process.env): Promise<void> {
   if (env.SEED_WIPE_REAL === "yes") return;
   const orders = await db.select({ id: donations.paypalOrderId }).from(donations);
-  const batches = await db.select({ id: payouts.paypalPayoutBatchId }).from(payouts);
-  const real = orders.filter((r) => !isSampleId(r.id)).length + batches.filter((r) => !isSampleId(r.id)).length;
+  const batches = await db
+    .select({ id: payouts.paypalPayoutBatchId, reason: agentActions.reason })
+    .from(payouts)
+    .innerJoin(agentActions, eq(payouts.actionId, agentActions.id));
+  const realOrders = orders.filter((r) => !isSampleId(r.id)).length;
+  const realBatches = batches.filter((r) => (r.id === null ? !r.reason.startsWith(SAMPLE_REASON) : !isSampleId(r.id))).length;
+  const real = realOrders + realBatches;
   if (real > 0) {
     throw new SeedRefused(
       `This database holds ${real} PayPal id${real === 1 ? "" : "s"} that are not sample or test ids, so it looks like a real ledger. Seeding would empty it. Nothing was changed. If you really mean it, run again with SEED_WIPE_REAL=yes.`,

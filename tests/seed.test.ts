@@ -103,6 +103,24 @@ describe("the seed will not wipe a real ledger", () => {
     await expect(seed({})).resolves.toMatchObject({ cats: 8 });
   });
 
+  it("counts a payout with no batch id as real, unless its action is marked as sample", async () => {
+    await seed({});
+    const [p] = await db.select().from(payouts).limit(1);
+    await db.update(payouts).set({ paypalPayoutBatchId: null }).where(eq(payouts.id, p.id));
+    await expect(assertNoRealLedger({})).resolves.toBeUndefined();
+    await expect(seed({})).resolves.toMatchObject({ cats: 8 });
+
+    await seed({});
+    const [q] = await db.select().from(payouts).limit(1);
+    await db.update(payouts).set({ paypalPayoutBatchId: null }).where(eq(payouts.id, q.id));
+    await db.update(agentActions).set({ reason: "Caretaker approved the balance for a vet." }).where(eq(agentActions.id, q.actionId));
+    const before = (await db.select().from(payouts)).length;
+    await expect(assertNoRealLedger({})).rejects.toThrow(SeedRefused);
+    await expect(seed({})).rejects.toThrow(SeedRefused);
+    expect(await db.select().from(payouts)).toHaveLength(before);
+    expect((await db.select().from(payouts)).some((r) => r.id === q.id && r.paypalPayoutBatchId === null)).toBe(true);
+  });
+
   it("refuses when a donation order id is not SAMPLE- or E2E-, and leaves the data alone", async () => {
     await withRealOrder("5O190127TN364715T");
     await expect(assertNoRealLedger({})).rejects.toThrow(SeedRefused);
