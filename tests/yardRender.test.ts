@@ -92,6 +92,7 @@ describe("Yard", () => {
     expect(html).toContain('aria-label="Mimi, Waiting for funding"');
     expect(html).toContain('aria-label="Kiko, Neutered"');
     expect(html.match(/<li /g)).toHaveLength(2);
+    expect(html).toMatch(/class="yard-name"[^>]*>Mimi</);
   });
 
   it("reads the goal from real counts and keeps the donate-free picture decorative", () => {
@@ -106,6 +107,8 @@ describe("Yard", () => {
     const html = renderToStaticMarkup(createElement(Yard, { yard: yard([], 0) }));
     expect(html).toContain("No cats yet");
     expect(html).toContain('href="/spot"');
+    expect(html).toContain("Spot a cat");
+    expect(html).not.toContain("first cat");
     expect(html).not.toContain("See all");
   });
 

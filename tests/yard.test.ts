@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { NEUTRAL_AVATAR } from "../src/lib/avatar";
-import { YARD_MAX, YARD_SLOTS, careMarks, pickYard, slotFor, slotsFor, yardStage, type YardCat } from "../src/lib/yard";
+import { TAG_MAX, YARD_MAX, YARD_SLOTS, careMarks, tagName, pickYard, slotFor, slotsFor, yardStage, type YardCat } from "../src/lib/yard";
 import { closePool, db } from "../src/server/db/client";
 import { cats, sightings, treatments } from "../src/server/db/schema";
 import { getYard } from "../src/server/public";
@@ -45,6 +45,24 @@ describe("slots", () => {
       expect(s.x).toBeLessThan(95);
       expect(s.y).toBeGreaterThan(40);
       expect(s.y).toBeLessThan(95);
+    }
+  });
+});
+
+describe("name tags", () => {
+  it("cuts a long name to 30 characters with an ellipsis and leaves short ones alone", () => {
+    expect(tagName("Muning")).toBe("Muning");
+    expect(tagName("a".repeat(TAG_MAX))).toBe("a".repeat(TAG_MAX));
+    const cut = tagName("Maria Clara Isabella Santos-Reyes de la Cruz");
+    expect(Array.from(cut)).toHaveLength(TAG_MAX);
+    expect(cut.endsWith("\u2026")).toBe(true);
+  });
+
+  it("keeps cats in a row at least 20 percent apart and out of the right edge", () => {
+    for (const row of [0, 4, 8]) {
+      const xs = YARD_SLOTS.slice(row, row + 4).map((s) => s.x);
+      for (let i = 1; i < xs.length; i++) expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(20);
+      expect(Math.max(...xs)).toBeLessThanOrEqual(90);
     }
   });
 });

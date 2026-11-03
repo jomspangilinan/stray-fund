@@ -23,12 +23,23 @@ export type YardCat = {
   female: boolean;
 };
 
-/** Where a cat's feet rest, as a percent of the yard. Three loose rows, staggered, none on the wall. */
+/**
+ * Where a cat's feet rest, as a percent of the yard. Three loose rows, staggered, none on the wall. Each row has
+ * four cats about 22 percent apart, so a name tag under a cat has room, and none sits in the far right corner.
+ */
 export const YARD_SLOTS: readonly { x: number; y: number }[] = [
-  { x: 14, y: 54 }, { x: 38, y: 52 }, { x: 63, y: 55 }, { x: 87, y: 53 },
-  { x: 26, y: 71 }, { x: 50, y: 68 }, { x: 75, y: 72 }, { x: 91, y: 71 },
-  { x: 13, y: 89 }, { x: 37, y: 91 }, { x: 61, y: 88 }, { x: 80, y: 91 },
+  { x: 13, y: 56 }, { x: 35, y: 54 }, { x: 57, y: 57 }, { x: 79, y: 55 },
+  { x: 24, y: 73 }, { x: 46, y: 71 }, { x: 68, y: 74 }, { x: 88, y: 72 },
+  { x: 13, y: 89 }, { x: 35, y: 87 }, { x: 57, y: 90 }, { x: 79, y: 88 },
 ];
+
+/** Longest name a yard tag shows; a longer one is cut with an ellipsis. */
+export const TAG_MAX = 30;
+
+export const tagName = (name: string): string => {
+  const chars = Array.from(name);
+  return chars.length <= TAG_MAX ? name : `${chars.slice(0, TAG_MAX - 1).join("").trimEnd()}\u2026`;
+};
 
 const hash = hashOf;
 

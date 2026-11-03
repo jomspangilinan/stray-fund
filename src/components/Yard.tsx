@@ -1,16 +1,16 @@
 import Link from "next/link";
 import type { PublicYard } from "@/server/public";
-import { YARD_SLOTS, jitterFor, slotsFor } from "@/lib/yard";
+import { YARD_SLOTS, jitterFor, slotsFor, tagName } from "@/lib/yard";
 import { CatAvatar } from "./CatAvatar";
 import { YardScene } from "./YardScene";
 import { YardStage } from "./YardStage";
 
 /** Width of a cat as a percent of the yard: a little larger toward the front, which reads as nearer. */
-const widthAt = (y: number) => 13 + ((y - 50) / 40) * 4.5;
+const widthAt = (y: number) => 12 + ((y - 50) / 40) * 3;
 
 /**
  * The home picture: one made-up courtyard. Cats stand where a hash of their id puts them and every cat is a
- * real link. The goal sits on top, "See all" at the foot. Motion is light CSS that pauses when hidden.
+ * real link. The goal sits on top; each cat wears an always-visible name tag. Motion is light CSS that pauses when hidden.
  */
 export function Yard({ yard }: { yard: PublicYard }) {
   const { cats, total, stage, goal } = yard;
@@ -45,7 +45,7 @@ export function Yard({ yard }: { yard: PublicYard }) {
           <div className="yard-empty">
             <p className="font-bold">No cats yet</p>
             <Link href="/spot" className="btn-pop">
-              Spot the first cat
+              Spot a cat
             </Link>
           </div>
         ) : (
@@ -58,7 +58,7 @@ export function Yard({ yard }: { yard: PublicYard }) {
                 top: `${slot.y}%`,
                 width: `${widthAt(slot.y).toFixed(2)}%`,
                 zIndex: Math.round(slot.y),
-                "--dx": `${(dir * (28 + jitterFor(c.id, 2) * 30)).toFixed(0)}%`,
+                "--dx": `${(dir * (10 + jitterFor(c.id, 2) * 10)).toFixed(0)}%`,
                 "--dur": `${(22 + jitterFor(c.id, 3) * 14).toFixed(1)}s`,
                 "--off": `${(-jitterFor(c.id, 4) * 30).toFixed(1)}s`,
                 "--breath": `${(4.2 + jitterFor(c.id, 5) * 1.8).toFixed(1)}s`,
@@ -70,7 +70,7 @@ export function Yard({ yard }: { yard: PublicYard }) {
                       <CatAvatar avatar={c.avatar} id={c.id} marks={c.marks} ribbon={c.female} />
                     </span>
                     <span className="yard-name" aria-hidden="true">
-                      {c.name}
+                      {tagName(c.name)}
                     </span>
                   </Link>
                 </li>
