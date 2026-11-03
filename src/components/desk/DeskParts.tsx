@@ -1,15 +1,9 @@
+import { StaffLocation } from "@/components/StaffLocation";
 import { deskTitle, type DeskSectionId } from "@/lib/deskSections";
 import type { ExactSpot } from "@/server/caretaker/queue";
 
 export function Where({ exact, area, exactHidden }: { exact: ExactSpot; area: string; exactHidden: boolean }) {
-  if (exactHidden) return <p className="small"><span className="font-bold">Area:</span> {area}. <span className="soft">Exact spots are hidden in the demo.</span></p>;
-  if (!exact) return <p className="small soft">No location on file.</p>;
-  return (
-    <p className="small">
-      <span className="font-bold">Exact location:</span> {exact.lat.toFixed(5)}, {exact.lng.toFixed(5)}
-      {exact.approximate && <span className="block soft">Approximate: the middle of the area.</span>}
-    </p>
-  );
+  return <StaffLocation exact={exact} area={area} exactHidden={exactHidden} />;
 }
 
 /** A section of "To check". It is only drawn when it has items, so there is no empty state here. */
