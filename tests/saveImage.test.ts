@@ -1,10 +1,10 @@
-import { createElement } from "react";
+import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { BACKGROUND_NOTE, SaveImage } from "../src/components/SaveImage";
 
 const draw = (note: "over" | "below") =>
-  renderToStaticMarkup(createElement(SaveImage, { catId: "c1", iconClass: "right-2 top-2", note }, createElement("img", { alt: "" })));
+  renderToStaticMarkup(createElement(SaveImage, { catId: "c1", iconClass: "right-2 top-2", note } as ComponentProps<typeof SaveImage>, createElement("img", { alt: "" })));
 
 describe("Save image", () => {
   it("shows the reminder to check the background before any tap, in either place", () => {
