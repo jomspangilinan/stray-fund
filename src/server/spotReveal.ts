@@ -14,6 +14,8 @@ import type { SpotState } from "./spot";
  */
 
 export type SpotReveal = {
+  /** Only seeds the small details of the look-alike, so it draws the same as in the yard. */
+  catId: string | null;
   name: string | null;
   /** The look-alike that arrives in the yard. Fixed palette only; the neutral cat until the real one is ready. */
   avatar: Avatar | null;
@@ -34,6 +36,7 @@ export type RevealInput = {
   /** The finder's own flag on this cat. */
   yourEarTip?: EarTipValue | null;
   cat: {
+    id: string;
     name: string;
     status: string;
     sex: string;
@@ -68,6 +71,7 @@ export function buildReveal(i: RevealInput): SpotReveal | null {
   if (i.state === "needs_review") {
     // A person decides, so nothing about the cat is stated.
     return {
+      catId: null,
       name: null,
       avatar: null,
       coat: null,
@@ -83,6 +87,7 @@ export function buildReveal(i: RevealInput): SpotReveal | null {
   const { cat, sighting } = i;
   const finderChose = sighting.requestedSex !== null && SEXES.has(sighting.requestedSex);
   return {
+    catId: cat.id,
     name: cat.name,
     avatar: parseAvatar(cat.avatar) ?? NEUTRAL_AVATAR,
     coat: cat.coatPattern ? (COAT_LABEL[cat.coatPattern] ?? null) : null,
@@ -113,6 +118,7 @@ export async function loadReveal(sightingId: string, state: SpotState): Promise<
   const [cat] = s.catId
     ? await db
         .select({
+          id: cats.id,
           name: cats.name,
           status: cats.status,
           sex: cats.sex,

@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { CatAvatar } from "../src/components/CatAvatar";
 import { Yard } from "../src/components/Yard";
-import { AVATAR_PATTERNS, FUR, catAvatar, type Avatar } from "../src/lib/avatar";
+import { AVATAR_PATTERNS, EYE, FUR, catAvatar, type Avatar } from "../src/lib/avatar";
 import type { YardCat } from "../src/lib/yard";
 import type { PublicYard } from "../src/server/public";
 
@@ -21,9 +21,9 @@ const yard = (cats: YardCat[], stage: PublicYard["stage"] = 1): PublicYard => ({
 
 describe("CatAvatar", () => {
   it("draws every pattern from palette colours only", () => {
-    const hexes = new Set<string>(Object.values(FUR).map((h) => h.toLowerCase()));
+    const hexes = new Set<string>([...Object.values(FUR), ...Object.values(EYE)].map((h) => h.toLowerCase()));
     for (const pattern of AVATAR_PATTERNS) {
-      const html = renderToStaticMarkup(createElement(CatAvatar, { avatar: { pattern, base: "ginger", accent: "brown" }, marks: ["collar", "tip"] }));
+      const html = renderToStaticMarkup(createElement(CatAvatar, { avatar: { pattern, base: "ginger", accent: "brown" }, id: "cat-1", marks: ["collar", "tip"] }));
       expect(html).toContain("<svg");
       expect(html).not.toContain("<script");
       expect(html).toContain(FUR.ginger);
@@ -34,18 +34,29 @@ describe("CatAvatar", () => {
     }
   });
 
+  it("draws the same cat for the same id and shows the tail, eye and face details from the id", () => {
+    const a: Avatar = { pattern: "solid", base: "black", accent: "grey" };
+    const draw = (id: string) => renderToStaticMarkup(createElement(CatAvatar, { avatar: a, id }));
+    expect(draw("abc")).toBe(draw("abc"));
+    const ids = Array.from({ length: 40 }, (_, i) => `cat-${i}`);
+    expect(new Set(ids.map(draw)).size).toBeGreaterThan(8);
+    const all = ids.map(draw).join("");
+    expect(all).toContain("stroke-dashoffset"); // a tail tip
+    expect(all).toContain("L71 45"); // a kinked tail
+  });
+
   it("never puts model text into the markup", () => {
     const evil = `"><script>alert(1)</script>`;
     const a = catAvatar({ colors: [evil], markings: evil }, evil);
-    const html = renderToStaticMarkup(createElement(CatAvatar, { avatar: a }));
+    const html = renderToStaticMarkup(createElement(CatAvatar, { avatar: a, id: "cat-1" }));
     expect(html).not.toContain("alert");
     expect(html).not.toContain("script");
   });
 
   it("shows only earned marks", () => {
     const a: Avatar = { pattern: "solid", base: "grey", accent: "cream" };
-    const none = renderToStaticMarkup(createElement(CatAvatar, { avatar: a }));
-    const collar = renderToStaticMarkup(createElement(CatAvatar, { avatar: a, marks: ["collar"] }));
+    const none = renderToStaticMarkup(createElement(CatAvatar, { avatar: a, id: "cat-1" }));
+    const collar = renderToStaticMarkup(createElement(CatAvatar, { avatar: a, id: "cat-1", marks: ["collar"] }));
     expect(collar).toContain("#f2c54f");
     expect(none).not.toContain("#f2c54f");
   });

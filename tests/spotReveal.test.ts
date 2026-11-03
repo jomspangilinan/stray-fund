@@ -17,6 +17,7 @@ vi.mock("next/headers", () => ({
 import { POST as spotPost } from "../src/app/api/spot/route";
 
 const cat = (patch: Partial<NonNullable<RevealInput["cat"]>> = {}): NonNullable<RevealInput["cat"]> => ({
+  id: "11111111-1111-4111-8111-111111111111",
   name: "Pepita",
   status: "queued",
   sex: "unknown",
@@ -37,6 +38,7 @@ describe("buildReveal", () => {
   it("shows labels for a new cat, and only labels", () => {
     const r = buildReveal({ state: "new_cat", cat: cat(), sighting: sighting() });
     expect(r).toEqual({
+      catId: "11111111-1111-4111-8111-111111111111",
       name: "Pepita",
       avatar: { pattern: "tortoiseshell", base: "black", accent: "ginger" },
       coat: "Tortoiseshell",
@@ -77,6 +79,7 @@ describe("buildReveal", () => {
   it("makes no confident claims when a caretaker must look", () => {
     const r = buildReveal({ state: "needs_review", cat: cat(), sighting: sighting({ publicKey: "photos/x.jpg", publicReady: true }) });
     expect(r).toEqual({
+      catId: null,
       name: null,
       avatar: null,
       coat: null,
@@ -166,6 +169,7 @@ describe("POST /api/spot reveal", () => {
     const reveal = json.reveal as Record<string, unknown>;
     expect(Object.keys(reveal).sort()).toEqual([
       "avatar",
+      "catId",
       "coat",
       "flags",
       "name",

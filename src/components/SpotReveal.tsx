@@ -39,7 +39,7 @@ export function SpotReveal({
           <div className="arrive">
             <div className="arrive-floor" aria-hidden="true" />
             <div className="arrive-cat" aria-hidden="true">
-              <CatAvatar avatar={reveal.avatar} />
+              <CatAvatar avatar={reveal.avatar} id={reveal.catId ?? ""} />
             </div>
             <p className="arrive-note small">A look-alike. The photo is the real one.</p>
           </div>

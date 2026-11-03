@@ -85,6 +85,13 @@
       "when": 1793703349045,
       "tag": "0011_cat_avatar",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793708986363,
+      "tag": "0012_redraw_avatars",
+      "breakpoints": true
     }
   ]
 }

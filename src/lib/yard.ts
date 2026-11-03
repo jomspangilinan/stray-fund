@@ -1,4 +1,4 @@
-import type { Avatar } from "./avatar";
+import { hashOf, type Avatar } from "./avatar";
 
 /*
  * The yard is a made-up courtyard, not a map. A cat's place comes from a hash of its id and nothing else, so
@@ -28,15 +28,7 @@ export const YARD_SLOTS: readonly { x: number; y: number }[] = [
   { x: 13, y: 89 }, { x: 37, y: 91 }, { x: 61, y: 88 }, { x: 80, y: 91 },
 ];
 
-/** FNV-1a, so the same id always lands on the same slot. */
-function hash(s: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h;
-}
+const hash = hashOf;
 
 export const slotFor = (id: string): number => hash(id) % YARD_SLOTS.length;
 

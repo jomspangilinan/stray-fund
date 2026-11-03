@@ -67,7 +67,7 @@ export function Yard({ yard }: { yard: PublicYard }) {
                 <li key={c.id} className="yard-cat" style={style} data-group={c.group}>
                   <Link href={`/cats/${c.id}`} className="yard-link" aria-label={`${c.name}, ${c.statusLabel}`}>
                     <span className="yard-bob">
-                      <CatAvatar avatar={c.avatar} marks={c.marks} />
+                      <CatAvatar avatar={c.avatar} id={c.id} marks={c.marks} />
                     </span>
                     {c.group === "waiting" && (
                       <span className="yard-ask" aria-hidden="true">
