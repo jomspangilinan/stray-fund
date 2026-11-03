@@ -6,6 +6,8 @@ import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
 import { SignIn } from "@/components/SignIn";
 import { formatPeso } from "@/lib/money";
+import { CelebrationNote } from "@/components/CelebrationNote";
+import { celebrationText, findCelebration, milestoneLabel } from "@/server/milestones";
 import { getHelpedEntries, getUnallocated } from "@/server/public";
 import { getSession } from "@/server/session";
 
@@ -25,8 +27,13 @@ async function Helped() {
     getHelpedEntries(session.userId),
     getUnallocated(session.userId),
   ]);
+  // One moment at a time, and only for a cat this donor helped. The browser marks it seen after showing it.
+  const celebration = await findCelebration(session.userId, entries);
   return (
     <>
+      {celebration && (
+        <CelebrationNote text={celebrationText(celebration)} catId={celebration.catId} milestone={celebration.milestone} />
+      )}
       {unallocated > 0 && (
         <p className="note note-ok mt-6">
           <strong>Your donation is waiting in the pool.</strong> {formatPeso(unallocated)} has not been matched to a
@@ -49,7 +56,7 @@ async function Helped() {
               cat={e.cat}
               footer={
                 <p className="small">
-                  Your donations put <strong>{formatPeso(e.amount)}</strong> toward {e.cat.name}.
+                  {milestoneLabel(e.cat)}. You put <strong>{formatPeso(e.amount)}</strong> toward {e.cat.name}.
                 </p>
               }
             />

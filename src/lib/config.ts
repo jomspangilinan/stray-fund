@@ -7,6 +7,8 @@ export const COLONY = {
   area_name: "Brgy. San Antonio, near the market",
   // Invented placeholder coordinates, not a real location.
   centre: { lat: 10.1234, lng: 120.5678 },
+  // PLACEHOLDER: an invented target for the demo. Replace it with the real goal the neighbourhood agrees on.
+  goalCats: 30,
 } as const;
 
 /** Read at call time so tests and deploys can change it. */

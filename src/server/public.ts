@@ -1,4 +1,7 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { COLONY } from "@/lib/config";
+import { goalPercent } from "@/lib/goal";
+import { pickMissions, type Mission, type MissionCat } from "@/lib/missions";
 import { db } from "./db/client";
 import { cats, sightings, treatments, users } from "./db/schema";
 import { CAPTURED, getPoolStatus, toInt } from "./ledger";
@@ -570,4 +573,48 @@ export async function getHomeData(): Promise<HomeData> {
     cats: all.slice(0, HOME_CATS),
     catCount: all.length,
   };
+}
+
+export type GoalProgress = { neutered: number; goal: number; area: string; percent: number };
+
+/**
+ * Cats the fund neutered, counted from neuter treatments, one per cat. A cat found already ear-tipped has no
+ * treatment from the fund, so it is not counted. The goal is a placeholder in config.
+ */
+export async function getGoalProgress(): Promise<GoalProgress> {
+  const { rows } = await db.execute(sql`select count(distinct cat_id)::int as n from treatments where type = 'neuter'`);
+  const neutered = toInt((rows[0] as { n: unknown }).n);
+  return {
+    neutered,
+    goal: COLONY.goalCats,
+    area: COLONY.area_name,
+    percent: goalPercent(neutered, COLONY.goalCats),
+  };
+}
+
+/** Missions from public-safe data only: public columns, public flag labels, and the scrubbed photo when ready. */
+export async function getMissions(now: Date = new Date()): Promise<Mission[]> {
+  const rows = await db
+    .select(publicCatColumns)
+    .from(cats)
+    .where(inArray(cats.status, [...STATUS_GROUPS.waiting, "adoptable"]))
+    .orderBy(desc(cats.createdAt), asc(cats.id))
+    .limit(MAX_CATS);
+  const ids = rows.map((r) => r.id);
+  const sights = await loadSightings(ids);
+  const input: MissionCat[] = rows.map((r) => {
+    const mine = sights.filter((s) => s.catId === r.id);
+    const last = mine.at(-1);
+    const photo = [...mine].reverse().find((s) => s.publicReady && s.publicKey);
+    return {
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      flags: (r.flags ?? []).map((f) => FLAG_LABEL[f]).filter((f): f is string => Boolean(f)),
+      earTipped: r.earTipped ?? null,
+      photoUrl: photoUrl(photo?.publicKey ?? null),
+      lastSeenAt: last ? (last.takenAt ?? last.createdAt) : r.createdAt,
+    };
+  });
+  return pickMissions(input, now);
 }

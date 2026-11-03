@@ -578,3 +578,24 @@ input[type="checkbox"] {
     to { opacity: 1; }
   }
 }
+
+/* The shared goal. Progress achieved, shown as a bar and words. */
+.goal {
+  display: block;
+  padding: 1.25rem;
+  border-radius: var(--r-out);
+  background: var(--main);
+  color: #ffffff;
+}
+.goal-bar {
+  height: 0.75rem;
+  border-radius: 999px;
+  background: #07503b;
+  overflow: hidden;
+}
+.goal-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--pop);
+}

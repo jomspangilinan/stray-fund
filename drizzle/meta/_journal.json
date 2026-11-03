@@ -57,6 +57,13 @@
       "when": 1793695077902,
       "tag": "0007_caretaker_console",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793699868309,
+      "tag": "0008_absent_bushwacker",
+      "breakpoints": true
     }
   ]
 }

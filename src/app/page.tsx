@@ -5,11 +5,12 @@ import { CatRow } from "@/components/CatRow";
 import { BlockSkeleton } from "@/components/Loading";
 import { StatusFilter } from "@/components/StatusFilter";
 import { formatPesoShort } from "@/lib/money";
-import { getHomeData } from "@/server/public";
+import { GoalCard } from "@/components/GoalCard";
+import { getGoalProgress, getHomeData } from "@/server/public";
 
 async function Home() {
   await connection();
-  const { poolAvailable, latestAction, cats, catCount } = await getHomeData();
+  const [{ poolAvailable, latestAction, cats, catCount }, goal] = await Promise.all([getHomeData(), getGoalProgress()]);
   return (
     <>
       <section aria-labelledby="pool-title" className="on-main mt-2 rounded-out bg-main p-5 text-white">
@@ -31,6 +32,14 @@ async function Home() {
           </Link>
         </div>
       </section>
+
+      <div className="mt-3 grid gap-2">
+        <GoalCard goal={goal} />
+        <Link href="/missions" className="press card flex items-center justify-between font-bold">
+          <span>Missions</span>
+          <span className="link !min-h-0">Help a cat</span>
+        </Link>
+      </div>
 
       <section className="mt-8" aria-labelledby="latest-title">
         <div className="flex items-baseline justify-between gap-4">

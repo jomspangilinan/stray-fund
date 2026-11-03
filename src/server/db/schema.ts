@@ -370,3 +370,22 @@ export const meals = pgTable("meals", {
   source: text("source").notNull(),
   createdAt: createdAt(),
 });
+
+/** A celebration shown once to a donor for a cat they helped. The unique key is what makes it once. */
+export const milestoneSeen = pgTable(
+  "milestone_seen",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    catId: uuid("cat_id")
+      .notNull()
+      .references(() => cats.id),
+    milestone: text("milestone").notNull(),
+    seenAt: timestamp("seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("milestone_seen_key_idx").on(t.userId, t.catId, t.milestone),
+    check("milestone_seen_check", sql`${t.milestone} in ('neutered', 'adopted')`),
+  ],
+);

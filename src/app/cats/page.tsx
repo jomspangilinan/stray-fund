@@ -17,7 +17,10 @@ async function Grid({ searchParams }: { searchParams: Promise<{ status?: string 
   const cats = await listCats(group);
   return (
     <>
-      <div className="mt-5">
+      <Link href="/missions" className="btn-quiet mt-4 w-full">
+        Missions: help a cat
+      </Link>
+      <div className="mt-3">
         <StatusFilter current={group} />
       </div>
       {cats.length === 0 ? (

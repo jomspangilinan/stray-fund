@@ -106,10 +106,21 @@ async function main() {
     [`leakreview-${tag}`, donor.id],
   );
 
-  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/helped", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/ledger", "/ledger?q=LEAKBATCH", "/impact", "/api/ledger", "/api/impact", "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
+  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/helped", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/ledger", "/ledger?q=LEAKBATCH", "/impact", "/missions", "/api/ledger", "/api/impact", "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
   const viewers: [string, Record<string, string>][] = [["anon", {}], ["donor", { cookie: `sf_session=${token}` }]];
   let bad = 0, checked = 0;
   try {
+    // The note shows until the browser confirms it, then never again. A confirmation for a cat the donor did not help is refused.
+    const helpedPage = () => fetch(`${BASE}/helped`, { headers: { cookie: `sf_session=${token}` } }).then((r) => r.text());
+    const firstHelped = await helpedPage();
+    checked++;
+    const leaked = SENTINELS.filter((x) => firstHelped.includes(x));
+    if (leaked.length) { bad++; console.log(`LEAK donor first /helped: ${leaked.join(", ")}`); }
+    if (!firstHelped.includes("came home from the vet. You helped fund this.")) { bad++; console.log("FAIL: the milestone note did not show"); }
+    const seen = (catId: string) => fetch(`${BASE}/api/helped/seen`, { method: "POST", headers: { cookie: `sf_session=${token}`, "content-type": "application/json" }, body: JSON.stringify({ catId, milestone: "neutered" }) }).then((r) => r.json());
+    if ((await seen(randomUUID())).marked) { bad++; console.log("FAIL: marked a milestone for a cat the donor did not help"); }
+    if (!(await seen(cat.id)).marked) { bad++; console.log("FAIL: the confirmation was not accepted"); }
+    if ((await helpedPage()).includes("You helped fund this.")) { bad++; console.log("FAIL: the milestone note showed again"); }
     for (const [who, base] of viewers) {
       for (const p of paths) {
         for (const rsc of [false, true]) {
@@ -140,6 +151,7 @@ async function main() {
     await pool.query("delete from review_requests where resolved_by=$1", [donor.id]);
     await pool.query("delete from payouts where booking_id=$1", [booking.id]);
     await pool.query("delete from agent_actions where approved_by=$1", [donor.id]);
+    await pool.query("delete from milestone_seen where user_id=$1", [donor.id]);
     await pool.query("delete from allocations where donation_id=$1", [don.id]);
     await pool.query("delete from donations where id=$1", [don.id]);
     await pool.query("delete from treatments where cat_id=$1", [cat.id]);
