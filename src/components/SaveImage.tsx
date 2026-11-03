@@ -26,12 +26,27 @@ function download(file: File) {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+export const BACKGROUND_NOTE = "Check the background before you share.";
+
 /**
- * One quiet button. The picture is built in the background once the button scrolls into view, so a tap on a
- * ready button opens the share sheet at once (an iPhone then offers Save Image); elsewhere the file downloads.
- * A tap before it is ready shows "Saving", then "Tap to save". A background failure stays silent until someone taps.
+ * One quiet button over the photo it wraps. The picture is built in the background once the button scrolls into view,
+ * so a tap on a ready button opens the share sheet at once (an iPhone then offers Save Image); elsewhere the file
+ * downloads. The reminder to check the background is on screen the whole time, so it is read before any tap. A tap
+ * before the picture is ready shows "Saving", then "Tap to save". A background failure stays silent until someone taps.
+ * The status sits in a live region that is mounted empty and filled, so a screen reader announces each change.
+ * `note` says where the lines go: "over" the bottom of the photo, or "below" what it wraps.
  */
-export function SaveImage({ catId }: { catId: string }) {
+export function SaveImage({
+  catId,
+  children,
+  iconClass,
+  note,
+}: {
+  catId: string;
+  children: React.ReactNode;
+  iconClass: string;
+  note: "over" | "below";
+}) {
   const [job] = useState(() => createJob((signal) => build(catId, signal)));
   const state = useSyncExternalStore(job.subscribe, job.state, () => "idle" as const);
   // Someone tapped before the picture was ready, so they are waiting on it.
@@ -72,29 +87,31 @@ export function SaveImage({ catId }: { catId: string }) {
 
   const saving = state === "building" && waiting;
   const label = saving ? "Saving" : state === "ready" && waiting ? "Tap to save" : "Save image";
-  // The short line sits beside the button only while there is something to say.
-  const line =
+  // The status line says something only while there is something to say.
+  const status =
     waiting && state === "failed"
       ? "Could not make the image. Check your connection and tap save again."
       : again
         ? "Tap save once more."
         : saving || (state === "ready" && waiting)
-          ? `${label}. Check the background before you share.`
-          : null;
+          ? `${label}.`
+          : "";
   return (
-    <div ref={box} className="absolute right-2 top-2 z-10 flex items-start justify-end gap-2">
-      {line && (
-        <p className="save-line small" role={waiting && state === "failed" ? "alert" : "status"}>
-          {line}
-        </p>
-      )}
-      <button type="button" className="save-icon" aria-label={label} aria-busy={saving} disabled={saving} onClick={tap}>
+    <div ref={box} className="relative">
+      {children}
+      <button type="button" className={`save-icon absolute z-10 ${iconClass}`} aria-label={label} aria-busy={saving} disabled={saving} onClick={tap}>
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M12 4v11" />
           <path d="m7 10 5 5 5-5" />
           <path d="M5 19h14" />
         </svg>
       </button>
+      <div className={note === "over" ? "save-lines save-over" : "save-lines save-below"}>
+        <p className="save-line small" role="status">
+          {status}
+        </p>
+        <p className="save-line small">{BACKGROUND_NOTE}</p>
+      </div>
     </div>
   );
 }

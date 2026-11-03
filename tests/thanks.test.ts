@@ -125,7 +125,12 @@ describe("cat thanks", () => {
     await spot(demo.id, c.id, "new_cat", 5);
     const card = await getCatThanks(c.id);
     expect(card[0].name).toBe("A neighbour");
-    expect(JSON.stringify([card, await getHomeThanks()])).not.toContain("demo_caretaker");
+    // An anonymous line carries no badges, so a demo account cannot be told apart by them.
+    expect(card[0].badges).toEqual([]);
+    const home = await getHomeThanks();
+    expect(home[0].name).toBe("A neighbour");
+    expect(home[0].badges).toEqual([]);
+    expect(JSON.stringify([card, home])).not.toContain("demo_caretaker");
   });
 
   it("shows A neighbour, and no badges, when someone opts out, everywhere", async () => {

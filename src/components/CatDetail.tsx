@@ -40,10 +40,19 @@ export function CatDetail({
         <Link href="/cats" className="link -ml-1 px-1">
           All cats
         </Link>
-        <div className="relative mt-1 aspect-[4/3] max-h-[32dvh] w-full overflow-hidden rounded-out">
-          <CatPhoto url={cat.photoUrl} name={cat.name} sizes="(min-width: 576px) 36rem, 100vw" caption />
-          {cat.photoUrl && <SaveImage catId={cat.id} />}
-        </div>
+        {cat.photoUrl ? (
+          <div className="mt-1">
+            <SaveImage catId={cat.id} iconClass="right-2 top-2" note="over">
+              <div className="relative aspect-[4/3] max-h-[32dvh] w-full overflow-hidden rounded-out">
+                <CatPhoto url={cat.photoUrl} name={cat.name} sizes="(min-width: 576px) 36rem, 100vw" caption />
+              </div>
+            </SaveImage>
+          </div>
+        ) : (
+          <div className="relative mt-1 aspect-[4/3] max-h-[32dvh] w-full overflow-hidden rounded-out">
+            <CatPhoto url={cat.photoUrl} name={cat.name} sizes="(min-width: 576px) 36rem, 100vw" caption />
+          </div>
+        )}
         <CatNameEditor catId={cat.id} name={cat.name} names={names} caretaker={caretaker} />
         <p className="mt-1 soft">
           {cat.sex}, {cat.statusLabel.toLowerCase()}

@@ -40,6 +40,28 @@ export function SpotReveal({
   const tipTag = reveal.yourEarTip === "yes" ? "You said: tipped ear" : reveal.yourEarTip === "no" ? "You said: not tipped" : null;
   const tags = [reveal.coat, tipTag, ...reveal.flags, reveal.probablyFemale ? "Probably female" : null].filter((t): t is string => Boolean(t));
   const hasMore = Boolean(catId) && (reveal.canRename || reveal.askSex || reveal.askEarTip);
+  const card = (
+    <div className="reveal-card flex items-stretch">
+      <div className="relative w-28 flex-none rounded-l-out bg-pale">
+        {photo && (
+          // A device photo is a blob: URL and the public one is already scrubbed, so next/image adds nothing.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={photo} alt="The photo you took" className="absolute inset-0 h-full w-full rounded-l-out object-cover" />
+        )}
+      </div>
+      <div className="grid min-w-0 flex-1 content-center gap-2 p-3">
+        {name && <p className="break-words text-xl font-extrabold leading-tight tracking-tight">{name}</p>}
+        <ul className="flex flex-wrap gap-2" aria-label="What we noticed">
+          {tags.map((t) => (
+            <li key={t} className="tag">
+              {t}
+            </li>
+          ))}
+          <li className={`tag ${reveal.needsFunding ? "tag-pop" : ""}`}>{reveal.statusLabel}</li>
+        </ul>
+      </div>
+    </div>
+  );
   return (
     <div className="reveal on-main" role="status">
       <div className="mx-auto grid w-full max-w-md gap-4 px-4 pb-10 pt-6">
@@ -58,27 +80,13 @@ export function SpotReveal({
           </div>
         )}
 
-        <div className="reveal-card flex items-stretch">
-          <div className="relative w-28 flex-none rounded-l-out bg-pale">
-            {photo && (
-              // A device photo is a blob: URL and the public one is already scrubbed, so next/image adds nothing.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={photo} alt="The photo you took" className="absolute inset-0 h-full w-full rounded-l-out object-cover" />
-            )}
-            {catId && reveal.photoUrl && state !== "needs_review" && <SaveImage catId={catId} />}
-          </div>
-          <div className="grid min-w-0 flex-1 content-center gap-2 p-3">
-            {name && <p className="break-words text-xl font-extrabold leading-tight tracking-tight">{name}</p>}
-            <ul className="flex flex-wrap gap-2" aria-label="What we noticed">
-              {tags.map((t) => (
-                <li key={t} className="tag">
-                  {t}
-                </li>
-              ))}
-              <li className={`tag ${reveal.needsFunding ? "tag-pop" : ""}`}>{reveal.statusLabel}</li>
-            </ul>
-          </div>
-        </div>
+        {catId && reveal.photoUrl && state !== "needs_review" ? (
+          <SaveImage catId={catId} iconClass="left-[3.75rem] top-2" note="below">
+            {card}
+          </SaveImage>
+        ) : (
+          card
+        )}
 
         <div className="grid gap-2">
           {reveal.needsFunding ? (

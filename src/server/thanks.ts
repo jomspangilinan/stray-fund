@@ -157,7 +157,9 @@ const isEarTipKind = (k: Kind) => k === "ear_yes" || k === "ear_no";
 const named = (r: Row) => r.show && !isEarTipKind(r.kind);
 /** The seeded demo accounts are roles, not people, so public pages never print their usernames. */
 const DEMO_USERNAMES: readonly string[] = Object.values(PERSONAS);
-const nameOf = (r: Row) => (named(r) && !DEMO_USERNAMES.includes(r.username) ? r.username : "A neighbour");
+/** Whether a line may carry a person's own name, and so their badges. An anonymous line carries neither. */
+const byName = (r: Row) => named(r) && !DEMO_USERNAMES.includes(r.username);
+const nameOf = (r: Row) => (byName(r) ? r.username : "A neighbour");
 
 /** Up to six people who helped this cat, newest first. */
 export async function getCatThanks(catId: string): Promise<Thanks[]> {
@@ -169,7 +171,7 @@ export async function getCatThanks(catId: string): Promise<Thanks[]> {
   return list.map((r) => ({
     name: nameOf(r),
     text: CARD_TEXT[r.kind],
-    badges: named(r) ? (badges.get(r.user_id) ?? []) : [],
+    badges: byName(r) ? (badges.get(r.user_id) ?? []) : [],
   }));
 }
 
@@ -187,7 +189,7 @@ export async function getHomeThanks(): Promise<Thanks[]> {
   return list.map((r) => ({
     name: nameOf(r),
     text: HOME_TEXT[r.kind](r.cat),
-    badges: named(r) ? (badges.get(r.user_id) ?? []) : [],
+    badges: byName(r) ? (badges.get(r.user_id) ?? []) : [],
   }));
 }
 

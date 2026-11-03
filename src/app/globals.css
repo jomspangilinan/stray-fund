@@ -1123,10 +1123,38 @@ input[type="checkbox"] {
 .save-icon:active:not(:disabled) { transform: scale(0.97); }
 .save-icon:disabled { color: var(--soft); cursor: not-allowed; }
 .save-line {
-  max-width: 14rem;
+  line-height: 1.3;
+}
+/* Nothing while there is nothing to say: the live region stays in the page, empty and flat. */
+.save-line:empty {
+  height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+/* Over the foot of a wide photo: solid soft pills so the words read on any picture. */
+.save-over {
+  position: absolute;
+  inset: auto 0.5rem 0.5rem;
+  display: grid;
+  justify-items: start;
+  gap: 0.25rem;
+  pointer-events: none;
+}
+.save-over .save-line {
+  max-width: 100%;
   border-radius: var(--r-in);
   background: var(--surface);
   color: var(--ink);
-  padding: 0.5rem 0.75rem;
-  line-height: 1.3;
+  padding: 0.25rem 0.625rem;
+}
+.save-over .save-line:empty {
+  padding: 0;
+}
+/* Under a card on the dark ground: plain centred words. */
+.save-below {
+  margin-top: 0.5rem;
+  display: grid;
+  gap: 0.125rem;
+  text-align: center;
 }
