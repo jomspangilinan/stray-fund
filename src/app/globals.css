@@ -599,3 +599,30 @@ input[type="checkbox"] {
   border-radius: 999px;
   background: var(--pop);
 }
+
+/* The on-device lock-on hint. Advisory: the shutter never waits for it. */
+.cam-status {
+  position: absolute;
+  z-index: 3;
+  top: calc(env(safe-area-inset-top) + 4.25rem);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.35rem 0.9rem;
+  border-radius: var(--r-in);
+  background: var(--ink);
+  color: #ffffff;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cam-brackets.locked {
+  transition:
+    left 160ms var(--ease-out),
+    top 160ms var(--ease-out),
+    width 160ms var(--ease-out),
+    height 160ms var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cam-brackets.locked {
+    transition: none;
+  }
+}

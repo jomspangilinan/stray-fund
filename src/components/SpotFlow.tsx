@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { boxToView, clampBox } from "@/lib/catDetect";
 import { COLONY } from "@/lib/config";
 import type { SpotReveal as Reveal } from "@/server/spotReveal";
 import { LiveCamera, type CaptureLocation } from "./LiveCamera";
 import { ScanChecklist } from "./ScanChecklist";
 import { SignIn } from "./SignIn";
 import { SpotReveal } from "./SpotReveal";
+import { useCatDetector } from "./useCatDetector";
 
 type Sex = "unknown" | "female" | "male";
 type Done = {
@@ -39,6 +41,13 @@ const HEADINGS: Record<Done["state"], string> = {
 
 /** How long every step shows ticked before the card appears. */
 const TICKED_MS = 450;
+/** A little room around the cat so the brackets frame it rather than touch it. */
+function padded(b: { x: number; y: number; w: number; h: number }) {
+  const px = b.w * 0.08;
+  const py = b.h * 0.08;
+  return { x: b.x - px, y: b.y - py, w: b.w + 2 * px, h: b.h + 2 * py };
+}
+
 const AREA = COLONY.area_name.split(",")[0];
 
 export function SpotFlow({ username }: { username: string | null }) {
@@ -47,6 +56,17 @@ export function SpotFlow({ username }: { username: string | null }) {
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const urlRef = useRef<string | null>(null);
+  const [video, setVideo] = useState<HTMLVideoElement | null>(null);
+  const detector = useCatDetector(video, phase.kind === "camera" && Boolean(username));
+  const bracketBox =
+    detector.state === "found" && detector.box && detector.video && typeof window !== "undefined"
+      ? clampBox(boxToView(padded(detector.box), detector.video, { w: window.innerWidth, h: window.innerHeight }), {
+          x: 16,
+          y: 120,
+          w: window.innerWidth - 32,
+          h: window.innerHeight - 120 - 360,
+        })
+      : null;
 
   const fullscreen = phase.kind !== "done" && Boolean(username);
   const covering = Boolean(username) && (phase.kind !== "done" || phase.done.reveal !== null);
@@ -171,6 +191,8 @@ export function SpotFlow({ username }: { username: string | null }) {
       {fullscreen && (
         <LiveCamera
           fullscreen
+          onVideoReady={setVideo}
+          bracketBox={bracketBox}
           onCapture={upload}
           disabled={sending}
           topBar={
@@ -188,6 +210,10 @@ export function SpotFlow({ username }: { username: string | null }) {
                 <img src={capturedUrl} alt="The photo you just took" className="h-full w-full object-cover" />
                 <div className="scan-line" aria-hidden="true" />
               </div>
+            ) : detector.state !== "off" ? (
+              <p className="cam-status" role="status" aria-live="polite">
+                {detector.state === "found" ? "Cat found" : "Looking for a cat"}
+              </p>
             ) : null
           }
           controls={

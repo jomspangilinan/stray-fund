@@ -66,6 +66,7 @@ export function LiveCamera({
   overlay,
   controls,
   busyPanel,
+  bracketBox = null,
 }: {
   onCapture: (blob: Blob, where: CaptureLocation) => void | Promise<void>;
   disabled?: boolean;
@@ -85,6 +86,8 @@ export function LiveCamera({
   controls?: React.ReactNode;
   /** Fullscreen only: replaces the shutter panel while it is set, such as progress. */
   busyPanel?: React.ReactNode;
+  /** Fullscreen only: where the brackets sit, in pixels of the view. Null keeps them centred. */
+  bracketBox?: { x: number; y: number; w: number; h: number } | null;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -206,7 +209,15 @@ export function LiveCamera({
         )}
         {overlay}
         {(live || overlay) && (
-          <div className="cam-brackets" aria-hidden="true">
+          <div
+            className={`cam-brackets ${bracketBox ? "locked" : ""}`}
+            style={
+              bracketBox
+                ? { left: bracketBox.x, top: bracketBox.y, width: bracketBox.w, height: bracketBox.h, right: "auto", bottom: "auto" }
+                : undefined
+            }
+            aria-hidden="true"
+          >
             <i />
             <i />
             <i />
