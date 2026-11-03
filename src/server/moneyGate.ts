@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { db, withColonyLock, type Tx } from "./db/client";
-import { agentActions, payouts, users } from "./db/schema";
+import { agentActions, payouts, reviewRequests, users } from "./db/schema";
 import { enqueueWakeup } from "./wakeups";
 import { checkSpend, type GuardrailCode, type SpendRequest } from "./guardrails";
 import {
@@ -58,6 +58,8 @@ const ITEM_FAILED = new Set(["FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVER
 /** Money that really did come back after a success. */
 const ITEM_UNDOES_SUCCESS = new Set(["RETURNED", "REFUNDED"]);
 const BATCH_DEAD = new Set(["DENIED", "CANCELED"]);
+/** Leads last_gateway_error when PayPal reported SUCCESS for a payout the fund had already called failed. */
+export const LATE_SUCCESS_FLAG = "LATE_SUCCESS";
 
 /** Drizzle wraps driver errors, so the Postgres error may be on the cause chain. */
 function isLivePayoutViolation(e: unknown): boolean {
@@ -647,6 +649,24 @@ async function findPayout(
   return byBatch;
 }
 
+/**
+ * A failed payout is terminal and has freed its reservation, so a later SUCCESS would otherwise vanish while the
+ * money has left. It stays failed (nobody has checked it, and "paid" must be true), but it is flagged on the row and
+ * a question goes to the caretaker desk, once. Nothing is paid again by the fund on its own.
+ */
+async function flagLateSuccess(tx: Tx, payout: Payout, batchId: string): Promise<void> {
+  const flagged = `${LATE_SUCCESS_FLAG}: PayPal reports SUCCESS for batch ${batchId}`;
+  if (payout.lastGatewayError === flagged) return;
+  console.error(`Payout ${payout.id} is failed but PayPal reports SUCCESS for batch ${batchId}`);
+  await tx.update(payouts).set({ lastGatewayError: flagged }).where(eq(payouts.id, payout.id));
+  await tx.insert(reviewRequests).values({
+    subject: "PayPal says a failed payout succeeded",
+    reason:
+      `Payout ${payout.id} was marked failed, but PayPal now reports SUCCESS for batch ${batchId}. ` +
+      `The money may have reached the vet. It still shows as failed and unpaid. Check it at PayPal before anyone asks for this payout again.`,
+  });
+}
+
 /** Idempotent. The wakeup commits with the status change, and only on a real change. */
 export async function applyPayoutStatus(batchId: string, u: PayoutStatusUpdate): Promise<void> {
   await withColonyLock((tx) => applyPayoutStatusIn(tx, batchId, u));
@@ -678,6 +698,10 @@ export async function applyPayoutStatusIn(
     (payout.status === "queued" || payout.status === "needs_review");
   const paypalPayoutBatchId = attach ? batchId : payout.paypalPayoutBatchId;
   const status = nextStatus(payout, u.itemStatus);
+  if (!status && payout.status === "failed" && u.itemStatus === "SUCCESS") {
+    await flagLateSuccess(tx, payout, batchId);
+    return;
+  }
   if (!status) {
     if (paypalPayoutBatchId !== payout.paypalPayoutBatchId) {
       await tx.update(payouts).set({ paypalPayoutBatchId }).where(eq(payouts.id, payout.id));

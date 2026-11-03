@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import type { Pool, PoolClient } from "pg";
 import { closePool, db, withColonyLock } from "../src/server/db/client";
@@ -15,6 +15,7 @@ import {
   resolveNeedsReview,
   retryUnknownPayouts,
 } from "../src/server/moneyGate";
+import { clearPayPalTokenCache, restPayoutGateway } from "../src/server/paypal/payouts";
 import { closeTestPool, createTestPool, truncateAll } from "./helpers/db";
 import {
   FakeGateway,
@@ -758,6 +759,78 @@ describe("money gate", () => {
       expect((await actionRow(res.actionId)).paypalRef).toBe("B-first");
       expect(error).toHaveBeenCalledOnce();
       error.mockRestore();
+    });
+
+    describe("whatever live PayPal answers to a repeated sender_batch_id", () => {
+      // PayPal documents no error for this (the schema only says the API "rejects the request with an error message
+      // that shows the duplicate sender_batch_id"). The sandbox answer is parsed elsewhere; these are the replies
+      // we cannot rule out on live. None of them may fail the payout, pay it again, or free its reservation.
+      const json = (status: number, body: unknown) =>
+        new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+      const REPLIES: [string, () => Response][] = [
+        ["a 400 with an unfamiliar name", () => json(400, { name: "DUPLICATE_TRANSACTION", message: "m", details: [] })],
+        ["a 422", () => json(422, { name: "UNPROCESSABLE_ENTITY", details: [{ field: "sender_batch_header.sender_batch_id" }] })],
+        ["a 403", () => json(403, { name: "NOT_AUTHORIZED" })],
+        ["a 400 whose body is not JSON", () => new Response("<html>duplicate</html>", { status: 400 })],
+      ];
+
+      beforeEach(() => {
+        clearPayPalTokenCache();
+        vi.stubEnv("PAYPAL_CLIENT_ID", "id");
+        vi.stubEnv("PAYPAL_CLIENT_SECRET", "secret");
+        vi.stubEnv("PAYPAL_ENV", "sandbox");
+      });
+      afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
+      });
+
+      function livePayPal(payoutReplies: (() => Response)[]) {
+        const queue = [...payoutReplies];
+        const sent: string[] = [];
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+            if (String(input).endsWith("/v1/oauth2/token")) return json(200, { access_token: "t", expires_in: 3600 });
+            sent.push(String(JSON.parse(String(init?.body)).sender_batch_header.sender_batch_id));
+            const next = queue.shift();
+            if (!next) throw new Error("unexpected extra payout call");
+            return next();
+          }),
+        );
+        return sent;
+      }
+
+      it.each(REPLIES)("on a retry, %s goes to needs_review, keeps the reservation and is never sent again", async (_n, reply) => {
+        // The first send is lost (a timeout), the retry meets the reply.
+        const sent = livePayPal([() => json(500, { name: "INTERNAL_SERVICE_ERROR" }), reply]);
+        const res = await requestPayout(ask(w), restPayoutGateway);
+        expect(res.status).toBe("queued");
+        await ageQueuedPayouts();
+        await retryUnknownPayouts(restPayoutGateway);
+
+        const row = await payoutRow(res.payoutId!);
+        expect(row.status).toBe("needs_review");
+        expect(row.attempts).toBe(2);
+        expect(await reserved()).toBe(45000);
+        await expectOneWakeup(res.payoutId!, "needs_review", "queued");
+        // Both sends carried the one id, and nothing is sent after review begins.
+        expect(sent).toEqual([res.payoutId, res.payoutId]);
+        await ageQueuedPayouts();
+        await retryUnknownPayouts(restPayoutGateway);
+        expect(sent).toHaveLength(2);
+        // Nor can the booking be asked for a second time while this one is live.
+        const again = await requestPayout(ask(w), new FakeGateway());
+        expect(again).toMatchObject({ status: "rejected", code: "DUPLICATE_PAYOUT" });
+        expect(await db.select().from(payouts)).toHaveLength(1);
+      });
+
+      it("on a first attempt the same replies are a refusal that never reached PayPal's books, so failed is still right", async () => {
+        livePayPal([() => json(422, { name: "UNPROCESSABLE_ENTITY" })]);
+        const res = await requestPayout(ask(w), restPayoutGateway);
+        expect(res.status).toBe("failed");
+        expect(await reserved()).toBe(0);
+      });
     });
 
     describe("duplicate results", () => {

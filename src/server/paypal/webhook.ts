@@ -78,6 +78,18 @@ function centavos(m: unknown, what: string): number | undefined {
   return undefined;
 }
 
+/** What each payouts item event means when its resource carries no transaction_status. HELD and UNCLAIMED are not final. */
+const ITEM_EVENT_STATUS: Record<string, string> = {
+  SUCCEEDED: "SUCCESS",
+  FAILED: "FAILED",
+  BLOCKED: "BLOCKED",
+  CANCELED: "CANCELED",
+  REFUNDED: "REFUNDED",
+  RETURNED: "RETURNED",
+  HELD: "ONHOLD",
+  UNCLAIMED: "UNCLAIMED",
+};
+
 async function applyEvent(tx: Tx, event: WebhookEvent): Promise<void> {
   const r = event.resource ?? {};
   if (event.event_type === "PAYMENT.CAPTURE.COMPLETED") {
@@ -107,7 +119,7 @@ async function applyEvent(tx: Tx, event: WebhookEvent): Promise<void> {
       return;
     }
     await applyPayoutStatusIn(tx, batchId, {
-      itemStatus: str(r.transaction_status),
+      itemStatus: str(r.transaction_status) ?? ITEM_EVENT_STATUS[event.event_type.slice("PAYMENT.PAYOUTS-ITEM.".length)],
       itemId: str(r.payout_item_id),
       fee: r.payout_item_fee === undefined ? undefined : centavos(r.payout_item_fee, "fee"),
       senderBatchId: str(r.sender_batch_id),

@@ -144,6 +144,9 @@ export const restPayoutGateway: PayoutGateway = {
           headers: {
             authorization: `Bearer ${token}`,
             "content-type": "application/json",
+            // The payouts spec: "The server stores keys for 30 days." Same value as sender_batch_id, so the two
+            // guards can never disagree. If PayPal answers a repeat with the original reply, that is a batch id.
+            "paypal-request-id": i.senderBatchId,
           },
           body: JSON.stringify({
             sender_batch_header: { sender_batch_id: i.senderBatchId },

@@ -74,6 +74,15 @@ describe("restPayoutGateway", () => {
       });
     });
 
+    it("sends PayPal-Request-Id equal to the sender batch id, the same on every send of one payout", async () => {
+      const fn = stubFetch(CREATED);
+      await restPayoutGateway.create(INPUT);
+      await restPayoutGateway.create(INPUT);
+      await restPayoutGateway.create({ ...INPUT, senderBatchId: "another-row" });
+      const ids = apiCalls(fn).map(([, init]) => new Headers(init?.headers).get("paypal-request-id"));
+      expect(ids).toEqual(["payout-row-id", "payout-row-id", "another-row"]);
+    });
+
     it("asks for a token with basic auth", async () => {
       const fn = stubFetch(CREATED);
       await restPayoutGateway.create(INPUT);
