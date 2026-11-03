@@ -1,10 +1,12 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { SendGate } from "@/lib/sendGate";
 import { DeskItemContext } from "./desk/DeskItem";
+import { ToneNote, type ReplyTone } from "./desk/ToneNote";
 
-type Reply = { ok?: boolean; message?: string };
+type Reply = { ok?: boolean; message?: string; tone?: ReplyTone };
 type Body = Record<string, string | string[]>;
 
 /** The problems found before anything is sent, by field name. A field shows its own under itself. */
@@ -33,10 +35,13 @@ export function ActionForm({
   const router = useRouter();
   const item = useContext(DeskItemContext);
   const [sending, setSending] = useState(false);
-  const [asking, setAsking] = useState<Body | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [reply, setReply] = useState<{ ok: boolean; message: string } | null>(null);
+  const [reply, setReply] = useState<{ tone: ReplyTone; message: string } | null>(null);
   const asked = useRef<HTMLDivElement>(null);
+  // The gate holds the confirm step and the one-send lock; it posts through the latest send below.
+  const [, redraw] = useReducer((n: number) => n + 1, 0);
+  const [gate] = useState(() => new SendGate<Body>(Boolean(confirm), async () => {}, redraw));
+  const asking = gate.asking;
 
   useEffect(() => {
     if (asking) asked.current?.focus();
@@ -65,7 +70,6 @@ export function ActionForm({
   }
 
   async function send(body: Body) {
-    if (sending) return;
     setSending(true);
     setReply(null);
     try {
@@ -75,21 +79,25 @@ export function ActionForm({
         body: JSON.stringify(body),
       });
       const json = (await res.json().catch(() => ({}))) as Reply;
-      const ok = res.ok && json.ok === true;
+      const worked = res.ok && json.ok === true;
+      const tone: ReplyTone = worked ? (json.tone ?? "ok") : "bad";
       const message = json.message ?? "Something went wrong. Try again.";
-      setAsking(null);
-      if (ok && item) item.done(message);
+      if (item && tone === "ok") item.done(message);
+      else if (item && worked) item.hold(message, tone);
       else {
-        setReply({ ok, message });
+        setReply({ tone, message });
         if (res.ok) router.refresh();
       }
     } catch {
-      setAsking(null);
-      setReply({ ok: false, message: "Could not reach the server. Check your connection and try again." });
+      setReply({ tone: "bad", message: "Could not reach the server. Check your connection and try again." });
     } finally {
       setSending(false);
     }
   }
+
+  useEffect(() => {
+    gate.setPost(send);
+  });
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -102,9 +110,7 @@ export function ActionForm({
       first?.focus();
       return;
     }
-    const body = collect(form);
-    if (confirm) setAsking(body);
-    else void send(body);
+    void gate.submit(collect(form));
   }
 
   return (
@@ -122,10 +128,10 @@ export function ActionForm({
         <div ref={asked} tabIndex={-1} role="group" aria-label="Check before sending" className="note grid gap-3 outline-none">
           <p className="font-bold">{confirm.question}</p>
           <div className="flex gap-3">
-            <button type="button" className="btn flex-1" disabled={sending} onClick={() => void send(asking)}>
+            <button type="button" className="btn flex-1" disabled={sending} onClick={() => void gate.confirm()}>
               {sending ? "Working" : confirm.send}
             </button>
-            <button type="button" className="btn-quiet flex-1" disabled={sending} onClick={() => setAsking(null)}>
+            <button type="button" className="btn-quiet flex-1" disabled={sending} onClick={() => gate.back()}>
               Back
             </button>
           </div>
@@ -135,11 +141,7 @@ export function ActionForm({
           {sending ? "Working" : submitLabel}
         </button>
       )}
-      {reply && (
-        <p role={reply.ok ? "status" : "alert"} className={`note font-bold ${reply.ok ? "note-ok" : "note-bad"}`}>
-          {reply.message}
-        </p>
-      )}
+      {reply && <ToneNote tone={reply.tone} message={reply.message} />}
     </form>
   );
 }

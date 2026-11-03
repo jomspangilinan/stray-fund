@@ -4,7 +4,7 @@ import { catAdoptable, catAdopted, catSetDetails, catRename, catSetEarTip, catUn
 import { evidenceAccept, evidenceConfirmEarTip, evidenceReject, reviewResolve } from "./evidence";
 import { payoutApprove, payoutNote, payoutReject, payoutResolve } from "./payouts";
 import { guardrailsUpdate, payeeAdd, payeeRemove, vetUpdate } from "./rules";
-import { Refusal, type Body, type Handler } from "./shared";
+import { Refusal, type Body, type Handler, type Tone } from "./shared";
 
 export { setGatewayForTests } from "./payouts";
 
@@ -41,16 +41,17 @@ const HANDLERS = {
 export const ACTION_NAMES = Object.keys(HANDLERS);
 export const isAction = (name: string): name is keyof typeof HANDLERS => Object.hasOwn(HANDLERS, name);
 
-export type ActionReply = { status: 200 | 400 | 403 | 404 | 409 | 500; ok: boolean; message: string };
+export type ActionReply = { status: 200 | 400 | 403 | 404 | 409 | 500; ok: boolean; message: string; tone: Tone };
 
 /** The role has been checked by the caller. Every failure comes back as plain words. */
 export async function runAction(name: keyof typeof HANDLERS, caretakerId: string, body: Body): Promise<ActionReply> {
   try {
-    return { status: 200, ok: true, message: await HANDLERS[name](caretakerId, body) };
+    const out = await HANDLERS[name](caretakerId, body);
+    return typeof out === "string" ? { status: 200, ok: true, tone: "ok", message: out } : { status: 200, ok: true, ...out };
   } catch (e) {
-    if (e instanceof Refusal) return { status: e.status, ok: false, message: e.message };
-    if (e instanceof IllegalTransition) return { status: 409, ok: false, message: "That change is not allowed from the cat's current step." };
+    if (e instanceof Refusal) return { status: e.status, ok: false, tone: "bad", message: e.message };
+    if (e instanceof IllegalTransition) return { status: 409, ok: false, message: "That change is not allowed from the cat's current step.", tone: "bad" };
     console.error(`[caretaker] ${name} failed: ${describeError(e)}`);
-    return { status: 500, ok: false, message: "Something went wrong and nothing was changed. Try again." };
+    return { status: 500, ok: false, message: "Something went wrong and nothing was changed. Try again.", tone: "bad" };
   }
 }

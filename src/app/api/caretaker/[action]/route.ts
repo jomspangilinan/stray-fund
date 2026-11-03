@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { isAction, runAction } from "@/server/caretaker";
 import { BodyTooLarge, readLimited } from "@/server/http";
+import type { Tone } from "@/server/caretaker/shared";
 import { AuthError, requireRole } from "@/server/session";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 const MAX_BODY = 32 * 1024;
-const reply = (status: number, message: string, ok = false) =>
-  NextResponse.json({ ok, message }, { status, headers: NO_STORE });
+const reply = (status: number, message: string, ok = false, tone: Tone = ok ? "ok" : "bad") =>
+  NextResponse.json({ ok, message, tone }, { status, headers: NO_STORE });
 
 /**
  * Every caretaker action. The role is checked here on the server, and a JSON content type is
@@ -35,5 +36,5 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
   if (typeof body !== "object" || body === null || Array.isArray(body)) return reply(400, "Send a valid JSON object.");
 
   const out = await runAction(action, session.userId, body as Record<string, unknown>);
-  return reply(out.status, out.message, out.ok);
+  return reply(out.status, out.message, out.ok, out.tone);
 }

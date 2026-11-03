@@ -2,8 +2,9 @@
 
 import { createContext, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { ToneNote, type ReplyTone } from "./ToneNote";
 
-export const DeskItemContext = createContext<{ done: (message: string) => void } | null>(null);
+export const DeskItemContext = createContext<{ done: (message: string) => void; hold: (message: string, tone: ReplyTone) => void } | null>(null);
 
 const SHOWN_MS = 1600;
 
@@ -14,6 +15,8 @@ const SHOWN_MS = 1600;
 export function DeskItem({ label, children }: { label?: string; children: React.ReactNode }) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
+  // A warning or a failure stays until the person dismisses it, so it cannot be missed.
+  const [held, setHeld] = useState<{ message: string; tone: ReplyTone } | null>(null);
   const [refreshing, startRefresh] = useTransition();
   const wasRefreshing = useRef(false);
 
@@ -32,19 +35,35 @@ export function DeskItem({ label, children }: { label?: string; children: React.
     }
   }, [refreshing]);
 
+  if (held) {
+    return (
+      <li className="card">
+        <ToneNote tone={held.tone} message={held.message} />
+        {label && <p className="small soft mt-2">{label}</p>}
+        <button
+          type="button"
+          className="btn-quiet mt-3 w-full"
+          onClick={() => {
+            setHeld(null);
+            router.refresh();
+          }}
+        >
+          Dismiss
+        </button>
+      </li>
+    );
+  }
   if (message !== null) {
     return (
       <li className="card">
-        <p role="status" className="note note-ok font-bold">
-          {message}
-        </p>
+        <ToneNote tone="ok" message={message} />
         {label && <p className="small soft mt-2">{label}</p>}
       </li>
     );
   }
   return (
     <li className="card">
-      <DeskItemContext.Provider value={{ done: setMessage }}>{children}</DeskItemContext.Provider>
+      <DeskItemContext.Provider value={{ done: setMessage, hold: (m, tone) => setHeld({ message: m, tone }) }}>{children}</DeskItemContext.Provider>
     </li>
   );
 }

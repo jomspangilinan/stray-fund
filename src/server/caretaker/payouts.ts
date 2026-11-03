@@ -40,8 +40,8 @@ export const payoutApprove: Handler = async (caretakerId, body) => {
     throw new Refusal(409, `The spending rules refuse this payout now: ${r.message} Nothing was paid.`);
   }
   if (r.status === "rejected") throw new Refusal(409, "This payout was already rejected.");
-  if (r.status === "failed") return "Approved, but PayPal did not take the payment. The treasurer will look at it.";
-  if (r.status === "needs_review") return "Approved, but we could not confirm the send. It is now under review.";
+  if (r.status === "failed") return { tone: "bad", message: "Approved, but PayPal did not take the payment. The treasurer will look at it." };
+  if (r.status === "needs_review") return { tone: "warn", message: "Approved, but we could not confirm the send. It is now under review." };
   return `Approved. The payment is ${words(r.status)}.`;
 };
 

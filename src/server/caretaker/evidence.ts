@@ -51,7 +51,7 @@ export const evidenceConfirmEarTip: Handler = async (caretakerId, body) => {
     const [r] = await tx.select({ bookingId: receipts.bookingId }).from(receipts).where(eq(receipts.id, receiptId));
     const [booking] = await tx.select().from(bookings).where(eq(bookings.id, r.bookingId));
     if (out.verification !== "verified") {
-      return "The checks no longer pass, so this went to review instead.";
+      return { tone: "warn", message: "The checks no longer pass, so this went to review instead." };
     }
     await audit(tx, {
       action: "ear_tip_confirmed",

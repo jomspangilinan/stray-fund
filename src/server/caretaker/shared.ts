@@ -15,8 +15,11 @@ export class Refusal extends Error {
 }
 
 export type Body = Record<string, unknown>;
-/** The message to show. A handler throws Refusal when it cannot do what was asked. */
-export type Handler = (caretakerId: string, body: Body) => Promise<string>;
+/** How the person should read a reply: it worked, it worked but needs a look, or it did not go through. */
+export type Tone = "ok" | "warn" | "bad";
+export type Outcome = string | { message: string; tone: Tone };
+/** The message to show. A handler throws Refusal when it cannot do what was asked, and returns a toned outcome when it did something but the result needs the person's eye. */
+export type Handler = (caretakerId: string, body: Body) => Promise<Outcome>;
 
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 

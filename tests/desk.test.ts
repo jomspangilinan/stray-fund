@@ -8,6 +8,8 @@ import { caretakerWaiting, getCaretakerQueue } from "../src/server/caretaker/que
 import { vetWaiting, listVetDashboard } from "../src/server/vetFlow";
 import { deskTotal } from "../src/lib/deskSections";
 import { landingAfterSwitch } from "../src/lib/nav";
+import { setGatewayForTests } from "../src/server/caretaker";
+import { FakeGateway, addPayout, makeWorld } from "./helpers/payoutFixtures";
 
 const jar = vi.hoisted(() => new Map<string, string>());
 vi.mock("next/headers", () => ({
@@ -126,5 +128,38 @@ describe("where a role switch lands", () => {
     expect(landingAfterSwitch("donor", "/caretaker")).toBe("/");
     expect(landingAfterSwitch("donor", "/caretaker/rules")).toBe("/");
     expect(landingAfterSwitch("foster", "/vet/bookings/abc")).toBe("/");
+  });
+});
+
+describe("the tone of a caretaker action's reply", () => {
+  const caretaker = async () => makeUser("caretaker");
+  const approve = async (results: ConstructorParameters<typeof FakeGateway>[0], over: { attempts?: number } = {}) => {
+    const care = await caretaker();
+    const w = await makeWorld({ funded: 250000 });
+    const p = await addPayout(w, { amount: 120000, status: "awaiting_approval", attempts: over.attempts });
+    setGatewayForTests(new FakeGateway(results));
+    try {
+      return await runAction("payout_approve", care.id, { payoutId: p.id });
+    } finally {
+      setGatewayForTests(null);
+    }
+  };
+
+  it("is ok for a send that went out", async () => {
+    expect(await approve([])).toMatchObject({ ok: true, tone: "ok" });
+  });
+  it("is bad when PayPal did not take the payment", async () => {
+    const r = await approve([{ kind: "rejected", error: "HTTP 422" }]);
+    expect(r).toMatchObject({ ok: true, tone: "bad" });
+    expect(r.message).toMatch(/did not take the payment/);
+  });
+  it("is warn when the send could not be confirmed", async () => {
+    const r = await approve([{ kind: "rejected", error: "HTTP 422" }], { attempts: 1 });
+    expect(r).toMatchObject({ ok: true, tone: "warn" });
+    expect(r.message).toMatch(/under review/);
+  });
+  it("is ok for an ordinary refusal-free action and bad for a refusal", async () => {
+    const care = await caretaker();
+    expect(await runAction("payout_note", care.id, { payoutId: "00000000-0000-4000-8000-000000000000", note: "x" })).toMatchObject({ ok: false, tone: "bad" });
   });
 });
