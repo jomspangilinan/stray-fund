@@ -37,7 +37,7 @@ export async function getImpact(): Promise<Impact> {
           (select count(distinct cat_id) from treatments where type = 'deworming') as dewormed,
           (select count(*) from cats where status = 'adopted') as adopted,
           (select count(*) from cats where status in (${waiting})) as waiting,
-          (select count(*) from cats c where c.ear_tipped = true
+          (select count(*) from cats c where c.ear_tipped = true and not c.neutered_unconfirmed
              and not exists (select 1 from treatments t where t.cat_id = c.id and t.type = 'neuter')) as already,
           (select count(*) from meals) as meals
       `);

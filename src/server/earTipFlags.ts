@@ -66,6 +66,8 @@ export async function applyEarTipRule(tx: Tx, catId: string, changed: EarTipValu
       try {
         // Savepoint, so a refusal leaves the transaction usable for the review.
         await tx.transaction((inner) => markAlreadyNeutered(inner, catId));
+        // Neighbours moved the cat. Public pages say "Neighbours say" until a caretaker confirms.
+        await tx.update(cats).set({ neuteredUnconfirmed: true }).where(eq(cats.id, catId));
       } catch (e) {
         if (!(e instanceof MoneyAlreadyMoved)) throw e;
         await fileReview(tx, disagreementSubject(catId), `Two people say ${cat.name} has an ear-tip, but money is already set aside for it. Please look and decide.`);

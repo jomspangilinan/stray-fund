@@ -231,6 +231,11 @@ export const catSetEarTip: Handler = async (caretakerId, body) => {
     };
 
     if (earTip === "present") {
+      if (cat.neuteredUnconfirmed) {
+        // Neighbours already moved this cat. A caretaker saying the same thing is what confirms it.
+        await tx.update(cats).set({ neuteredUnconfirmed: false }).where(eq(cats.id, catId));
+        return note("Confirmed as ear-tipped, so already neutered.", "neutered_confirmed");
+      }
       if (cat.earTipped === true) {
         await endReviews();
         return "Already marked as ear-tipped.";
@@ -283,7 +288,7 @@ export const catUndoNeutered: Handler = async (caretakerId, body) => {
     }
 
     const cleared = await tx.delete(earTipFlags).where(and(eq(earTipFlags.catId, catId), eq(earTipFlags.value, "yes"))).returning({ id: earTipFlags.id });
-    await tx.update(cats).set({ earTipped: false, queuedAt: new Date() }).where(eq(cats.id, catId));
+    await tx.update(cats).set({ earTipped: false, neuteredUnconfirmed: false, queuedAt: new Date() }).where(eq(cats.id, catId));
     await transitionCat(tx, catId, "queued");
     await enqueueWakeup(tx, "cat_queued", { catId });
     await audit(tx, {
@@ -309,6 +314,8 @@ function lifecycle(to: "adoptable" | "adopted", from: CatStatus, refusal: string
         if (e instanceof IllegalTransition) throw new Refusal(409, refusal);
         throw e;
       }
+      // A caretaker who marks a cat ready for a home has settled that it is neutered.
+      await tx.update(cats).set({ neuteredUnconfirmed: false }).where(eq(cats.id, catId));
       await audit(tx, {
         action: "cat_updated",
         caretakerId,

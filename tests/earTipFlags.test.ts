@@ -113,7 +113,9 @@ describe("ear-tip flags and the queue rule", () => {
     expect(row.earTipped).toBe(true);
     expect(await db.select().from(treatments)).toHaveLength(0);
     expect((await getGoalProgress()).neutered).toBe(0);
-    expect((await getImpact()).alreadyNeutered).toBe(1);
+    // Only neighbours said so, so Impact does not count it until a caretaker confirms.
+    expect((await getImpact()).alreadyNeutered).toBe(0);
+    expect(row.neuteredUnconfirmed).toBe(true);
     expect(await wakeKinds()).toEqual([]);
   });
 

@@ -1,11 +1,11 @@
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { COLONY } from "@/lib/config";
 import { NEUTRAL_AVATAR, parseAvatar } from "@/lib/avatar";
 import { goalPercent } from "@/lib/goal";
 import { careMarks, pickYard, yardStage, type YardCat, type YardGroup } from "@/lib/yard";
 import { pickMissions, type Mission, type MissionCat } from "@/lib/missions";
 import { db } from "./db/client";
-import { cats, earTipFlags, guardrails, sightings, treatments, users } from "./db/schema";
+import { cats, earTipFlags, guardrails, nameSuggestions, sightings, treatments, users } from "./db/schema";
 import { ownFlags } from "./earTipFlags";
 import { CAPTURED, getPoolStatus, toInt } from "./ledger";
 import { PRIVATE_ACTIONS } from "./privateActions";
@@ -53,6 +53,13 @@ export const STATUS_LABEL: Record<string, string> = {
   adopted: "Adopted",
 };
 
+/** What a cat that only neighbours called already neutered is called in public, until a caretaker confirms it. */
+export const NEIGHBOURS_SAY_NEUTERED = "Neighbours say already neutered";
+
+/** Only a cat still at "neutered" can be waiting on a caretaker; later statuses came through a caretaker or a vet. */
+const unconfirmedNeutered = (c: { status: string; neuteredUnconfirmed: boolean }) =>
+  c.status === "neutered" && c.neuteredUnconfirmed;
+
 export const FLAG_LABEL: Record<string, string> = {
   pregnant: "Pregnant",
   injured: "Injured",
@@ -85,7 +92,7 @@ const isGroup = (g: string): g is StatusGroup => Object.hasOwn(STATUS_GROUPS, g)
 
 type CatPublicColumns = Pick<
   typeof cats.$inferSelect,
-  "id" | "name" | "sex" | "status" | "flags" | "areaName" | "bio" | "earTipped" | "createdAt"
+  "id" | "name" | "sex" | "status" | "flags" | "areaName" | "bio" | "earTipped" | "neuteredUnconfirmed" | "createdAt"
 >;
 type CatFull = CatPublicColumns &
   Pick<typeof cats.$inferSelect, "exactLat" | "exactLng" | "locationApproximate">;
@@ -153,7 +160,7 @@ export type CatForViewer = PublicCat & { exact?: ExactLocation };
 
 // ---------- Journey ----------
 
-type JourneyCat = { status: string; earTipped: boolean | null; firstSeenAt?: Date | null };
+type JourneyCat = { status: string; earTipped: boolean | null; neuteredUnconfirmed?: boolean; firstSeenAt?: Date | null };
 
 const NEUTERED_STATUSES = ["neutered", "adoptable", "adopted"];
 
@@ -171,13 +178,15 @@ function step(name: string, done: boolean, date?: string, note?: string): Journe
 export function journey(cat: JourneyCat, rows: Pick<TreatmentInput, "type" | "date">[]): JourneyStep[] {
   const datesOf = (type: string) => rows.filter((t) => t.type === type).map((t) => t.date);
   const neuterDate = datesOf("neuter").sort()[0];
-  const alreadyNeutered = !neuterDate && cat.earTipped === true;
-  const neutered = Boolean(neuterDate) || alreadyNeutered || NEUTERED_STATUSES.includes(cat.status);
+  // Two neighbours agreeing moves a cat, but the card does not tick Neutered until a caretaker or a vet says so.
+  const said = !neuterDate && unconfirmedNeutered({ status: cat.status, neuteredUnconfirmed: cat.neuteredUnconfirmed === true });
+  const alreadyNeutered = !neuterDate && !said && cat.earTipped === true;
+  const neutered = !said && (Boolean(neuterDate) || alreadyNeutered || NEUTERED_STATUSES.includes(cat.status));
   const vaccinated = latest(datesOf("vaccine"));
   const dewormed = latest(datesOf("deworming"));
   return [
     step("Spotted", true, cat.firstSeenAt ? manilaDate(cat.firstSeenAt) : undefined),
-    step("Neutered", neutered, neuterDate, alreadyNeutered ? "Already neutered when found" : undefined),
+    step("Neutered", neutered, neuterDate, said ? NEIGHBOURS_SAY_NEUTERED : alreadyNeutered ? "Already neutered when found" : undefined),
     step("Vaccinated", Boolean(vaccinated), vaccinated),
     step("Dewormed", Boolean(dewormed), dewormed),
     step("Adoptable", cat.status === "adoptable" || cat.status === "adopted"),
@@ -195,13 +204,13 @@ export function publicCat(row: CatPublicColumns, ctx: CatContext): PublicCat {
     name: row.name,
     sex: SEX_LABEL[row.sex] ?? SEX_LABEL.unknown,
     status: row.status,
-    statusLabel: STATUS_LABEL[row.status] ?? row.status,
+    statusLabel: unconfirmedNeutered(row) ? NEIGHBOURS_SAY_NEUTERED : (STATUS_LABEL[row.status] ?? row.status),
     area: row.areaName,
     bio: row.bio ?? null,
     earTipped: row.earTipped ?? null,
     flags: (row.flags ?? []).map((f) => FLAG_LABEL[f]).filter((f): f is string => Boolean(f)),
     journey: journey(
-      { status: row.status, earTipped: row.earTipped ?? null, firstSeenAt: ctx.firstSeenAt ?? row.createdAt },
+      { status: row.status, earTipped: row.earTipped ?? null, neuteredUnconfirmed: row.neuteredUnconfirmed, firstSeenAt: ctx.firstSeenAt ?? row.createdAt },
       ctx.treatments,
     ),
     photoUrl: photoUrl(ctx.photoKey),
@@ -400,6 +409,7 @@ const publicCatColumns = {
   areaName: cats.areaName,
   bio: cats.bio,
   earTipped: cats.earTipped,
+  neuteredUnconfirmed: cats.neuteredUnconfirmed,
   createdAt: cats.createdAt,
 };
 
@@ -461,9 +471,20 @@ async function hydrate(rows: CatPublicColumns[]): Promise<PublicCat[]> {
   return rows.map((r) => publicCat(r, contextFor(r.id, sights, treats)));
 }
 
+/**
+ * A cat that neighbours called already neutered waits with the Waiting cats until a caretaker confirms it, so the
+ * Neutered list holds only cats a caretaker or a vet has settled.
+ */
+function groupWhere(group: StatusGroup) {
+  const inGroup = inArray(cats.status, [...STATUS_GROUPS[group]]);
+  if (group === "neutered") return and(inGroup, eq(cats.neuteredUnconfirmed, false));
+  if (group === "waiting") return or(inGroup, and(eq(cats.status, "neutered"), eq(cats.neuteredUnconfirmed, true)));
+  return inGroup;
+}
+
 /** Newest first, capped. Unknown group names mean all cats. */
 export async function listCats(group: string = "all"): Promise<PublicCat[]> {
-  const where = isGroup(group) ? inArray(cats.status, [...STATUS_GROUPS[group]]) : undefined;
+  const where = isGroup(group) ? groupWhere(group) : undefined;
   const rows = await db
     .select(publicCatColumns)
     .from(cats)
@@ -532,6 +553,41 @@ export async function getHelpedEntries(userId: string): Promise<HelpedEntry[]> {
     const cat = byId.get(f.catId);
     return cat ? [{ cat, amount: f.amount }] : [];
   });
+}
+
+/** A cat this person helped, and how: they spotted it, a name of theirs was approved, or they gave to it. */
+export type MyCat = { cat: PublicCat; spotted: boolean; named: boolean; amount: number };
+
+/**
+ * Every cat this person helped, once each. Reads only their own sightings, approved names and gifts, so it says
+ * nothing about anyone else. A sighting counts once a cat is on it, whether it matched or started the card.
+ */
+export async function getHelpedCats(userId: string): Promise<MyCat[]> {
+  const [gave, spottedRows, namedRows] = await Promise.all([
+    getHelpedEntries(userId),
+    db
+      .selectDistinct({ catId: sightings.catId })
+      .from(sightings)
+      .where(and(eq(sightings.caughtByUserId, userId), inArray(sightings.state, ["matched", "new_cat"]))),
+    db
+      .selectDistinct({ catId: nameSuggestions.catId })
+      .from(nameSuggestions)
+      .where(and(eq(nameSuggestions.requesterId, userId), eq(nameSuggestions.status, "approved"))),
+  ]);
+  const spotted = new Set(spottedRows.flatMap((r) => (r.catId ? [r.catId] : [])));
+  const named = new Set(namedRows.map((r) => r.catId));
+  const byId = new Map<string, MyCat>(gave.map((e) => [e.cat.id, { cat: e.cat, spotted: false, named: false, amount: e.amount }]));
+  const otherIds = [...new Set([...spotted, ...named])].filter((id) => !byId.has(id));
+  if (otherIds.length > 0) {
+    const rows = await db.select(publicCatColumns).from(cats).where(inArray(cats.id, otherIds));
+    for (const cat of await hydrate(rows)) byId.set(cat.id, { cat, spotted: false, named: false, amount: 0 });
+  }
+  for (const [id, e] of byId) {
+    e.spotted = spotted.has(id);
+    e.named = named.has(id);
+  }
+  // Gifts first, biggest first; then the cats they spotted or named, newest cat first (the order they came in).
+  return [...byId.values()].sort((x, y) => y.amount - x.amount);
 }
 
 export async function getHelped(userId: string): Promise<PublicCat[]> {
@@ -644,8 +700,9 @@ export async function getMissions(now: Date = new Date(), viewerId: string | nul
 
 // ---------- The yard ----------
 
-const YARD_GROUP_OF = (status: string): YardGroup => {
+const YARD_GROUP_OF = (status: string, unconfirmed: boolean): YardGroup => {
   if (status === "adopted") return "adopted";
+  if (unconfirmedNeutered({ status, neuteredUnconfirmed: unconfirmed })) return "waiting";
   for (const g of Object.keys(STATUS_GROUPS) as StatusGroup[]) {
     if ((STATUS_GROUPS[g] as readonly string[]).includes(status)) return g;
   }
@@ -681,7 +738,7 @@ export async function getYard(viewerId: string | null): Promise<PublicYard> {
     return {
       id: r.id,
       name: r.name,
-      group: YARD_GROUP_OF(r.status),
+      group: YARD_GROUP_OF(r.status, r.neuteredUnconfirmed),
       statusLabel: pub.statusLabel,
       avatar: parseAvatar(r.avatar) ?? NEUTRAL_AVATAR,
       marks: careMarks(pub.journey),

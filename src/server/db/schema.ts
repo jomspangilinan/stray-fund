@@ -60,6 +60,9 @@ export const cats = pgTable(
     sexUnconfirmed: boolean("sex_unconfirmed").notNull().default(false),
     status: text("status").notNull().default("spotted"),
     earTipped: boolean("ear_tipped"),
+    // True while the cat is only called already neutered because two neighbours said so. Public pages say "Neighbours say"
+    // and count nothing until a caretaker confirms (or a vet records a neuter), which sets it false.
+    neuteredUnconfirmed: boolean("neutered_unconfirmed").notNull().default(false),
     flags: text("flags").array().notNull().default(sql`'{}'::text[]`),
     coat: jsonb("coat"),
     coatPattern: text("coat_pattern"),
