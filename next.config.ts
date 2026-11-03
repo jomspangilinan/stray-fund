@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   agentRules: false,
   // Lets a phone load the dev server through a temporary Cloudflare tunnel.
   allowedDevOrigins: ["*.trycloudflare.com"],
+  // The dev badge covers bottom bar tabs and buttons on a phone.
+  devIndicators: false,
   cacheComponents: true,
   partialPrefetching: true,
   async headers() {
