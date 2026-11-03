@@ -5,6 +5,7 @@ import { CatRow } from "@/components/CatRow";
 import { BlockSkeleton } from "@/components/Loading";
 import { StatusFilter } from "@/components/StatusFilter";
 import { formatPesoShort } from "@/lib/money";
+import { HomeYou } from "@/components/HomeYou";
 import { GoalCard } from "@/components/GoalCard";
 import { getGoalProgress, getHomeData } from "@/server/public";
 
@@ -40,6 +41,10 @@ async function Home() {
           <span className="link !min-h-0">Help a cat</span>
         </Link>
       </div>
+
+      <Suspense fallback={null}>
+        <HomeYou />
+      </Suspense>
 
       <section className="mt-8" aria-labelledby="latest-title">
         <div className="flex items-baseline justify-between gap-4">

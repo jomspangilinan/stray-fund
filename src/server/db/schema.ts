@@ -31,6 +31,10 @@ export const users = pgTable(
     paypalEmail: text("paypal_email"),
     // Vets only. The name printed on this vet's receipts. Private, like the email.
     clinicName: text("clinic_name"),
+    // News shown to this person is everything after this moment. Moved forward only after they saw it.
+    newsSeenAt: timestamp("news_seen_at", { withTimezone: true }),
+    // Whether their username may appear on thank-you lists. Off shows "A neighbour".
+    showNameInThanks: boolean("show_name_in_thanks").notNull().default(true),
     createdAt: createdAt(),
   },
   (t) => [
