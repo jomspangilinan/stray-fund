@@ -1,15 +1,17 @@
-import { and, asc, eq, gt, lt, or, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lt, or, isNull, sql } from "drizzle-orm";
 import { withColonyLock } from "../db/client";
 import { donations } from "../db/schema";
 import { describeError } from "../errors";
 import { CAPTURED } from "../ledger";
 import {
+  CaptureMismatch,
   captureFromOrder,
   ordersGateway,
   OrderNotFound,
   PayPalRateLimited,
   PENDING,
   recordCapture,
+  UnknownOrder,
   type OrdersGateway,
   type PayPalCapture,
 } from "./orders";
@@ -41,8 +43,10 @@ const RATE_LIMIT_WAIT_MINUTES = 15;
 
 /** Last check left it open: PayPal erred, or the order is approved or its capture pending. Money may be out there. */
 const UNRESOLVED = "unresolved";
-/** PayPal says the order is VOIDED or does not exist. Nothing to find, never asked again. */
+/** PayPal says the order is VOIDED. Nothing to find, never asked again. */
 const CLOSED = "closed";
+/** PayPal answered 404 once. That is also what wrong credentials look like, so it is asked again before anyone is told. */
+const NOT_FOUND = "not_found";
 /** A caretaker question was opened. Never asked about or escalated again. */
 const ESCALATED = "escalated";
 
@@ -85,7 +89,7 @@ async function escalate(donationId: string, orderId: string, why: string): Promi
     await askCaretaker(
       tx,
       "A PayPal donation is not in the ledger",
-      `Order ${orderId}: ${why} It is not counted in the pool or the Proof line. Check it at PayPal and record it by hand if the money arrived.`,
+      `Order ${orderId}: ${why} It is not counted in the pool or the Proof line. The desk has no button to record it. Check it at PayPal: if the money arrived and should stay, a developer has to record it; if it should not be kept, refund it there.`,
     );
   });
 }
@@ -110,7 +114,7 @@ async function record(capture: PayPalCapture, body: OrderBody): Promise<boolean>
  * Asks PayPal about pending donations between 5 minutes and 72 hours old, one bounded batch, oldest wait first.
  * An order PayPal shows COMPLETED is recorded; nothing is ever captured. A PayPal error, a 429 or an order that is
  * not done yet writes no money: it only spaces out the next question (doubling from 5 minutes up to 6 hours,
- * 15 minutes after a 429, which also ends the batch). VOIDED and 404 are final and stop the polling. A COMPLETED
+ * 15 minutes after a 429, which also ends the batch). VOIDED is final and stops the polling; a 404 needs a second one. A COMPLETED
  * order that will not record, and a row that ages out with its last check unresolved, open one caretaker question.
  */
 export async function reconcilePendingDonations(
@@ -120,7 +124,7 @@ export async function reconcilePendingDonations(
   await escalateAgedOut();
   const due = await withColonyLock((tx) =>
     tx
-      .select({ id: donations.id, orderId: donations.paypalOrderId, attempts: donations.reconcileAttempts })
+      .select({ id: donations.id, orderId: donations.paypalOrderId, attempts: donations.reconcileAttempts, state: donations.reconcileState })
       .from(donations)
       .where(
         and(
@@ -147,16 +151,19 @@ export async function reconcilePendingDonations(
         continue;
       }
       if (body?.status !== "COMPLETED") {
-        // CREATED and the like: no money yet, and the order lapses by itself. APPROVED or a pending capture could
-        // still become money, so those stay open for the aged-out question.
-        const open = body?.status === "APPROVED" || body?.status === "PAYER_ACTION_REQUIRED" ? UNRESOLVED : null;
-        await backOff(d.id, d.attempts, open);
+        // Only CREATED and SAVED are known to hold no money; the order lapses by itself. Anything else, APPROVED,
+        // an unknown word or no status at all, could still be money, so it stays open for the aged-out question.
+        const clean = body?.status === "CREATED" || body?.status === "SAVED";
+        await backOff(d.id, d.attempts, clean ? null : UNRESOLVED);
         continue;
       }
       let recorded = false;
       try {
         recorded = await record(captureFromOrder(body), body);
       } catch (e) {
+        // Only an answer that will never fit the donation is a question. A database or lock error is transient:
+        // it falls through to the back-off below, and the aged-out question still catches it if it never clears.
+        if (!(e instanceof CaptureMismatch || e instanceof UnknownOrder)) throw e;
         console.error(`[worker] order ${d.orderId} is COMPLETED at PayPal but cannot be recorded: ${describeError(e)}`);
         await escalate(d.id, d.orderId, `PayPal says it is COMPLETED but it could not be recorded (${describeError(e)}).`);
         continue;
@@ -171,7 +178,12 @@ export async function reconcilePendingDonations(
         return;
       }
       if (e instanceof OrderNotFound) {
-        await setState(d.id, CLOSED);
+        // One 404 proves nothing: wrong credentials look the same. A second one, after the back-off, is a question.
+        if (d.state === NOT_FOUND) {
+          await escalate(d.id, d.orderId, "PayPal answered 404, no such order, twice in a row. Check that the worker's PayPal credentials are the ones that created it.");
+        } else {
+          await backOff(d.id, d.attempts, NOT_FOUND);
+        }
         continue;
       }
       console.error(`[worker] donation check failed for order ${d.orderId}: ${describeError(e)}`);
@@ -180,7 +192,7 @@ export async function reconcilePendingDonations(
   }
 }
 
-/** A row past the 72 hour window whose last check left money possibly out there. Asked once, then marked. */
+/** A row past the 72 hour window whose last check left money possibly out there, or that was never checked at all. Asked once, then marked. */
 async function escalateAgedOut(): Promise<void> {
   const aged = await withColonyLock((tx) =>
     tx
@@ -189,13 +201,15 @@ async function escalateAgedOut(): Promise<void> {
       .where(
         and(
           eq(donations.status, PENDING),
-          eq(donations.reconcileState, UNRESOLVED),
+          or(inArray(donations.reconcileState, [UNRESOLVED, NOT_FOUND]), eq(donations.reconcileAttempts, 0)),
+          sql`${donations.reconcileState} is distinct from ${ESCALATED}`,
+          sql`${donations.reconcileState} is distinct from ${CLOSED}`,
           lt(donations.createdAt, sql`now() - make_interval(hours => ${MAX_AGE_HOURS})`),
         ),
       )
       .limit(50),
   );
   for (const d of aged) {
-    await escalate(d.id, d.orderId, `It is still pending after ${MAX_AGE_HOURS} hours and the last check at PayPal was not conclusive.`);
+    await escalate(d.id, d.orderId, `It is still pending after ${MAX_AGE_HOURS} hours and PayPal never gave a conclusive answer (or was never asked).`);
   }
 }

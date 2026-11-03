@@ -53,18 +53,43 @@ export function NeedsReview({ items }: { items: PayoutItem[] }) {
       {items.map((p) => (
         <DeskItem key={p.id} label={label(p)}>
           <PayoutFacts p={p} />
+          {p.itemStatus && <p className="small soft">PayPal last said: {p.itemStatus}</p>}
           {p.lastGatewayError && <p className="note note-bad mt-2 small break-words">Last gateway error: {p.lastGatewayError}</p>}
-          <p className="mt-2 small">Check PayPal activity first. Money may have left even if this shows an error.</p>
-          <ActionForm action="payout_resolve" submitLabel="It was paid">
+          {p.lateSuccess ? (
+            <p className="note note-bad mt-2 small">
+              PayPal says this succeeded after we had called it failed. The treasurer will never ask for it again. Check PayPal, then say what happened.
+            </p>
+          ) : (
+            <p className="mt-2 small">Check PayPal activity first. Money may have left even if this shows an error.</p>
+          )}
+          <ActionForm
+            action="payout_resolve"
+            submitLabel={p.lateSuccess ? "Paid" : "It was paid"}
+            confirm={
+              p.lateSuccess
+                ? { question: `Record ${formatPesoShort(p.amount)} to ${p.vetName} as paid? The books will count it. This can't be undone.`, send: "Record as paid" }
+                : undefined
+            }
+          >
             <Hidden name="payoutId" value={p.id} />
             <Hidden name="outcome" value="paid" />
-            <Field label="PayPal reference" name="paypalRef" missing="Add the PayPal reference." />
+            {p.lateSuccess && p.batchId ? (
+              <Hidden name="paypalRef" value={p.batchId} />
+            ) : (
+              <Field label="PayPal reference" name="paypalRef" missing="Add the PayPal reference." />
+            )}
           </ActionForm>
-          <ActionForm action="payout_resolve" submitLabel="It was not paid" quiet>
-            <Hidden name="payoutId" value={p.id} />
-            <Hidden name="outcome" value="not_paid" />
-            <Field label="Note: what you checked" name="note" missing="Say what you checked." />
-          </ActionForm>
+          {p.canRuleNotPaid && (
+            <ActionForm action="payout_resolve" submitLabel={p.lateSuccess ? "Not paid" : "It was not paid"} quiet>
+              <Hidden name="payoutId" value={p.id} />
+              <Hidden name="outcome" value="not_paid" />
+              <Field
+                label={p.lateSuccess ? "Note: what you checked at PayPal" : "Note: what you checked"}
+                name="note"
+                missing={p.lateSuccess ? "Say what you checked at PayPal." : "Say what you checked."}
+              />
+            </ActionForm>
+          )}
         </DeskItem>
       ))}
     </Section>

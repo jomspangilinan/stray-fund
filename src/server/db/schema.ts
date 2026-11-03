@@ -373,8 +373,11 @@ export const payouts = pgTable(
     lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
     // Evidence for a person reviewing the payout. Never exposed publicly.
     lastGatewayError: text("last_gateway_error"),
+    // The last item status PayPal reported for this payout (SUCCESS, BLOCKED, PENDING, ...). Evidence for a person.
+    paypalItemStatus: text("paypal_item_status"),
     // Set when PayPal reported SUCCESS for a payout the fund had called failed. Points at the caretaker question.
-    // While that question is open the agent may not ask for this booking and kind again.
+    // While it is set the agent may never ask for this booking and kind again. Only a caretaker's "Not paid"
+    // ruling clears it; "Paid" moves the payout to succeeded and leaves it set.
     lateSuccessReviewId: uuid("late_success_review_id").references(() => reviewRequests.id),
     createdAt: createdAt(),
   },

@@ -1,0 +1,1 @@
+ALTER TABLE "payouts" ADD COLUMN "paypal_item_status" text;

@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { db, withColonyLock, type Tx } from "./db/client";
 import { agentActions, payouts, reviewRequests, users } from "./db/schema";
 import { enqueueWakeup } from "./wakeups";
+import { BATCH_EXISTS_FLAG } from "./payoutRetry";
 import { checkSpend, type GuardrailCode, type SpendRequest } from "./guardrails";
 import {
   describeGatewayError,
@@ -50,8 +51,6 @@ const LIVE_PAYOUT_INDEX = "payouts_booking_kind_live_idx";
 
 /** A send attempted this recently may still be in flight, so not_paid is refused. */
 export const IN_FLIGHT_WINDOW_SECONDS = 60;
-/** Leads last_gateway_error when PayPal has said the batch exists. Refuses not_paid. */
-export const BATCH_EXISTS_FLAG = "BATCH_EXISTS";
 
 const ITEM_SUCCEEDED = new Set(["SUCCESS"]);
 /** Proven final and the money did not stay gone: PayPal says funds were not deducted, or came back. */
@@ -520,13 +519,25 @@ export async function rejectPayout(
   });
 }
 
+/**
+ * With a batch id, not_paid is only open when PayPal's last word on the item was BLOCKED or REVERSED, which are
+ * not proven final but are what a person can confirm at PayPal. The note is required.
+ */
+const NOT_PAID_PROVABLE = new Set(["BLOCKED", "REVERSED"]);
+
+/** Whether the desk should offer "It was not paid" for a payout under review. A send still in flight is checked on submit. */
+export function canRuleNotPaid(p: { paypalPayoutBatchId: string | null; paypalItemStatus: string | null; lastGatewayError: string | null }): boolean {
+  if (p.lastGatewayError?.startsWith(BATCH_EXISTS_FLAG)) return false;
+  return !p.paypalPayoutBatchId || NOT_PAID_PROVABLE.has(p.paypalItemStatus ?? "");
+}
+
 /** not_paid frees the reservation, so it needs every sign the money stayed put. */
 async function refuseIfMoneyMayHaveLeft(tx: Tx, payout: Payout): Promise<void> {
-  if (payout.paypalPayoutBatchId) {
-    throw new Error("Cannot rule not_paid: this payout has a PayPal batch");
-  }
   if (payout.lastGatewayError?.startsWith(BATCH_EXISTS_FLAG)) {
     throw new Error("Cannot rule not_paid: PayPal reports this batch already exists");
+  }
+  if (payout.paypalPayoutBatchId && !NOT_PAID_PROVABLE.has(payout.paypalItemStatus ?? "")) {
+    throw new Error("Cannot rule not_paid: this payout has a PayPal batch");
   }
   const { rows } = await tx.execute(sql`
     select 1 from payouts
@@ -558,6 +569,9 @@ export async function resolveNeedsReview(
   return withColonyLock(async (tx): Promise<GateResult> => {
     const payout = await loadForDecision(tx, payoutId, caretakerId);
     const base = { payoutId, actionId: payout.actionId };
+    if (payout.status === "failed" && payout.lateSuccessReviewId) {
+      return resolveLateSuccess(tx, payout, caretakerId, r, evidence);
+    }
     if (payout.status !== "needs_review") {
       return { ...base, status: payout.status as PayoutStatus };
     }
@@ -616,6 +630,54 @@ export async function resolveNeedsReview(
   });
 }
 
+/**
+ * A caretaker's ruling on a payout PayPal said succeeded after the fund called it failed. "Paid" makes it succeeded
+ * with PayPal's batch id (the books then count it, the pointer stays so it can never be asked for again, and the
+ * agent is woken to move on). "Not paid" needs a note, clears the pointer and leaves it failed; a later SUCCESS
+ * flags it again. Either way the question is closed. Nothing is ever sent.
+ */
+async function resolveLateSuccess(
+  tx: Tx,
+  payout: Payout,
+  caretakerId: string,
+  r: ReviewResolution,
+  evidence: string,
+): Promise<GateResult> {
+  const base = { payoutId: payout.id, actionId: payout.actionId };
+  const paid = r.outcome === "paid";
+  if (paid && payout.paypalPayoutBatchId === null && (await isBatchOnAnotherPayout(tx, evidence, payout.id))) {
+    throw new Error("That PayPal reference is already on another payout");
+  }
+  const batchId = payout.paypalPayoutBatchId ?? evidence;
+  const moved = await tx
+    .update(payouts)
+    .set(paid ? { status: "succeeded", paypalPayoutBatchId: batchId } : { lateSuccessReviewId: null })
+    .where(and(eq(payouts.id, payout.id), eq(payouts.status, "failed"), isNotNull(payouts.lateSuccessReviewId)))
+    .returning({ id: payouts.id });
+  if (moved.length === 0) {
+    const [current] = await tx.select({ status: payouts.status }).from(payouts).where(eq(payouts.id, payout.id));
+    return { ...base, status: current.status as PayoutStatus };
+  }
+  await tx
+    .update(reviewRequests)
+    .set({ status: "resolved", resolvedBy: caretakerId, resolvedAt: sql`now()`, resolution: paid ? `Paid: ${evidence}` : `Not paid: ${evidence}` })
+    .where(and(eq(reviewRequests.id, payout.lateSuccessReviewId!), eq(reviewRequests.status, "open")));
+  if (paid) {
+    await tx.update(agentActions).set({ status: "succeeded", paypalRef: batchId }).where(eq(agentActions.id, payout.actionId));
+  }
+  await tx.insert(agentActions).values({
+    action: "payout_review_resolved",
+    inputs: { payoutId: payout.id, outcome: r.outcome, late: true, ...(paid ? { paypalRef: evidence } : { note: evidence }), previousBatchId: payout.paypalPayoutBatchId },
+    reason: paid ? "Caretaker confirmed payment after a late SUCCESS" : "Caretaker confirmed no payment after a late SUCCESS",
+    amount: payout.amount,
+    status: paid ? "succeeded" : "failed",
+    approvedBy: caretakerId,
+    paypalRef: paid ? batchId : null,
+  });
+  if (paid) await enqueueStatusChange(tx, payout, "succeeded");
+  return { ...base, status: paid ? "succeeded" : "failed" };
+}
+
 function nextStatus(payout: Payout, itemStatus: string | undefined): PayoutStatus | undefined {
   if (!itemStatus) return undefined;
   const target: PayoutStatus | undefined = ITEM_SUCCEEDED.has(itemStatus)
@@ -664,7 +726,7 @@ async function findPayout(
  * booking and kind again, because a new row would mean a new sender_batch_id and a second payment. The row's
  * last_gateway_error is left alone, so earlier evidence such as BATCH_EXISTS is never overwritten.
  */
-async function flagLateSuccess(tx: Tx, payout: Payout, batchId: string): Promise<void> {
+async function flagLateSuccess(tx: Tx, payout: Payout, batchId: string, fee: number | undefined): Promise<void> {
   if (payout.lateSuccessReviewId) return;
   console.error(`Payout ${payout.id} is failed but PayPal reports SUCCESS for batch ${batchId}`);
   const [made] = await tx
@@ -673,11 +735,20 @@ async function flagLateSuccess(tx: Tx, payout: Payout, batchId: string): Promise
       subject: "PayPal says a failed payout succeeded",
       reason:
         `Payout ${payout.id} was marked failed, but PayPal now reports SUCCESS for batch ${batchId}. ` +
-        `The money may have reached the vet. It still shows as failed and unpaid, and the agent may not ask for this payout again until you close this. ` +
-        `Check it at PayPal first.`,
+        `The money may have reached the vet. It still shows as failed and unpaid, and the treasurer may never ask for this payout again, whatever you do with this note. ` +
+        `Check it at PayPal, then use "Paid" (the vet was paid: it becomes paid and the books are corrected) or "Not paid" (with a note saying what you checked at PayPal) on the payout under Payouts under review.`,
     })
     .returning({ id: reviewRequests.id });
-  await tx.update(payouts).set({ lateSuccessReviewId: made.id }).where(eq(payouts.id, payout.id));
+  // Keep what PayPal told us, so "Paid" can correct the books without anyone retyping it.
+  const canStore = payout.paypalPayoutBatchId === null && !(await isBatchOnAnotherPayout(tx, batchId, payout.id));
+  await tx
+    .update(payouts)
+    .set({
+      lateSuccessReviewId: made.id,
+      ...(canStore ? { paypalPayoutBatchId: batchId } : {}),
+      ...(isCentavos(fee) ? { fee } : {}),
+    })
+    .where(eq(payouts.id, payout.id));
 }
 
 /** Idempotent. The wakeup commits with the status change, and only on a real change. */
@@ -711,8 +782,12 @@ export async function applyPayoutStatusIn(
     (payout.status === "queued" || payout.status === "needs_review");
   const paypalPayoutBatchId = attach ? batchId : payout.paypalPayoutBatchId;
   const status = nextStatus(payout, u.itemStatus);
+  // The last thing PayPal said, kept as evidence. A caretaker may rule not_paid on a BLOCKED or REVERSED one.
+  if (u.itemStatus && payout.paypalItemStatus !== u.itemStatus) {
+    await tx.update(payouts).set({ paypalItemStatus: u.itemStatus }).where(eq(payouts.id, payout.id));
+  }
   if (!status && payout.status === "failed" && u.itemStatus === "SUCCESS") {
-    await flagLateSuccess(tx, payout, batchId);
+    await flagLateSuccess(tx, payout, batchId, u.fee);
     return;
   }
   if (!status) {

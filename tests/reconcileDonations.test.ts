@@ -197,17 +197,44 @@ describe("what it leaves alone", () => {
 });
 
 describe("terminal answers stop the polling", () => {
-  it.each([
-    ["VOIDED", (id: string) => orderBody(id, { status: "VOIDED" })],
-    ["404", () => new OrderNotFound()],
-  ])("an order PayPal calls %s is asked about once", async (_name, answer) => {
+  it("an order PayPal calls VOIDED is asked about once", async () => {
     const orderId = await pendingOrder(30);
-    const gw = gateway(answer as (id: string) => unknown);
+    const gw = gateway((id) => orderBody(id, { status: "VOIDED" }));
     await run(gw);
     await db.execute(sql`update donations set reconcile_after = null`);
     await run(gw);
     expect(gw.getOrder).toHaveBeenCalledTimes(1);
     expect((await row(orderId)).status).toBe("pending");
+    expect(await db.select().from(reviewRequests)).toHaveLength(0);
+  });
+
+  it("a single 404 is not believed, since wrong credentials look the same: it is asked again, and two 404 in a row open one question", async () => {
+    const orderId = await pendingOrder(30);
+    const gw = gateway(() => new OrderNotFound());
+    await run(gw);
+    expect(await row(orderId)).toMatchObject({ reconcileState: "not_found", reconcileAttempts: 1 });
+    expect(await db.select().from(reviewRequests)).toHaveLength(0);
+    await db.execute(sql`update donations set reconcile_after = null`);
+    await run(gw);
+    expect(gw.getOrder).toHaveBeenCalledTimes(2);
+    const qs = await db.select().from(reviewRequests);
+    expect(qs).toHaveLength(1);
+    expect(qs[0].reason).toMatch(/credentials/);
+    // Escalated, so no further polling or questions.
+    await db.execute(sql`update donations set reconcile_after = null`);
+    await run(gw);
+    expect(gw.getOrder).toHaveBeenCalledTimes(2);
+    expect(await db.select().from(reviewRequests)).toHaveLength(1);
+  });
+
+  it("a 404 followed by a real answer is forgotten", async () => {
+    const orderId = await pendingOrder(30);
+    let n = 0;
+    const gw = gateway((id) => (n++ === 0 ? new OrderNotFound() : orderBody(id)));
+    await run(gw);
+    await db.execute(sql`update donations set reconcile_after = null`);
+    await run(gw);
+    expect((await row(orderId)).status).toBe("captured");
     expect(await db.select().from(reviewRequests)).toHaveLength(0);
   });
 });
@@ -226,6 +253,56 @@ describe("money PayPal holds is never lost quietly", () => {
     expect(qs).toHaveLength(1);
     expect(qs[0]).toMatchObject({ status: "open" });
     expect(qs[0].reason).toContain(orderId);
+  });
+
+  it("a transient error while recording a COMPLETED order is not an escalation: it backs off and is tried again", async () => {
+    const orderId = await pendingOrder(30);
+    const gw = gateway((id) => orderBody(id));
+    // The first record attempt fails like a lock timeout would.
+    const spy = vi.spyOn(await import("../src/server/paypal/orders"), "recordCapture").mockRejectedValueOnce(new Error("canceling statement due to lock timeout"));
+    await run(gw);
+    spy.mockRestore();
+    expect(await db.select().from(reviewRequests)).toHaveLength(0);
+    expect(await row(orderId)).toMatchObject({ status: "pending", reconcileState: "unresolved", reconcileAttempts: 1 });
+    await db.execute(sql`update donations set reconcile_after = null`);
+    await run(gw);
+    expect((await row(orderId)).status).toBe("captured");
+  });
+
+  it("an unknown 200 status is not clean: only CREATED and SAVED are", async () => {
+    const odd = await pendingOrder(30);
+    const saved = await pendingOrder(30);
+    const created = await pendingOrder(30);
+    const gw = gateway((id) => orderBody(id, { status: id === odd ? "SOMETHING_NEW" : id === saved ? "SAVED" : "CREATED" }));
+    await run(gw);
+    expect((await row(odd)).reconcileState).toBe("unresolved");
+    expect((await row(saved)).reconcileState).toBeNull();
+    expect((await row(created)).reconcileState).toBeNull();
+    for (const id of [odd, saved, created]) await age(id, 72 * 60 + 10);
+    await run(gw);
+    const qs = await asked();
+    expect(qs).toHaveLength(1);
+    expect(qs[0].reason).toContain(odd);
+  });
+
+  it("a row that was never checked at all opens one question when it ages out", async () => {
+    const never = await pendingOrder(72 * 60 + 10);
+    const gw = gateway((id) => orderBody(id));
+    await run(gw);
+    await run(gw);
+    expect(gw.getOrder).not.toHaveBeenCalled();
+    const qs = await asked();
+    expect(qs).toHaveLength(1);
+    expect(qs[0].reason).toContain(never);
+  });
+
+  it("the question says only what a caretaker can really do", async () => {
+    const orderId = await pendingOrder(30);
+    await run(gateway((id) => orderBody(id, { gross: 5 })));
+    const [q] = await asked();
+    expect(q.reason).toContain(orderId);
+    expect(q.reason).not.toMatch(/by hand/);
+    expect(q.reason).toMatch(/no button|developer|refund/i);
   });
 
   it("a row that ages out with an unresolved check opens one question, and a clean one asks nothing", async () => {

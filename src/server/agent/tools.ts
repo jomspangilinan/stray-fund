@@ -1,15 +1,16 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { BetaRunnableTool } from "@anthropic-ai/sdk/lib/tools/BetaRunnableTool";
 import { ToolError } from "@anthropic-ai/sdk/lib/tools/ToolError";
 import * as z from "zod/v4";
 import { syncCatForPayout, transitionCat } from "../catTransitions";
 import { db, withColonyLock, type Tx } from "../db/client";
-import { agentActions, bookings, cats, guardrails, payouts, receipts, reviewRequests } from "../db/schema";
+import { agentActions, bookings, cats, guardrails, payouts, receipts } from "../db/schema";
 import { describeError } from "../errors";
 import { CONFIRMED_BOOKING } from "../guardrails";
 import { InsufficientFunds, allocateToCat, getPoolStatus } from "../ledger";
-import { BATCH_EXISTS_FLAG, requestPayout, type GateResult } from "../moneyGate";
+import { requestPayout, type GateResult } from "../moneyGate";
+import { retryBlock } from "../payoutRetry";
 import { payoutGateway, type PayoutGateway } from "../paypal/payouts";
 import { manilaDate } from "../public";
 import { isPlainText } from "../plainText";
@@ -21,8 +22,6 @@ const MAX_REASON = 500;
 const MAX_SUBJECT = 200;
 const MAX_BOOKINGS = 50;
 const MAX_WAITING = 50;
-/** One first try plus the single retry the agent is allowed. */
-const MAX_FAILED_PAYOUTS = 2;
 
 export type AgentToolDeps = {
   gateway?: PayoutGateway;
@@ -156,47 +155,22 @@ async function fundCat(catId: string, why: string, now: Date): Promise<Outcome> 
   }
 }
 
-type PayoutHistory = { status: string; lastGatewayError: string | null; lateSuccessOpen?: boolean };
-
-/**
- * Why the agent may not ask for this payout again, if so. Money may have left on a
- * flagged row, a caretaker has said no on a rejected one, and two refusals in a row
- * are a problem one more try will not solve. All need a person.
- */
-function retryBlock(history: PayoutHistory[]): string | undefined {
-  if (history.some((p) => p.lastGatewayError?.startsWith(BATCH_EXISTS_FLAG))) {
-    return "PayPal reported a batch for an earlier try, so money may have left.";
-  }
-  if (history.some((p) => p.lateSuccessOpen)) {
-    return "PayPal later reported SUCCESS for an earlier try that was marked failed, so the vet may already be paid.";
-  }
-  if (history.some((p) => p.status === "rejected")) {
-    return "An earlier payout for this booking was rejected on review.";
-  }
-  if (history.filter((p) => p.status === "failed").length >= MAX_FAILED_PAYOUTS) {
-    return "This payout has already failed twice.";
-  }
-  return undefined;
-}
-
-async function payoutHistory(bookingId: string, kind: "deposit" | "balance") {
+async function history(bookingId: string, kind: "deposit" | "balance") {
   return db
     .select({
       status: payouts.status,
       lastGatewayError: payouts.lastGatewayError,
+      lateSuccessReviewId: payouts.lateSuccessReviewId,
       amount: payouts.amount,
-      // A question about a late SUCCESS that no caretaker has closed yet.
-      lateSuccessOpen: sql<boolean>`coalesce(${reviewRequests.status} = 'open', false)`,
     })
     .from(payouts)
-    .leftJoin(reviewRequests, eq(reviewRequests.id, payouts.lateSuccessReviewId))
     .where(and(eq(payouts.bookingId, bookingId), eq(payouts.kind, kind)))
     .orderBy(desc(payouts.createdAt));
 }
 
 /** Whether the agent is barred from asking for this payout again, so it needs a person. */
 export async function payoutRetryBlocked(bookingId: string, kind: "deposit" | "balance"): Promise<boolean> {
-  return retryBlock(await payoutHistory(bookingId, kind)) !== undefined;
+  return retryBlock(await history(bookingId, kind)) !== undefined;
 }
 
 const depositAmount = (packagePrice: number, depositPct: number) =>
@@ -347,8 +321,8 @@ export function createAgentTools(deps: AgentToolDeps = {}) {
 
         const open = [];
         for (const b of rows) {
-          const deposits = await payoutHistory(b.id, "deposit");
-          const balances = await payoutHistory(b.id, "balance");
+          const deposits = await history(b.id, "deposit");
+          const balances = await history(b.id, "balance");
           if (balances.some((p) => p.status === "succeeded")) continue;
           const receipt = await latestVerifiedReceipt(b.id);
           const total = receipt ? readTotal(receipt.parsed) : null;
@@ -392,7 +366,7 @@ export function createAgentTools(deps: AgentToolDeps = {}) {
       async (input) => {
         const [booking] = await db.select().from(bookings).where(eq(bookings.id, input.booking_id));
         if (!booking) return fail("BOOKING_NOT_FOUND", "There is no booking with that id.");
-        const blocked = retryBlock(await payoutHistory(booking.id, "deposit"));
+        const blocked = retryBlock(await history(booking.id, "deposit"));
         if (blocked) return fail("REVIEW_REQUIRED", blocked);
 
         const limits = await loadLimits(db);
@@ -436,10 +410,10 @@ export function createAgentTools(deps: AgentToolDeps = {}) {
         if (total === null) {
           return fail("REVIEW_REQUIRED", "The verified receipt has no readable total.");
         }
-        const blocked = retryBlock(await payoutHistory(booking.id, "balance"));
+        const blocked = retryBlock(await history(booking.id, "balance"));
         if (blocked) return fail("REVIEW_REQUIRED", blocked);
 
-        const depositPaid = sumSucceeded(await payoutHistory(booking.id, "deposit"));
+        const depositPaid = sumSucceeded(await history(booking.id, "deposit"));
         const amount = Math.min(total, booking.packagePrice) - depositPaid;
         if (amount <= 0) {
           return fail("NOTHING_TO_PAY", "The deposit already covers this receipt, so no balance is due.");

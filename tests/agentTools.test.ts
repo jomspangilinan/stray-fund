@@ -12,14 +12,18 @@ import {
   reviewRequests,
   users,
 } from "../src/server/db/schema";
-import { BATCH_EXISTS_FLAG, applyPayoutStatus } from "../src/server/moneyGate";
+import { applyPayoutStatus } from "../src/server/moneyGate";
+import { BATCH_EXISTS_FLAG } from "../src/server/payoutRetry";
 import { resolveReview } from "../src/server/agent/review";
+import { runAction } from "../src/server/caretaker";
+import { getCaretakerQueue } from "../src/server/caretaker/queue";
+import { getPoolStatus } from "../src/server/ledger";
 import { createAgentTools, payoutRetryBlocked } from "../src/server/agent/tools";
 import { runAgent, SYSTEM_PROMPT, MAX_ITERATIONS } from "../src/server/agent/run";
 import { syncCatForPayout } from "../src/server/catTransitions";
 import { loadToolkitTools, toolkitToClaudeTools } from "../src/server/paypal/toolkit";
 import { truncateAll } from "./helpers/db";
-import { FakeGateway, addPayout, addReceipt, makeBooking, makeVet, setGuardrails } from "./helpers/payoutFixtures";
+import { FakeGateway, addPayout, addReceipt, makeBooking, makeCaretaker, makeVet, setGuardrails } from "./helpers/payoutFixtures";
 import { scriptedClient } from "./helpers/scriptedClient";
 import { ToolError } from "@anthropic-ai/sdk/lib/tools/ToolError";
 
@@ -483,8 +487,8 @@ describe("pay_vet_deposit", () => {
   });
 
   describe("a SUCCESS PayPal reports for a payout we called failed", () => {
-    async function late(earlierFlag: boolean) {
-      const w = await bookedWorld();
+    async function late(earlierFlag: boolean, catStatus = "booked") {
+      const w = await bookedWorld({ catStatus });
       const row = await addPayout(w, { amount: 45000, status: "failed", batchId: "B-LATE" });
       const earlier = `${BATCH_EXISTS_FLAG}: HTTP 400 DUPLICATE_BATCH`;
       if (earlierFlag) await db.update(payouts).set({ lastGatewayError: earlier }).where(eq(payouts.id, row.id));
@@ -507,16 +511,91 @@ describe("pay_vet_deposit", () => {
       expect(await payoutRetryBlocked(w.booking.id, "deposit")).toBe(true);
     });
 
-    it("stays blocked for the other payout type's own history only, and lifts once a caretaker resolves the question", async () => {
-      const { gw } = setup();
+    it("closing the question never lifts the block, and the other payout type is not affected", async () => {
+      const { gw, call } = setup();
       const { w } = await late(false);
       const [q] = await db.select().from(reviewRequests);
       expect(q.status).toBe("open");
       expect(await payoutRetryBlocked(w.booking.id, "balance")).toBe(false);
       const [caretaker] = await db.insert(users).values({ username: "care-late", role: "caretaker" }).returning();
-      await db.transaction((tx) => resolveReview(tx, q.id, caretaker.id, "Checked at PayPal; settled by hand."));
-      expect(await payoutRetryBlocked(w.booking.id, "deposit")).toBe(false);
+      await db.transaction((tx) => resolveReview(tx, q.id, caretaker.id, "Checked at PayPal; the vet was paid."));
+      expect(await payoutRetryBlocked(w.booking.id, "deposit")).toBe(true);
+      const again = await call("pay_vet_deposit", { booking_id: w.booking.id, reason: "Try again." });
+      expect(again.body.code).toBe("REVIEW_REQUIRED");
       expect(gw.calls).toHaveLength(0);
+      expect(await db.select().from(payouts)).toHaveLength(1);
+    });
+
+    it("the question tells the caretaker which buttons to use", async () => {
+      await late(false);
+      const [q] = await db.select().from(reviewRequests);
+      expect(q.reason).toMatch(/Paid/);
+      expect(q.reason).toMatch(/Not paid/);
+      expect(q.reason).not.toMatch(/until you close this/);
+    });
+
+    it("is on the desk with its own Paid and Not paid choices", async () => {
+      const { w } = await late(false);
+      const queue = await getCaretakerQueue();
+      const item = queue.needsReview.find((p) => p.bookingId === w.booking.id);
+      expect(item).toMatchObject({ lateSuccess: true, status: "failed", batchId: "B-LATE" });
+    });
+
+    it("Paid: failed becomes succeeded with the batch id and fee, nothing is paid again, the question closes, and the balance proceeds", async () => {
+      const { gw, call } = setup();
+      const { w } = await late(false, "in_care");
+      const care = await makeCaretaker();
+      const [row] = await db.select().from(payouts);
+      const reply = await runAction("payout_resolve", care.id, { payoutId: row.id, outcome: "paid", paypalRef: "B-LATE" });
+      expect(reply).toMatchObject({ ok: true });
+      const [after] = await db.select().from(payouts);
+      expect(after).toMatchObject({ status: "succeeded", paypalPayoutBatchId: "B-LATE", fee: 100 });
+      expect((await db.select().from(reviewRequests))[0].status).toBe("resolved");
+      expect(await db.select().from(payouts)).toHaveLength(1);
+      expect(gw.calls).toHaveLength(0);
+      // The deposit counts as paid in the books.
+      const pool = await db.transaction((tx) => getPoolStatus(tx));
+      expect(pool).toMatchObject({ vetPaid: 45000, payoutFees: 100 });
+      // Asking again pays nothing.
+      const again = await call("pay_vet_deposit", { booking_id: w.booking.id, reason: "Again." });
+      expect(again.isError).toBe(true);
+      expect(gw.calls).toHaveLength(0);
+      // The flow moves on: the balance is paid, less the deposit.
+      const receipt = await addReceipt(w.booking.id, "verified");
+      await db.execute(sql`update receipts set parsed = ${JSON.stringify({ total_centavos: 120000 })}::jsonb where id = ${receipt.id}`);
+      const bal = await call("release_vet_balance", { booking_id: w.booking.id, reason: "Balance." });
+      expect(bal.isError).toBe(false);
+      expect(gw.calls).toHaveLength(1);
+      expect(gw.calls[0].amount).toBe(75000);
+      // A second click on Paid changes nothing.
+      expect(await runAction("payout_resolve", care.id, { payoutId: row.id, outcome: "paid", paypalRef: "B-LATE" })).toMatchObject({ ok: false });
+    });
+
+    it("Not paid needs a note, clears the pointer and closes the question; a later SUCCESS flags it again", async () => {
+      const { w } = await late(false);
+      const care = await makeCaretaker();
+      const [row] = await db.select().from(payouts);
+      expect((await runAction("payout_resolve", care.id, { payoutId: row.id, outcome: "not_paid" })).status).toBe(400);
+      const ok = await runAction("payout_resolve", care.id, { payoutId: row.id, outcome: "not_paid", note: "Checked at PayPal: the item was returned." });
+      expect(ok).toMatchObject({ ok: true });
+      const [after] = await db.select().from(payouts);
+      expect(after).toMatchObject({ status: "failed", lateSuccessReviewId: null });
+      expect((await db.select().from(reviewRequests))[0].status).toBe("resolved");
+      expect(await payoutRetryBlocked(w.booking.id, "deposit")).toBe(false);
+      // PayPal contradicts the ruling.
+      await applyPayoutStatus("B-LATE", { itemStatus: "SUCCESS", fee: 100 });
+      const flagged = await db.select().from(reviewRequests);
+      expect(flagged).toHaveLength(2);
+      expect((await db.select().from(payouts))[0].lateSuccessReviewId).toBe(flagged.find((q) => q.status === "open")!.id);
+      expect(await payoutRetryBlocked(w.booking.id, "deposit")).toBe(true);
+    });
+
+    it("Not paid does not lift a BATCH_EXISTS block", async () => {
+      await late(true);
+      const care = await makeCaretaker();
+      const [row] = await db.select().from(payouts);
+      await runAction("payout_resolve", care.id, { payoutId: row.id, outcome: "not_paid", note: "Checked at PayPal." });
+      expect(await payoutRetryBlocked((await db.select().from(payouts))[0].bookingId, "deposit")).toBe(true);
     });
   });
 

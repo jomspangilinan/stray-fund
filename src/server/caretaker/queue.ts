@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { AssessmentSchema, ReceiptSchema, type Assessment, type ReceiptReading } from "../ai/schemas";
 import { db } from "../db/client";
 import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reviewRequests, sightings, users, wakeups } from "../db/schema";
@@ -6,6 +6,7 @@ import { COLONY } from "@/lib/config";
 import { hidePrivateInDemo, maskEmail, placeForStaff } from "../demoPrivacy";
 import { bioIsSafe, nameIsSafe, safeBio } from "../placeText";
 import { needsHumanTick, regionsOf } from "../photoGate";
+import { canRuleNotPaid } from "../moneyGate";
 import { depositPaidOn, reasonMessages } from "../vetFlow";
 import { manilaDate } from "../public";
 import { deskTotal } from "@/lib/deskSections";
@@ -29,6 +30,13 @@ export type PayoutItem = {
   attempts: number;
   /** For caretakers only. Never leaves this console. */
   lastGatewayError: string | null;
+  bookingId: string;
+  /** PayPal's last word on the item (SUCCESS, BLOCKED, PENDING, ...). */
+  itemStatus: string | null;
+  /** True for a failed payout PayPal later reported as SUCCESS. Offers Paid and Not paid, and nothing else. */
+  lateSuccess: boolean;
+  /** Whether "It was not paid" can work now. Offered only then. */
+  canRuleNotPaid: boolean;
 };
 
 /** The AI's free text reaches the open demo desk only after the public-card filters: a visitor's photo may show a sign or a shop. */
@@ -99,7 +107,7 @@ export type CaretakerQueue = {
 const exactOf = (lat: number | null, lng: number | null, approximate = false): ExactSpot =>
   lat !== null && lng !== null ? { lat, lng, approximate } : null;
 
-async function payoutItems(statuses: string[], olderThanMinutes?: number): Promise<PayoutItem[]> {
+async function payoutItems(statuses: string[], olderThanMinutes?: number, lateSuccessOnly = false): Promise<PayoutItem[]> {
   const rows = await db
     .select({
       id: payouts.id,
@@ -114,6 +122,9 @@ async function payoutItems(statuses: string[], olderThanMinutes?: number): Promi
       batchId: payouts.paypalPayoutBatchId,
       attempts: payouts.attempts,
       lastGatewayError: payouts.lastGatewayError,
+      bookingId: payouts.bookingId,
+      itemStatus: payouts.paypalItemStatus,
+      lateSuccessReviewId: payouts.lateSuccessReviewId,
     })
     .from(payouts)
     .innerJoin(cats, eq(cats.id, payouts.catId))
@@ -122,20 +133,28 @@ async function payoutItems(statuses: string[], olderThanMinutes?: number): Promi
     .where(
       and(
         inArray(payouts.status, statuses),
+        lateSuccessOnly ? isNotNull(payouts.lateSuccessReviewId) : undefined,
         olderThanMinutes === undefined
           ? undefined
           : sql`coalesce(${payouts.lastAttemptAt}, ${payouts.createdAt}) < now() - make_interval(mins => ${olderThanMinutes})`,
       ),
     )
     .orderBy(asc(payouts.createdAt), asc(payouts.id));
-  return rows.map((r) => ({ ...r, date: manilaDate(r.createdAt) }));
+  return rows.map(({ lateSuccessReviewId, ...r }) => ({
+    ...r,
+    date: manilaDate(r.createdAt),
+    lateSuccess: r.status === "failed" && lateSuccessReviewId !== null,
+    canRuleNotPaid:
+      r.status === "failed" ? lateSuccessReviewId !== null : canRuleNotPaid({ paypalPayoutBatchId: r.batchId, paypalItemStatus: r.itemStatus, lastGatewayError: r.lastGatewayError }),
+  }));
 }
 
 /** Everything waiting for a person. Holds exact locations and private notes, so only a caretaker's page may call it. */
 export async function getCaretakerQueue(): Promise<CaretakerQueue> {
-  const [awaitingApproval, needsReview, longSent] = await Promise.all([
+  const [awaitingApproval, needsReviewRows, lateSuccessRows, longSent] = await Promise.all([
     payoutItems(["awaiting_approval"]),
     payoutItems(["needs_review"]),
+    payoutItems(["failed"], undefined, true),
     payoutItems(["sent"], LONG_SENT_MINUTES),
   ]);
 
@@ -265,7 +284,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
 
   return {
     awaitingApproval,
-    needsReview,
+    needsReview: [...needsReviewRows, ...lateSuccessRows],
     longSent,
     sightings: sightingItems,
     receipts: receiptItems,

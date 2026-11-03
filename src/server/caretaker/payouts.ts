@@ -62,13 +62,24 @@ export const payoutResolve: Handler = async (caretakerId, body) => {
       ? ({ outcome, paypalRef: reqText(body, "paypalRef", "A PayPal reference", 120) } as const)
       : ({ outcome, note: reqText(body, "note", "A note", 500) } as const);
 
-  const [row] = await db.select({ status: payouts.status }).from(payouts).where(eq(payouts.id, payoutId));
+  const [row] = await db
+    .select({ status: payouts.status, late: payouts.lateSuccessReviewId })
+    .from(payouts)
+    .where(eq(payouts.id, payoutId));
   if (!row) throw new Refusal(404, "There is no such payout.");
-  if (row.status !== "needs_review") throw new Refusal(409, `This payout is ${words(row.status)}, not under review.`);
+  const lateSuccess = row.status === "failed" && row.late !== null;
+  if (row.status !== "needs_review" && !lateSuccess) throw new Refusal(409, `This payout is ${words(row.status)}, not under review.`);
 
   const r = await gate(() => resolveNeedsReview(payoutId, caretakerId, resolution));
   if (r.status !== "succeeded" && r.status !== "failed") {
     throw new Refusal(409, `This payout is ${words(r.status)}, not under review.`);
+  }
+  // A second click finds the payout already settled and changes nothing.
+  if (lateSuccess && (outcome === "paid") !== (r.status === "succeeded")) throw new Refusal(409, "This payout was already settled.");
+  if (lateSuccess) {
+    return outcome === "paid"
+      ? "Recorded as paid. The books now count it, and the treasurer will move on without paying it again."
+      : "Recorded as not paid. If PayPal says SUCCESS again, it will come back here.";
   }
   return outcome === "paid" ? "Recorded as paid." : "Recorded as not paid. The money is free again.";
 };

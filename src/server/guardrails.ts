@@ -9,6 +9,7 @@ import {
   users,
 } from "./db/schema";
 import { CAPTURED, getPoolStatus, toInt } from "./ledger";
+import { payoutHistory, retryBlock } from "./payoutRetry";
 
 export type GuardrailCode =
   | "PAYEE_NOT_ALLOWED"
@@ -19,6 +20,7 @@ export type GuardrailCode =
   | "EAR_TIP_NOT_CONFIRMED"
   | "DEPOSIT_NOT_PAID"
   | "DUPLICATE_PAYOUT"
+  | "REVIEW_REQUIRED"
   | "BOOKING_NOT_CONFIRMED";
 
 export type SpendRequest = {
@@ -104,6 +106,11 @@ export async function checkSpend(
   if (duplicates.length > 0) {
     return deny("DUPLICATE_PAYOUT", `This booking already has a live ${r.kind} payout.`);
   }
+
+  // Every path to a new payout row ends here, under the colony lock, so the agent's tools and a caretaker's approval
+  // are held to the same retry rules.
+  const blocked = retryBlock(await payoutHistory(tx, r.bookingId, r.kind));
+  if (blocked) return deny("REVIEW_REQUIRED", blocked);
 
   if (r.kind === "balance") {
     const [receipt] = r.receiptId

@@ -4,8 +4,8 @@ import type { Pool, PoolClient } from "pg";
 import { closePool, db, withColonyLock } from "../src/server/db/client";
 import { agentActions, bookings, payouts, users, wakeups } from "../src/server/db/schema";
 import { getPoolStatus } from "../src/server/ledger";
+import { BATCH_EXISTS_FLAG } from "../src/server/payoutRetry";
 import {
-  BATCH_EXISTS_FLAG,
   IN_FLIGHT_WINDOW_SECONDS,
   applyPayoutStatus,
   approvePayout,
@@ -392,8 +392,9 @@ describe("money gate", () => {
       expect(approved.status).toBe("rejected");
       expect(gw.calls).toEqual([]);
 
+      // A caretaker's no is final for the agent: asking again needs a person, not another row.
       const again = await requestPayout(ask(w, 200001), gw);
-      expect(again.status).toBe("awaiting_approval");
+      expect(again).toMatchObject({ status: "rejected", code: "REVIEW_REQUIRED" });
     });
 
     it("rejecting cannot free money that has left or may have left", async () => {
@@ -1692,5 +1693,36 @@ describe("money gate", () => {
       expect((await payoutRow(b.id)).status).toBe("succeeded");
       error.mockRestore();
     });
+  });
+});
+
+describe("the retry block is enforced by the gate itself", () => {
+  async function blockedWorld() {
+    const w = await makeWorld();
+    const failed = await addPayout(w, { amount: 45000, status: "failed", batchId: "B-X" });
+    await db.update(payouts).set({ lastGatewayError: `${BATCH_EXISTS_FLAG}: HTTP 400` }).where(eq(payouts.id, failed.id));
+    return w;
+  }
+
+  it("requestPayout refuses without the agent's own check", async () => {
+    const w = await blockedWorld();
+    const gw = new FakeGateway();
+    const r = await requestPayout({ ...ask(w), reason: "Again.", inputs: {} }, gw);
+    expect(r).toMatchObject({ status: "rejected", code: "REVIEW_REQUIRED" });
+    expect(gw.calls).toHaveLength(0);
+    expect(await db.select().from(payouts).where(eq(payouts.bookingId, w.booking.id))).toHaveLength(1);
+  });
+
+  it("approvePayout refuses a waiting row whose booking has become blocked, and sends nothing", async () => {
+    const w = await makeWorld();
+    const waiting = await addPayout(w, { amount: 45000, status: "awaiting_approval" });
+    const failed = await addPayout(w, { amount: 45000, status: "failed", batchId: "B-X" });
+    await db.update(payouts).set({ lateSuccessReviewId: null, lastGatewayError: `${BATCH_EXISTS_FLAG}: HTTP 400` }).where(eq(payouts.id, failed.id));
+    const care = await makeCaretaker();
+    const gw = new FakeGateway();
+    const r = await approvePayout(waiting.id, care.id, gw);
+    expect(r).toMatchObject({ status: "rejected", code: "REVIEW_REQUIRED" });
+    expect(gw.calls).toHaveLength(0);
+    expect((await db.select().from(payouts).where(eq(payouts.id, waiting.id)))[0].status).toBe("rejected");
   });
 });

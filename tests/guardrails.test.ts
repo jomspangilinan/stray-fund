@@ -125,9 +125,14 @@ describe("checkSpend", () => {
       },
     );
 
-    it.each(["failed", "rejected"])("allows a new payout after a %s one", async (status) => {
-      await addPayout(w, { amount: 100, status });
+    it("allows a new payout after one failed", async () => {
+      await addPayout(w, { amount: 100, status: "failed" });
       expect(await check(depositRequest(w))).toEqual({ verdict: "allow" });
+    });
+
+    it("denies a new payout after a caretaker rejected one, since that needs a person", async () => {
+      await addPayout(w, { amount: 100, status: "rejected" });
+      expect(await check(depositRequest(w))).toMatchObject({ verdict: "deny", code: "REVIEW_REQUIRED" });
     });
   });
 
