@@ -5,7 +5,7 @@ import { goalPercent } from "@/lib/goal";
 import { careMarks, pickYard, yardStage, type YardCat, type YardGroup } from "@/lib/yard";
 import { pickMissions, type Mission, type MissionCat } from "@/lib/missions";
 import { db } from "./db/client";
-import { cats, earTipFlags, sightings, treatments, users } from "./db/schema";
+import { cats, earTipFlags, guardrails, sightings, treatments, users } from "./db/schema";
 import { ownFlags } from "./earTipFlags";
 import { CAPTURED, getPoolStatus, toInt } from "./ledger";
 import { PRIVATE_ACTIONS } from "./privateActions";
@@ -559,6 +559,8 @@ export async function getUnallocated(userId: string): Promise<number> {
 export type HomeData = {
   /** Centavos free in the pool, never negative. */
   poolAvailable: number;
+  /** Centavos one care package costs, from the spending rules. */
+  packagePrice: number;
   latestAction: PublicAgentAction | null;
   /** The newest cats first, capped. */
   cats: PublicCat[];
@@ -569,13 +571,15 @@ export type HomeData = {
 const HOME_CATS = 5;
 
 export async function getHomeData(): Promise<HomeData> {
-  const [pool, actions, all] = await Promise.all([
+  const [pool, rules, actions, all] = await Promise.all([
     db.transaction((tx) => getPoolStatus(tx)),
+    db.select({ packagePrice: guardrails.packagePrice }).from(guardrails).where(eq(guardrails.id, 1)),
     listAgentActions(1),
     listCats("all"),
   ]);
   return {
     poolAvailable: Math.max(0, pool.available),
+    packagePrice: rules[0].packagePrice,
     latestAction: actions[0] ?? null,
     cats: all.slice(0, HOME_CATS),
     catCount: all.length,

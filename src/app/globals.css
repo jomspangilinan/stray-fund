@@ -763,6 +763,14 @@ input[type="checkbox"] {
   line-height: 1.1;
   letter-spacing: -0.02em;
 }
+.yard-intro {
+  margin-top: 0.25rem;
+  font-size: 0.9375rem;
+  line-height: 1.3;
+}
+.yard-intro + .goal-bar {
+  margin-top: 0.625rem;
+}
 .yard-stage {
   position: relative;
   width: 100%;
@@ -771,6 +779,10 @@ input[type="checkbox"] {
   max-height: max(15rem, calc(100svh - 23.5rem));
   overflow: hidden;
   color: var(--ink);
+}
+/* The intro line takes two lines of height; the stage gives them back so Donate stays above the bar. */
+.yard:has(.yard-intro) .yard-stage {
+  max-height: max(13rem, calc(100svh - 26.5rem));
 }
 .yard-art {
   position: absolute;

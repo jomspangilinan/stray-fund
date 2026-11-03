@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { formatPesoShort } from "@/lib/money";
+import { fundLine } from "@/lib/fundLine";
 import { DeskWaiting } from "@/components/DeskWaiting";
 import { HomeYou } from "@/components/HomeYou";
 import { CatPhoto } from "@/components/CatPhoto";
@@ -13,7 +14,7 @@ async function Home() {
   await connection();
   const session = await getSession();
   const viewerId = session?.userId ?? null;
-  const [{ poolAvailable, latestAction }, yard, missions] = await Promise.all([
+  const [{ poolAvailable, packagePrice, latestAction }, yard, missions] = await Promise.all([
     getHomeData(),
     getYard(viewerId),
     getMissions(new Date(), viewerId),
@@ -24,12 +25,12 @@ async function Home() {
       <Suspense fallback={null}>
         <DeskWaiting />
       </Suspense>
-      <Yard yard={yard} />
+      <Yard yard={yard} intro={!session} />
 
       <section aria-label="The fund" className="yard-row">
         <div>
           <p className="yard-fund">{formatPesoShort(poolAvailable)}</p>
-          <p className="small soft">{poolAvailable > 0 ? "ready for the next cat" : "in the fund"}</p>
+          <p className="small soft">{fundLine(poolAvailable, packagePrice)}</p>
         </div>
         <Link href="/donate" className="btn-pop flex-none">
           Donate

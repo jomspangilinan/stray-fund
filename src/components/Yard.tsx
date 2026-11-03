@@ -10,9 +10,9 @@ const widthAt = (y: number) => 12 + ((y - 50) / 40) * 3;
 
 /**
  * The home picture: one made-up courtyard. Cats stand where a hash of their id puts them and every cat is a
- * real link. The goal sits on top; each cat wears an always-visible name tag. Motion is light CSS that pauses when hidden.
+ * real link. A signed-out visitor also gets one line on what this is. The goal sits on top; each cat wears an always-visible name tag. Motion is light CSS that pauses when hidden.
  */
-export function Yard({ yard }: { yard: PublicYard }) {
+export function Yard({ yard, intro = false }: { yard: PublicYard; intro?: boolean }) {
   const { cats, total, stage, goal } = yard;
   const slots = slotsFor(cats.map((c) => c.id));
   return (
@@ -28,6 +28,7 @@ export function Yard({ yard }: { yard: PublicYard }) {
             </Link>
           )}
         </div>
+        {intro && <p className="yard-intro">Neighbours fund neutering for stray cats. The money is shown in the open.</p>}
         <div
           className="goal-bar"
           role="progressbar"

@@ -6,7 +6,8 @@ import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
 import { PageSwitch } from "@/components/PageSwitch";
 import { HELPED_PAGES } from "@/lib/nav";
-import { SignIn } from "@/components/SignIn";
+import { SignInGate } from "@/components/SignInGate";
+import { isDemoMode } from "@/lib/config";
 import { formatPeso } from "@/lib/money";
 import { CelebrationNote } from "@/components/CelebrationNote";
 import { streakLabel } from "@/lib/streak";
@@ -22,10 +23,10 @@ async function Helped() {
   const session = await getSession();
   if (!session) {
     return (
-      <div className="card mt-6">
-        <p className="mb-4 font-bold">Sign in to see the cats you have helped.</p>
-        <SignIn username={null} inline />
-      </div>
+      <SignInGate demo={isDemoMode()}>
+        <p className="font-bold">The cats you have helped show up here.</p>
+        <p className="soft">Each one comes with what you gave, plus your streak and badges.</p>
+      </SignInGate>
     );
   }
   const [entries, unallocated] = await Promise.all([

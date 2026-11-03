@@ -8,7 +8,7 @@ import { COLONY } from "@/lib/config";
 import type { SpotReveal as Reveal } from "@/server/spotReveal";
 import { LiveCamera, type CaptureLocation } from "./LiveCamera";
 import { ScanChecklist } from "./ScanChecklist";
-import { SignIn } from "./SignIn";
+import { SignInGate } from "./SignInGate";
 import { SpotReveal } from "./SpotReveal";
 import { useCatDetector } from "./useCatDetector";
 
@@ -44,7 +44,7 @@ function padded(b: { x: number; y: number; w: number; h: number }) {
 
 const AREA = COLONY.area_name.split(",")[0];
 
-export function SpotFlow({ username }: { username: string | null }) {
+export function SpotFlow({ username, demo = false }: { username: string | null; demo?: boolean }) {
   const [phase, setPhase] = useState<Phase>({ kind: "camera" });
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -114,10 +114,10 @@ export function SpotFlow({ username }: { username: string | null }) {
 
   if (!username) {
     return (
-      <div className="card mt-6">
-        <p className="mb-4 font-bold">Sign in so we can link the photo to you.</p>
-        <SignIn username={null} inline />
-      </div>
+      <SignInGate demo={demo}>
+        <p className="font-bold">Take a photo of a stray cat.</p>
+        <p className="soft">We check if the cat is already in the yard, and add it if it is new. Your exact spot stays private.</p>
+      </SignInGate>
     );
   }
 

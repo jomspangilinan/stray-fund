@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closePool, db } from "../src/server/db/client";
 import { agentActions, cats, donations } from "../src/server/db/schema";
 import { consoleFor, FUND_PAGES, HELPED_PAGES, isActiveTab, TABS } from "../src/lib/nav";
+import { fundLine } from "../src/lib/fundLine";
 import { getHomeData } from "../src/server/public";
 import { truncateAll } from "./helpers/db";
 
@@ -33,7 +34,7 @@ describe("home data", () => {
       status: "done",
     });
     const home = await getHomeData();
-    expect(Object.keys(home).sort()).toEqual(["catCount", "cats", "latestAction", "poolAvailable"]);
+    expect(Object.keys(home).sort()).toEqual(["catCount", "cats", "latestAction", "packagePrice", "poolAvailable"]);
     expect(home.poolAvailable).toBe(100_000);
     expect(home.catCount).toBe(1);
     expect(home.latestAction?.cat).toBe("Mimi");
@@ -45,7 +46,7 @@ describe("home data", () => {
 
   it("shows no latest action and a zero pool when there is nothing yet", async () => {
     const home = await getHomeData();
-    expect(home).toEqual({ poolAvailable: 0, latestAction: null, cats: [], catCount: 0 });
+    expect(home).toEqual({ poolAvailable: 0, packagePrice: 150_000, latestAction: null, cats: [], catCount: 0 });
   });
 });
 
@@ -92,5 +93,31 @@ describe("renamed routes", () => {
     for (const now of ["src/app/spot/page.tsx", "src/app/helped/page.tsx", "src/app/api/spot/route.ts"]) {
       expect(existsSync(now), now).toBe(true);
     }
+  });
+});
+
+describe("fund line", () => {
+  it("reads the real package price from the guardrails", async () => {
+    expect((await getHomeData()).packagePrice).toBe(150_000);
+  });
+
+  it("does not say ready when the pool is smaller than one package", async () => {
+    await db.insert(donations).values({ gross: 18_000, paypalFee: 0, net: 18_000, paypalOrderId: "small-1", status: "captured" });
+    const home = await getHomeData();
+    const line = fundLine(home.poolAvailable, home.packagePrice);
+    expect(line).toBe("of ₱1,500 for the next cat");
+    expect(line).not.toMatch(/ready/);
+  });
+
+  it("says ready when the pool covers one package", async () => {
+    await db.insert(donations).values({ gross: 150_000, paypalFee: 0, net: 150_000, paypalOrderId: "enough-1", status: "captured" });
+    const home = await getHomeData();
+    expect(fundLine(home.poolAvailable, home.packagePrice)).toBe("ready for the next cat");
+  });
+
+  it("covers the edges", () => {
+    expect(fundLine(0, 150_000)).toBe("in the fund");
+    expect(fundLine(149_999, 150_000)).toBe("of ₱1,500 for the next cat");
+    expect(fundLine(150_000, 150_000)).toBe("ready for the next cat");
   });
 });
