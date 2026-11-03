@@ -19,7 +19,7 @@ async function Impact() {
   const c = conservation(impact.pool);
   const bar = barParts(c);
   const counts: [string, number][] = [
-    ["Cats fixed", impact.catsNeutered],
+    ["Cats neutered", impact.catsNeutered],
     ["Vaccinated", impact.catsVaccinated],
     ["Dewormed", impact.catsDewormed],
     ["Adopted", impact.catsAdopted],
@@ -81,7 +81,7 @@ async function Impact() {
         </dl>
         <p className="mt-3 soft">
           {impact.catsNeuteredByFund.toLocaleString("en-US")} by the fund.{" "}
-          {impact.alreadyNeutered.toLocaleString("en-US")} {impact.alreadyNeutered === 1 ? "was" : "were"} already fixed when found, as a caretaker confirmed. Fixed means spayed or neutered.
+          {impact.alreadyNeutered.toLocaleString("en-US")} {impact.alreadyNeutered === 1 ? "was" : "were"} already neutered when found, as a caretaker confirmed.
         </p>
       </section>
 

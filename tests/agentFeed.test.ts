@@ -8,6 +8,7 @@ import { GET } from "../src/app/api/agent/feed/route";
 import { AgentFeed } from "../src/components/AgentFeed";
 import { truncateAll } from "./helpers/db";
 import { addPayout, makeBooking, makeCaretaker, makeVet } from "./helpers/payoutFixtures";
+import { feedStory } from "../src/lib/feedCopy";
 import { eq } from "drizzle-orm";
 
 const SENTINELS = ["inputs-sentinel", "gateway-sentinel", "HTTP 400", "passedOver", "topPick", "approved", "bookingId"];
@@ -93,7 +94,7 @@ describe("the public agent feed", () => {
     expect(Object.keys(out).sort()).toEqual(
       ["action", "amount", "cat", "date", "id", "paypalRef", "reason", "refused", "signedOffByPerson", "status"].sort(),
     );
-    expect(out.action).toBe("Fund helper action");
+    expect(out.action).toBe("Treasurer action");
     expect(out.status).toBe("Recorded");
   });
 
@@ -102,8 +103,38 @@ describe("the public agent feed", () => {
     await db.update(agentActions).set({ approvedBy: null }).where(eq(agentActions.action, "payout_deposit"));
     const rows = await listAgentActions();
     expect(rows.find((r) => r.action === "Vet first payment")?.signedOffByPerson).toBe(false);
-    expect(rows.find((r) => r.cat === "Mimi")?.signedOffByPerson).toBe(true);
+    // Funding a cat is the AI's own choice, so a stray approver stamp on it is not a sign-off.
+    expect(rows.find((r) => r.cat === "Mimi")?.signedOffByPerson).toBe(false);
     expect(JSON.stringify(rows)).not.toContain(caretaker.id);
+  });
+
+  it("counts a sign-off only on a payment a caretaker approved and the rules let through", () => {
+    const base = { id: "1", reason: "r", amount: 1, paypalRef: null, createdAt: new Date(), cat: "Luna" };
+    const shown = (action: string, status: string, signedOffByPerson: boolean) => publicAgentAction({ ...base, action, status, signedOffByPerson }).signedOffByPerson;
+    expect(shown("payout_deposit", "succeeded", true)).toBe(true);
+    expect(shown("payout_balance", "queued", true)).toBe(true);
+    // Under the threshold nobody approved it.
+    expect(shown("payout_deposit", "succeeded", false)).toBe(false);
+    // A refusal or rejection stamps a caretaker on the row but approved nothing.
+    expect(shown("payout_deposit", "rejected", true)).toBe(false);
+    expect(shown("payout_deposit", "denied", true)).toBe(false);
+    // Waiting, notes, reviews and funding are not approvals of a payout.
+    expect(shown("payout_deposit", "awaiting_approval", true)).toBe(false);
+    expect(shown("payout_note", "done", true)).toBe(false);
+    expect(shown("caretaker_review", "resolved", true)).toBe(false);
+    expect(shown("fund_cat", "done", true)).toBe(false);
+    // Absent reads as false.
+    expect(publicAgentAction({ ...base, action: "payout_deposit", status: "succeeded" } as never).signedOffByPerson).toBe(false);
+  });
+
+  it("the feed story names a person only when one signed off", () => {
+    const pay = (status: string, signedOffByPerson: boolean) => feedStory({ action: "Vet first payment", status, signedOffByPerson });
+    expect(pay("Paid", true)?.person).toBe("A caretaker signed it off.");
+    expect(pay("Paid", false)?.person).toBe("No sign-off was needed. It was within the spending rules.");
+    expect(pay("Waiting for approval", false)?.person).toBe("Waiting for a caretaker to sign it off.");
+    expect(pay("Refused by the rules", false)?.person).toBe("The spending rules stopped it.");
+    expect(pay("Rejected", false)?.person).toBe("It was stopped and nothing was paid.");
+    expect(pay("Rejected", false)?.person).not.toMatch(/rules|signed/);
   });
 
   it("an empty feed says so", () => {

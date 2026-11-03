@@ -338,16 +338,29 @@ type AgentActionInput = {
   signedOffByPerson: boolean;
 };
 
+/**
+ * True only for a vet payment a caretaker approved and the rules then let go ahead. A refusal or rejection also
+ * stamps a caretaker on the row, and a note, review or rule change on a payment is not an approval, so none of those count.
+ * A bare yes or no: it never says who.
+ */
+function personApprovedPayout(row: Pick<AgentActionInput, "action" | "status" | "signedOffByPerson">): boolean {
+  return (
+    row.signedOffByPerson === true &&
+    (row.action === "payout_deposit" || row.action === "payout_balance") &&
+    !["rejected", "denied", "awaiting_approval"].includes(row.status)
+  );
+}
+
 /** Never inputs, approver identities or gateway error text, which all live on the same row. */
 export function publicAgentAction(row: AgentActionInput): PublicAgentAction {
   return {
     id: row.id,
-    action: ACTION_LABEL[row.action] ?? "Fund helper action",
+    action: ACTION_LABEL[row.action] ?? "Treasurer action",
     reason: row.reason,
     amount: row.amount ?? null,
     status: ACTION_STATUS_LABEL[row.status] ?? "Recorded",
     refused: ["denied", "failed", "rejected"].includes(row.status),
-    signedOffByPerson: row.signedOffByPerson === true,
+    signedOffByPerson: personApprovedPayout(row),
     paypalRef: row.paypalRef ?? null,
     date: manilaDate(row.createdAt),
     cat: row.cat ?? null,

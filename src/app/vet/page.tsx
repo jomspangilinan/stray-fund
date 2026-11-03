@@ -20,7 +20,7 @@ const NEXT_STEP: Record<VetBookingRow["evidence"], string> = {
   waiting_cat: "Waiting for the cat to come in.",
   checking: "Being checked. Nothing to send.",
   waiting_caretaker: "Waiting for a caretaker. Nothing to send.",
-  verified: "Verified. The fund helper sends the final payment next.",
+  verified: "Verified. The AI treasurer sends the final payment next.",
   closed: "Closed.",
 };
 

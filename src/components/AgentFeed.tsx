@@ -44,7 +44,7 @@ export function AgentFeed({ initial }: { initial: PublicAgentAction[] }) {
       {actions.length === 0 ? (
         <div className="card mt-5">
           <p className="font-bold">Nothing yet.</p>
-          <p className="mt-1 soft">The fund helper posts here as soon as money moves.</p>
+          <p className="mt-1 soft">The AI treasurer posts here as soon as money moves.</p>
         </div>
       ) : (
         <ul aria-live="polite" className="mt-5 grid gap-3">
@@ -70,7 +70,7 @@ export function AgentFeed({ initial }: { initial: PublicAgentAction[] }) {
                   <>
                     <span className="break-all">PayPal {a.paypalRef}</span>
                     <Link href={`/ledger?q=${encodeURIComponent(a.paypalRef)}`} className="font-bold text-main underline underline-offset-4">
-                      See it in Money
+                      See it in the Ledger
                     </Link>
                   </>
                 )}

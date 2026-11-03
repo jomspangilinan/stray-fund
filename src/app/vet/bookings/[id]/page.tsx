@@ -32,7 +32,7 @@ const VERIFICATION: Record<string, string> = {
 };
 
 function Payouts({ payouts }: { payouts: VetPayout[] }) {
-  if (payouts.length === 0) return <p className="mt-2 soft">No payments yet. The fund helper sends the first payment shortly after booking.</p>;
+  if (payouts.length === 0) return <p className="mt-2 soft">No payments yet. The AI treasurer sends the first payment shortly after booking.</p>;
   return (
     <ul className="mt-3 grid gap-3">
       {payouts.map((p, i) => (
@@ -78,7 +78,7 @@ function EvidenceSection({ view }: { view: VetBookingView }) {
         {evidence.state === "checking" && <p className="note">Your last submission is still being checked. You do not need to send it again.</p>}
         {evidence.state === "waiting_caretaker" && <p className="note">Waiting for a caretaker. You do not need to send anything again.</p>}
         {evidence.state === "verified" && (
-          <p className="note note-ok font-bold">Verified. The fund helper sends the final payment next, and it shows above once sent.</p>
+          <p className="note note-ok font-bold">Verified. The AI treasurer sends the final payment next, and it shows above once sent.</p>
         )}
         {evidence.state === "closed" && <p className="note">This booking is closed.</p>}
       </div>

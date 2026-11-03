@@ -10,7 +10,7 @@ import { moneyIsTest } from "@/lib/config";
 import { testMoneyLine } from "@/lib/moneyCopy";
 import { getLedger } from "@/server/impact";
 
-export const metadata: Metadata = { title: "Money | Stray Fund" };
+export const metadata: Metadata = { title: "Ledger | Stray Fund" };
 
 async function Ledger() {
   await connection();
@@ -27,8 +27,8 @@ export default function LedgerPage() {
   return (
     <main>
       <PageSwitch label="Fund" pages={FUND_PAGES} current="/ledger" action={{ href: "/donate", label: "Donate" }} />
-      <PageHead title="Money">Every donation and every payment to a vet.</PageHead>
-      <Suspense fallback={<ListSkeleton rows={4} label="Loading the money list" />}>
+      <PageHead title="Ledger">Every donation and every payment to a vet.</PageHead>
+      <Suspense fallback={<ListSkeleton rows={4} label="Loading the ledger" />}>
         <Ledger />
       </Suspense>
     </main>

@@ -162,7 +162,7 @@ function Detail({ row, onClose }: { row: Row | null; onClose: () => void }) {
             )}
             {row.reason && (
               <div>
-                <dt className="small soft">Why the fund helper did this</dt>
+                <dt className="small soft">Why the treasurer did this</dt>
                 <dd>{row.reason}</dd>
               </div>
             )}
@@ -345,7 +345,7 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
     });
 
   return (
-    <section aria-label="Money" className="mt-5 lg:-mx-16 xl:-mx-44">
+    <section aria-label="Ledger" className="mt-5 lg:-mx-16 xl:-mx-44">
       <dl className="grid grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-x-3 gap-y-4" aria-label="Totals">
         <div>
           <dt className="small soft">Received</dt>
@@ -367,7 +367,7 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
       </dl>
       <div className="mt-5 flex flex-wrap items-center gap-2">
         <label className="min-w-0 flex-1 basis-56">
-          <span className="sr-only">Search the money list</span>
+          <span className="sr-only">Search the ledger</span>
           <input
             type="search"
             value={quick}
@@ -386,7 +386,7 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
       </p>
       {stale && (
         <p role="status" className="note note-bad mt-2 font-bold">
-          Could not refresh the money list. What you see may be out of date, and we will keep trying.
+          Could not refresh the ledger. What you see may be out of date, and we will keep trying.
         </p>
       )}
       <div className="mt-2 h-[clamp(24rem,calc(100dvh-15rem),36rem)] max-w-full overflow-hidden rounded-out">

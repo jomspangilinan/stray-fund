@@ -4,8 +4,8 @@ export type PageLink = { href: string; label: string };
 
 /** The money pages. The Fund tab opens the first and stays lit on all three. */
 export const FUND_PAGES: readonly PageLink[] = [
-  { href: "/ledger", label: "Money" },
-  { href: "/agent", label: "AI helper" },
+  { href: "/ledger", label: "Ledger" },
+  { href: "/agent", label: "Treasurer" },
   { href: "/impact", label: "Proof" },
 ];
 

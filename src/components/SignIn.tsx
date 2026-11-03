@@ -57,6 +57,7 @@ export function SignIn({
   }
 
   async function signOut() {
+    menu.current?.removeAttribute("open");
     await fetch("/api/session", { method: "DELETE" });
     router.refresh();
   }
@@ -85,7 +86,7 @@ export function SignIn({
 
   if (username && !inline) {
     return (
-      <details ref={menu} className="relative">
+      <details key="account" ref={menu} className="relative">
         <summary
           aria-label={`Account, signed in as ${username}`}
           className="press grid h-11 w-11 cursor-pointer list-none place-items-center rounded-in bg-pale text-sm font-extrabold text-main [&::-webkit-details-marker]:hidden"
@@ -106,7 +107,7 @@ export function SignIn({
             onClick={toggleName}
             className="press flex min-h-12 w-full items-center justify-between gap-3 rounded-in px-3 text-left font-semibold"
           >
-            <span>Show my name in thanks and on the Money page</span>
+            <span>Show my name in thanks and in the Ledger</span>
             <span aria-hidden="true" className="tag flex-none">
               {shown ? "On" : "Off"}
             </span>
@@ -154,7 +155,7 @@ export function SignIn({
 
   if (inline) return form;
   return (
-    <details ref={menu} className="relative">
+    <details key="sign-in" ref={menu} className="relative">
       <summary className="btn-quiet cursor-pointer list-none [&::-webkit-details-marker]:hidden">Sign in</summary>
       <div className="absolute right-0 z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-out bg-surface p-4 shadow-[0_8px_30px_rgba(18,53,42,0.18)]">{form}</div>
     </details>

@@ -64,7 +64,7 @@ describe("tabs and consoles", () => {
     expect(isActiveTab(fund, "/helped")).toBe(false);
     expect(isActiveTab(helped, "/ledger")).toBe(false);
     expect(isActiveTab(fund, "/")).toBe(false);
-    expect(FUND_PAGES.map((p) => p.label)).toEqual(["Money", "AI helper", "Proof"]);
+    expect(FUND_PAGES.map((p) => p.label)).toEqual(["Ledger", "Treasurer", "Proof"]);
     expect(HELPED_PAGES.map((p) => p.label)).toEqual(["Cats I've helped", "Missions"]);
   });
 

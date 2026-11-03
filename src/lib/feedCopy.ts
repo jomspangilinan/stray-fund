@@ -23,11 +23,12 @@ export function feedHeadline(a: Pick<PublicAgentAction, "action" | "cat" | "stat
 
 /** What the AI proposed and what a person did about it. Only said when the data says so. */
 export function feedStory(a: Pick<PublicAgentAction, "action" | "status" | "signedOffByPerson">): { ai: string; person: string | null } | null {
-  if (a.action === "Funded a cat") return { ai: "The fund helper (AI) chose this cat, inside the spending rules.", person: null };
+  if (a.action === "Funded a cat") return { ai: "The AI treasurer chose this cat, inside the spending rules.", person: null };
   if (!isPayment(a)) return null;
-  const ai = "The fund helper (AI) proposed it.";
-  if (STOPPED.includes(a.status)) return { ai, person: "The spending rules stopped it." };
+  const ai = "The AI treasurer proposed it.";
+  if (a.status === "Refused by the rules") return { ai, person: "The spending rules stopped it." };
+  if (a.status === "Rejected") return { ai, person: "It was stopped and nothing was paid." };
   if (a.signedOffByPerson) return { ai, person: "A caretaker signed it off." };
   if (a.status === "Waiting for approval") return { ai, person: "Waiting for a caretaker to sign it off." };
-  return { ai, person: "It was within the spending rules." };
+  return { ai, person: "No sign-off was needed. It was within the spending rules." };
 }

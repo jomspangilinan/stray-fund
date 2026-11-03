@@ -38,7 +38,7 @@ export function EarTipChoice({
       <legend className="mb-2 font-bold">{legend}</legend>
       <div className="flex items-center gap-3">
         <EarDrawing />
-        <p className="small soft">A flat cut across the point of one ear means the cat is already fixed.</p>
+        <p className="small soft">A flat cut across the point of one ear means the cat is already neutered.</p>
       </div>
       <div role="radiogroup" aria-label="Tipped ear" className="flex flex-wrap gap-2">
         {OPTIONS.map((o) => (
