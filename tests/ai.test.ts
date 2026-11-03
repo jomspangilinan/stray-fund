@@ -39,8 +39,15 @@ const RECEIPT = {
   tamper_signs: [],
 };
 
-function ok(parsed: unknown): ReturnType<AiTransport> {
-  return Promise.resolve({ stop_reason: "end_turn", parsed_output: parsed });
+function raw(stop_reason: string, text: string | null): ReturnType<AiTransport> {
+  return Promise.resolve({
+    stop_reason,
+    content: text === null ? [] : [{ type: "text", text }],
+  });
+}
+
+function ok(value: unknown): ReturnType<AiTransport> {
+  return raw("end_turn", JSON.stringify(value));
 }
 
 let fake: ReturnType<typeof vi.fn<AiTransport>>;
@@ -131,8 +138,35 @@ describe("request shape", () => {
 
 describe("failure mapping", () => {
   it("maps a refusal stop reason to refusal", async () => {
-    install(() => Promise.resolve({ stop_reason: "refusal", parsed_output: ASSESSMENT }));
+    install(() => raw("refusal", JSON.stringify(ASSESSMENT)));
     expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "refusal" });
+  });
+
+  it("maps a refusal whose text is prose, or empty, to refusal", async () => {
+    install(() => raw("refusal", "I can't help with that request."));
+    expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "refusal" });
+    install(() => raw("refusal", null));
+    expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "refusal" });
+  });
+
+  it("maps non-JSON text on a normal stop to unparseable", async () => {
+    install(() => raw("end_turn", "Sorry, here is a cat description instead."));
+    expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "unparseable" });
+  });
+
+  it("maps max_tokens, even with valid-looking JSON, to unparseable", async () => {
+    install(() => raw("max_tokens", JSON.stringify(ASSESSMENT)));
+    expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "unparseable" });
+  });
+
+  it("uses the first text block and ignores non-text blocks", async () => {
+    install(() =>
+      Promise.resolve({
+        stop_reason: "end_turn",
+        content: [{ type: "thinking" }, { type: "text", text: JSON.stringify(ASSESSMENT) }],
+      }),
+    );
+    expect(await assessPhoto(JPEG)).toEqual({ ok: true, data: ASSESSMENT });
   });
 
   it("maps typed API errors and plain errors to unavailable, without leaking the message", async () => {
@@ -148,10 +182,10 @@ describe("failure mapping", () => {
     expect(logged).toContain("500");
   });
 
-  it("maps a null parsed_output, an SDK parse failure and out-of-range values to unparseable", async () => {
-    install(() => ok(null));
+  it("maps no text block, a JSON null and out-of-range values to unparseable", async () => {
+    install(() => raw("end_turn", null));
     expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "unparseable" });
-    install(() => Promise.reject(new Anthropic.AnthropicError("Failed to parse structured output")));
+    install(() => ok(null));
     expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "unparseable" });
     install(() => ok({ ...ASSESSMENT, ear_tip_confidence: 1.5 }));
     expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "unparseable" });
@@ -161,6 +195,7 @@ describe("failure mapping", () => {
     const saved = { k: process.env.ANTHROPIC_API_KEY, t: process.env.ANTHROPIC_AUTH_TOKEN };
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_AUTH_TOKEN;
+    setAiForTests(null); // also drops any cached real client
     try {
       expect(await assessPhoto(JPEG)).toEqual({ ok: false, reason: "unavailable" });
     } finally {
@@ -251,6 +286,15 @@ describe("matchCat", () => {
     expect(lastParams().system).toMatch(/duplicate/i);
     const [row] = await db.select().from(aiUsage);
     expect(row.calls).toBe(1);
+  });
+});
+
+describe("verifyEarTip prompt", () => {
+  it("asks for same_cat_confidence 0 when no references are supplied", async () => {
+    install(() => ok({ ear_tip: "unknown", confidence: 0.3, same_cat_confidence: 0 }));
+    await verifyEarTip(JPEG, []);
+    expect(lastParams().system).toMatch(/no reference photos[^.]*same_cat_confidence[^.]*0/i);
+    expect(lastParams().messages[0].content.filter((b: Block) => b.type === "image")).toHaveLength(1);
   });
 });
 

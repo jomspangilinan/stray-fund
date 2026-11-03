@@ -34,7 +34,7 @@ Rules:
 - A tipped ear is a straight cut across the tip of one ear, usually the left. A torn, notched, folded or scarred ear is not a tip.
 - ear_tip is "present", "absent", or "unknown". Say "unknown" when you cannot see the ears clearly or are unsure.
 - confidence from 0 to 1 is how sure you are about ear_tip.
-- same_cat_confidence from 0 to 1 is how likely the new photo is the same cat as the references. Photos of one cat vary with light and pose, so judge coat pattern, markings and face. When unsure, give a low value.`;
+- same_cat_confidence from 0 to 1 is how likely the new photo is the same cat as the references. Photos of one cat vary with light and pose, so judge coat pattern, markings and face. When unsure, give a low value. When there are no reference photos, set same_cat_confidence to 0.`;
 
 export function verifyEarTip(jpeg: Buffer, references: Buffer[]): Promise<Result<EarTipCheck>> {
   return parseVision({

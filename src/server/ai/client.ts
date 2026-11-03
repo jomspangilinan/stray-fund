@@ -13,17 +13,17 @@ export type Result<T> =
   | { ok: true; data: T }
   | { ok: false; reason: "refusal" | "budget" | "unavailable" | "unparseable" };
 
-type BetaParseParams = Parameters<Anthropic["beta"]["messages"]["parse"]>[0];
+type BetaCreateParams = Parameters<Anthropic["beta"]["messages"]["create"]>[0];
 
 /** What the rest of the code needs back from one call. */
 export type AiResponse = {
   stop_reason: string | null;
-  parsed_output: unknown;
+  content: { type: string; text?: string }[];
   usage?: { input_tokens: number; output_tokens: number };
 };
 
 /** The one seam to the SDK. Tests replace it with a fake. */
-export type AiTransport = (params: BetaParseParams) => Promise<AiResponse>;
+export type AiTransport = (params: BetaCreateParams) => Promise<AiResponse>;
 
 let override: AiTransport | null = null;
 let real: AiTransport | undefined;
@@ -31,6 +31,7 @@ let usageListener: ((u: { input_tokens: number; output_tokens: number }) => void
 
 export function setAiForTests(transport: AiTransport | null): void {
   override = transport;
+  real = undefined; // drop any cached real client so env changes take effect
 }
 
 /** Lets a script total token cost. Not used by the app. */
@@ -43,7 +44,7 @@ function transport(): AiTransport {
   if (!real) {
     // Built on first call so a missing key never breaks import. The SDK reads its own credentials.
     const client = new Anthropic();
-    real = (params) => client.beta.messages.parse(params);
+    real = async (params) => (await client.beta.messages.create({ ...params, stream: false })) as AiResponse;
   }
   return real;
 }
@@ -93,17 +94,23 @@ export async function parseVision<T>(args: {
     });
   } catch (e) {
     logFailure(e);
-    // APIError covers HTTP and connection failures. A bare AnthropicError is the SDK failing to
-    // parse the reply. Anything else (such as no credentials) means the service cannot be used.
-    if (e instanceof Anthropic.APIError) return { ok: false, reason: "unavailable" };
-    if (e instanceof Anthropic.AnthropicError) return { ok: false, reason: "unparseable" };
+    // HTTP, connection and missing-credential failures all mean the service cannot be used.
     return { ok: false, reason: "unavailable" };
   }
 
   if (res.usage) usageListener?.(res.usage);
   if (res.stop_reason === "refusal") return { ok: false, reason: "refusal" };
-  if (res.parsed_output == null) return { ok: false, reason: "unparseable" };
-  const checked = args.schema.safeParse(res.parsed_output);
+  // A truncated reply is never trusted, even if the JSON happens to close.
+  if (res.stop_reason === "max_tokens") return { ok: false, reason: "unparseable" };
+  const text = res.content.find((b) => b.type === "text")?.text;
+  if (typeof text !== "string") return { ok: false, reason: "unparseable" };
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return { ok: false, reason: "unparseable" };
+  }
+  const checked = args.schema.safeParse(json);
   if (!checked.success) return { ok: false, reason: "unparseable" };
   return { ok: true, data: checked.data };
 }
