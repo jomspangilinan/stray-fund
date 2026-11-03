@@ -8,6 +8,7 @@ import { describeError } from "../errors";
 import { reconcilePayouts, retryUnknownPayouts } from "../moneyGate";
 import { retryPendingEvidence } from "../vetFlow";
 import { payoutGateway } from "../paypal/payouts";
+import { reconcilePendingDonations } from "../paypal/reconcileOrders";
 import { isUuid } from "../public";
 import { fileReview } from "./review";
 import { payoutRetryBlocked } from "./tools";
@@ -32,6 +33,7 @@ export type Wakeup = typeof wakeups.$inferSelect;
 
 export type WorkerDeps = AgentDeps & {
   reconcile?: () => Promise<unknown>;
+  reconcileDonations?: () => Promise<unknown>;
   retryUnknown?: () => Promise<unknown>;
   retrySightings?: () => Promise<unknown>;
   retryEvidence?: () => Promise<unknown>;
@@ -267,6 +269,7 @@ async function isolated(name: string, job: () => Promise<unknown>): Promise<void
 export async function runMaintenance(deps: WorkerDeps = {}): Promise<void> {
   const gateway = deps.gateway ?? payoutGateway();
   await isolated("reconcile", deps.reconcile ?? (() => reconcilePayouts(gateway)));
+  await isolated("donation check", deps.reconcileDonations ?? (() => reconcilePendingDonations()));
   await isolated("payout retry", deps.retryUnknown ?? (() => retryUnknownPayouts(gateway)));
   await isolated("sighting retry", deps.retrySightings ?? retryPendingSightings);
   await isolated("evidence retry", deps.retryEvidence ?? retryPendingEvidence);

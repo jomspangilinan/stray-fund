@@ -18,6 +18,7 @@ import { askIfPoolShort } from "./reversals";
 export type Donation = typeof donations.$inferSelect;
 
 export const PENDING = "pending";
+const CAPTURE_WAS_COMPLETED = new Set(["COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"]);
 /** Unfinished orders one user may open in 10 minutes. */
 const MAX_PENDING_ORDERS = 5;
 
@@ -69,6 +70,14 @@ export class ForbiddenOrder extends Error {
   }
 }
 
+/** PayPal answered 429. The caller should stop asking for a while. */
+export class PayPalRateLimited extends Error {
+  constructor() {
+    super("PayPal rate limit reached");
+    this.name = "PayPalRateLimited";
+  }
+}
+
 export interface OrdersGateway {
   /**
    * Amount in centavos. Returns the PayPal order id. requestId goes out as PayPal-Request-Id, so repeating the
@@ -77,6 +86,8 @@ export interface OrdersGateway {
   createOrder(amount: number, requestId: string): Promise<{ orderId: string }>;
   /** Returns PayPal's capture response body, parsed. Idempotent per order id. */
   captureOrder(orderId: string): Promise<unknown>;
+  /** Returns the order as PayPal holds it (GET /v2/checkout/orders/{id}), parsed. Throws PayPalRateLimited on 429. */
+  getOrder(orderId: string): Promise<unknown>;
 }
 
 function sdkClient(): OrdersController {
@@ -113,6 +124,15 @@ export const sdkOrdersGateway: OrdersGateway = {
   async captureOrder(orderId) {
     const res = await sdkClient().captureOrder({ id: orderId, paypalRequestId: `capture-${orderId}` });
     return JSON.parse(String(res.body)) as unknown;
+  },
+  async getOrder(orderId) {
+    try {
+      const res = await sdkClient().getOrder({ id: orderId });
+      return JSON.parse(String(res.body)) as unknown;
+    } catch (e) {
+      if ((e as { statusCode?: unknown })?.statusCode === 429) throw new PayPalRateLimited();
+      throw e;
+    }
   },
 };
 
@@ -227,8 +247,9 @@ export async function recordCapture(capture: PayPalCapture, tx?: Tx): Promise<Do
 
   const [row] = await tx.select().from(donations).where(eq(donations.paypalOrderId, capture.orderId));
   if (!row) throw new UnknownOrder(capture.orderId);
-  // Not COMPLETED (pending review, declined): nothing is captured yet.
-  if (capture.status !== "COMPLETED") return row;
+  // Not COMPLETED (pending review, declined): nothing is captured yet. A capture already refunded, in part or whole,
+  // was completed first; the poller can meet one when it was never recorded, and its refunds are separate rows.
+  if (!CAPTURE_WAS_COMPLETED.has(String(capture.status))) return row;
 
   if (typeof capture.id !== "string" || !capture.id) throw new CaptureMismatch("Capture has no id");
   const b = capture.seller_receivable_breakdown;

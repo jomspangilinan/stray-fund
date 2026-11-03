@@ -127,6 +127,13 @@
       "when": 1793728458979,
       "tag": "0017_donation_reversals",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793729020087,
+      "tag": "0018_pending_donation_checks",
+      "breakpoints": true
     }
   ]
 }

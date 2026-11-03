@@ -59,6 +59,11 @@ export const fakeOrdersGateway: OrdersGateway = {
       ],
     };
   },
+  async getOrder(orderId) {
+    // Nothing is captured behind the page's back in the end-to-end test, so a lookup finds an order not yet approved.
+    log({ call: "getOrder", orderId });
+    return { id: orderId, status: "CREATED", purchase_units: [{}] };
+  },
 };
 
 export const fakePayoutGateway: PayoutGateway = {

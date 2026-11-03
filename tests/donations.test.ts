@@ -40,6 +40,7 @@ describe("createDonationOrder", () => {
   const gw = (): OrdersGateway => ({
     createOrder: vi.fn(async () => ({ orderId: "PP-ORDER-1" })),
     captureOrder: vi.fn(),
+    getOrder: vi.fn(),
   });
 
   it("inserts a pending row with the gross, and fee and net at 0", async () => {
@@ -228,7 +229,7 @@ describe("captureDonation", () => {
   it("captures at PayPal and records once", async () => {
     const u = await makeDonor();
     const { orderId } = await makePendingOrder(u.id);
-    const gw: OrdersGateway = { createOrder: vi.fn(), captureOrder: vi.fn(async () => orderBody(orderId)) };
+    const gw: OrdersGateway = { createOrder: vi.fn(), getOrder: vi.fn(), captureOrder: vi.fn(async () => orderBody(orderId)) };
     const d = await captureDonation(u.id, orderId, gw);
     expect(d).toMatchObject({ status: "captured", net: FIXTURE_NET });
     // A second call does not call PayPal again.
@@ -241,7 +242,7 @@ describe("captureDonation", () => {
     const owner = await makeDonor();
     const other = await makeDonor();
     const { orderId } = await makePendingOrder(owner.id);
-    const gw: OrdersGateway = { createOrder: vi.fn(), captureOrder: vi.fn() };
+    const gw: OrdersGateway = { createOrder: vi.fn(), getOrder: vi.fn(), captureOrder: vi.fn() };
     await expect(captureDonation(other.id, orderId, gw)).rejects.toBeInstanceOf(ForbiddenOrder);
     expect(gw.captureOrder).not.toHaveBeenCalled();
     expect((await rows())[0].status).toBe("pending");
@@ -252,6 +253,7 @@ describe("captureDonation", () => {
     const { orderId } = await makePendingOrder(u.id);
     const gw: OrdersGateway = {
       createOrder: vi.fn(),
+      getOrder: vi.fn(),
       captureOrder: vi.fn(async () => {
         await handleWebhookEvent(captureEvent("EV-WIN", orderId));
         throw new Error("ORDER_ALREADY_CAPTURED");

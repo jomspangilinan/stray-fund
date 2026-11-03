@@ -39,6 +39,7 @@ function idempotentGateway(): OrdersGateway & { ids: string[] } {
       return { orderId: seen.get(requestId)! };
     }),
     captureOrder: vi.fn(),
+    getOrder: vi.fn(),
   };
 }
 

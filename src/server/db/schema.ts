@@ -190,6 +190,10 @@ export const donations = pgTable(
     paypalOrderId: text("paypal_order_id").notNull().unique(),
     paypalCaptureId: text("paypal_capture_id").unique(),
     status: text("status").notNull(),
+    // The worker asks PayPal about a pending order now and then. These only space those questions out; they never
+    // touch what the donation is worth. reconcile_after is the earliest the next question may be asked.
+    reconcileAttempts: integer("reconcile_attempts").notNull().default(0),
+    reconcileAfter: timestamp("reconcile_after", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [
