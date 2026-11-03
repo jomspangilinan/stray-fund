@@ -1,8 +1,8 @@
 import { defineConfig } from "vitest/config";
 import { config } from "dotenv";
-import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-config({ path: ".env.local" });
+config({ path: ".env.local", quiet: true });
 
 export default defineConfig({
   test: {
@@ -11,6 +11,6 @@ export default defineConfig({
     fileParallelism: false,
   },
   resolve: {
-    alias: { "@": path.resolve(__dirname, "src") },
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
 });
