@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { canTransition, type CatStatus } from "@/lib/catState";
 import { db, type Tx } from "./db/client";
-import { bookings, cats, payouts } from "./db/schema";
+import { allocations, bookings, cats, payouts } from "./db/schema";
 import { CONFIRMED_BOOKING } from "./guardrails";
 
 export class IllegalTransition extends Error {
@@ -77,4 +77,25 @@ export async function syncCatForPayout(payoutId: string): Promise<void> {
       .for("update");
     if (cat?.status === "booked") await transitionCat(tx, payout.catId, "in_care");
   });
+}
+
+/** The cat has had money set aside or paid out, so it cannot be treated as already neutered. */
+export class MoneyAlreadyMoved extends Error {
+  constructor() {
+    super("This cat already has money set aside or a payout on record");
+    this.name = "MoneyAlreadyMoved";
+  }
+}
+
+/**
+ * A caretaker confirms a cat was neutered before we met it, so it skips the funding chain.
+ * Allowed from spotted or queued, and only while nothing at all has been allocated or paid
+ * for the cat. The caller holds the colony lock, so funding cannot slip in between.
+ */
+export async function markAlreadyNeutered(tx: Tx, catId: string): Promise<void> {
+  const [alloc] = await tx.select({ id: allocations.id }).from(allocations).where(eq(allocations.catId, catId)).limit(1);
+  const [paid] = await tx.select({ id: payouts.id }).from(payouts).where(eq(payouts.catId, catId)).limit(1);
+  if (alloc || paid) throw new MoneyAlreadyMoved();
+  await transitionCat(tx, catId, "neutered");
+  await tx.update(cats).set({ earTipped: true }).where(eq(cats.id, catId));
 }

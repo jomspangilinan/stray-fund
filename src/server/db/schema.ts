@@ -358,6 +358,10 @@ export const reviewRequests = pgTable("review_requests", {
   subject: text("subject").notNull(),
   reason: text("reason").notNull(),
   status: text("status").notNull().default("open"),
+  // Set when a caretaker closes the request. The note is private to caretakers.
+  resolvedBy: uuid("resolved_by").references(() => users.id),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  resolution: text("resolution"),
   createdAt: createdAt(),
 });
 

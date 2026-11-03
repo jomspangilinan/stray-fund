@@ -16,6 +16,7 @@ const arrows: [CatStatus, CatStatus][] = [
   ["neutered", "adoptable"],
   ["adoptable", "adopted"],
   ["spotted", "neutered"],
+  ["queued", "neutered"],
 ];
 
 describe("canTransition", () => {

@@ -265,6 +265,17 @@ const ACTION_LABEL: Record<string, string> = {
   payout_balance: "Vet balance",
   caretaker_review: "Asked a caretaker",
   payout_review_resolved: "Caretaker settled a payment",
+  payout_note: "Caretaker added a note to a payment",
+  guardrails_changed: "Caretaker changed a spending rule",
+  payee_added: "Caretaker allowed a vet to be paid",
+  payee_removed: "Caretaker stopped payments to a vet",
+  vet_details_changed: "Caretaker updated a vet's details",
+  evidence_accepted: "Caretaker accepted a vet's receipt",
+  evidence_rejected: "Caretaker did not accept a vet's receipt",
+  sighting_reviewed: "Caretaker settled a sighting",
+  cat_updated: "Caretaker updated a cat's card",
+  photo_published: "Caretaker published a photo",
+  photo_held: "Caretaker held back a photo",
 };
 
 const ACTION_STATUS_LABEL: Record<string, string> = {
@@ -277,6 +288,7 @@ const ACTION_STATUS_LABEL: Record<string, string> = {
   failed: "Failed",
   needs_review: "Being checked",
   rejected: "Rejected",
+  resolved: "Settled by a caretaker",
   denied: "Refused by the rules",
 };
 

@@ -19,7 +19,7 @@ const SENTINELS = [
   "10.987654321", "120.123456789", "10.55555555", "120.66666666", "11.246813579", "121.135792468",
   "leakcheck.sentinel@example.test", "originals/", "exact_lat", "exactLat", "fuzzed", "originalKey",
   "original_key", "locationApproximate", "paypal_email", "paypalEmail", "requested_sex", "assessment",
-  "agentinputs-sentinel", "gatewayerror-sentinel",
+  "agentinputs-sentinel", "gatewayerror-sentinel", "caretakernote-sentinel", "resolution-sentinel", "reviewnote-sentinel",
   "Leakcheck Sentinel Clinic", "clinic_name", "clinicName", "OR-LEAK-SENTINEL", "receipt_number", "file_key", "fileKey",
   "ear_tip_photo_key", "earTipPhotoKey", "ear_tip_result", "earTipResult", "same_cat_confidence",
   "leakreceipt-sentinel-sha", "LeakItem-Sentinel", "tamper_signs",
@@ -77,8 +77,25 @@ async function main() {
      values ('fund_cat', $1, 'Leak check reason', 150000, 'done', $2, 'LEAKREF')`,
     [JSON.stringify({ catId: cat.id, secret: "agentinputs-sentinel", gatewayError: "gatewayerror-sentinel" }), donor.id],
   );
+  // Caretaker actions keep what a person typed in inputs, and a resolved question keeps its note on the request.
+  await pool.query(
+    `insert into agent_actions (action, inputs, reason, status, approved_by)
+     values ('evidence_accepted', $1, 'Caretaker reason', 'done', $2),
+            ('payout_note', $3, 'Caretaker reason', 'done', $2),
+            ('caretaker_review', $4, 'Caretaker reason', 'resolved', $2)`,
+    [
+      JSON.stringify({ catId: cat.id, note: "caretakernote-sentinel" }),
+      donor.id,
+      JSON.stringify({ catId: cat.id, note: "caretakernote-sentinel" }),
+      JSON.stringify({ catId: cat.id, note: "reviewnote-sentinel" }),
+    ],
+  );
+  await pool.query(
+    "insert into review_requests (subject, reason, status, resolved_by, resolved_at, resolution) values ($1,'r','resolved',$2,now(),'resolution-sentinel')",
+    [`leakreview-${tag}`, donor.id],
+  );
 
-  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/collection", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/vet", `/vet/bookings/${booking.id}`];
+  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/collection", `/api/cats/${cat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
   const viewers: [string, Record<string, string>][] = [["anon", {}], ["donor", { cookie: `sf_session=${token}` }]];
   let bad = 0, checked = 0;
   try {
@@ -102,6 +119,7 @@ async function main() {
     const col = await (await fetch(`${BASE}/collection`, { headers: { cookie: `sf_session=${token}` } })).text();
     if (!col.includes(`LeakCat ${tag}`)) { bad++; console.log("FAIL: collection did not render the seeded cat"); }
   } finally {
+    await pool.query("delete from review_requests where resolved_by=$1", [donor.id]);
     await pool.query("delete from agent_actions where approved_by=$1", [donor.id]);
     await pool.query("delete from allocations where donation_id=$1", [don.id]);
     await pool.query("delete from donations where id=$1", [don.id]);

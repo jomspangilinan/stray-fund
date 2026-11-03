@@ -72,6 +72,7 @@ const REASON_MESSAGES = {
   duplicate_receipt_image: "This receipt image has already been used. Take a new photo of the correct receipt.",
   duplicate_receipt_number: "This receipt number has already been used.",
   superseded: "A newer submission replaced this one.",
+  caretaker_rejected: "A caretaker looked at this and did not accept it. Send a new receipt and a clear photo of the ears.",
 } as const;
 
 export type ReasonCode = keyof typeof REASON_MESSAGES;
@@ -262,7 +263,7 @@ async function loadLimits(tx: Tx) {
   return limits;
 }
 
-async function depositPaidOn(tx: Tx | typeof db, bookingId: string): Promise<number> {
+export async function depositPaidOn(tx: Tx | typeof db, bookingId: string): Promise<number> {
   const [row] = await tx
     .select({ total: sql<string>`coalesce(sum(${payouts.amount}), 0)::bigint` })
     .from(payouts)
@@ -635,10 +636,9 @@ async function applyEvidence(
     );
 
     const total = parsed?.total_centavos ?? 0;
-    const surplus = booking.packagePrice - total;
-    const returnsSurplus = decision.verification === "verified" && surplus > PRICE_TOLERANCE;
+    const surplus = surplusToReturn(booking.packagePrice, total);
     // Throwing here would leave the row pending and retried for ever, so a person looks instead.
-    if (returnsSurplus && surplus > (await unspentForCat(tx, cat.id))) {
+    if (decision.verification === "verified" && (await surplusUnavailable(tx, cat.id, surplus))) {
       decision = { verification: "needs_review", reasons: ["surplus_unavailable"] };
     }
 
@@ -658,17 +658,47 @@ async function applyEvidence(
     }
 
     // parsed and its date are non-null here, since the decision verified them.
-    const treatedOn = receiptDate(parsed!.date)!;
-    await tx
-      .insert(treatments)
-      .values(treatmentRows(parsed!, treatedOn, { catId: cat.id, vetId: booking.vetId, receiptId: r.id }))
-      .onConflictDoNothing();
-    await transitionCat(tx, cat.id, "neutered");
-    await tx.update(cats).set({ earTipped: true }).where(eq(cats.id, cat.id));
-    if (returnsSurplus) await returnSurplus(tx, cat.id, surplus);
-    await enqueueWakeup(tx, "evidence_ready", { bookingId: booking.id, catId: cat.id });
+    await applyVerifiedOutcome(tx, {
+      receiptId: r.id,
+      booking,
+      catId: cat.id,
+      parsed: parsed!,
+      treatedOn: receiptDate(parsed!.date)!,
+      surplus,
+    });
     return { verification: "verified", reasons: [] };
   });
+}
+
+/** What goes back to the pool when a receipt comes in under the package price. Within the tolerance, nothing. */
+export function surplusToReturn(packagePrice: number, total: number): number {
+  const surplus = packagePrice - total;
+  return surplus > PRICE_TOLERANCE ? surplus : 0;
+}
+
+/** Caller must hold the colony lock. True when the cat no longer holds enough unspent money to return. */
+export async function surplusUnavailable(tx: Tx, catId: string, surplus: number): Promise<boolean> {
+  return surplus > 0 && surplus > (await unspentForCat(tx, catId));
+}
+
+/**
+ * The one place a verified receipt takes effect, for the code path and for a caretaker's
+ * override alike: the three treatments, the cat neutered and ear-tipped, any surplus back to
+ * the pool, and the wakeup. The caller holds the colony lock, has marked the receipt verified,
+ * and has checked surplusUnavailable.
+ */
+export async function applyVerifiedOutcome(
+  tx: Tx,
+  o: { receiptId: string; booking: Booking; catId: string; parsed: ReceiptReading; treatedOn: string; surplus: number },
+): Promise<void> {
+  await tx
+    .insert(treatments)
+    .values(treatmentRows(o.parsed, o.treatedOn, { catId: o.catId, vetId: o.booking.vetId, receiptId: o.receiptId }))
+    .onConflictDoNothing();
+  await transitionCat(tx, o.catId, "neutered");
+  await tx.update(cats).set({ earTipped: true }).where(eq(cats.id, o.catId));
+  if (o.surplus > 0) await returnSurplus(tx, o.catId, o.surplus);
+  await enqueueWakeup(tx, "evidence_ready", { bookingId: o.booking.id, catId: o.catId });
 }
 
 const PRODUCT_WORDS = {

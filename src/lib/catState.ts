@@ -11,10 +11,14 @@ export const CAT_STATUSES = [
 
 export type CatStatus = (typeof CAT_STATUSES)[number];
 
-/** The spec chain, plus spotted -> neutered for already ear-tipped cats. */
+/**
+ * The spec chain, plus two routes for a cat that was already neutered: spotted -> neutered,
+ * and queued -> neutered, which only a caretaker takes and only while no money has been
+ * set aside or paid for the cat (see markAlreadyNeutered in server/caretaker/cats.ts).
+ */
 const ALLOWED: Record<CatStatus, readonly CatStatus[]> = {
   spotted: ["queued", "neutered"],
-  queued: ["funded"],
+  queued: ["funded", "neutered"],
   funded: ["booked"],
   booked: ["in_care"],
   in_care: ["neutered"],

@@ -111,6 +111,8 @@ const NEXT_STEP: Record<string, string> = {
   booking_confirmed: "A vet visit is confirmed. See whether a deposit is due on the open bookings.",
   evidence_ready: "A vet's receipt and ear-tip photo have been verified by code. See whether a balance is due on the open bookings.",
   payout_status_changed: "A vet payment has changed. See whether anything is now due on the open bookings.",
+  evidence_rejected: "A caretaker did not accept a vet's evidence, so its balance stays unpaid. Do not release it. The vet may send new evidence.",
+  review_resolved: "A caretaker answered one of your review requests. See whether anything is now due.",
 };
 
 function buildUserMessage(wakeup: AgentWakeup): string {

@@ -291,33 +291,7 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
       return { done: true as const, result: result("needs_review", s.id), sighting: s, catId: null };
     }
 
-    // A new cat. The fuzz is computed here, once, and never again.
-    const hasPoint = s.exactLat !== null && s.exactLng !== null;
-    const exact = hasPoint ? { lat: s.exactLat!, lng: s.exactLng! } : COLONY.centre;
-    const fuzzed = fuzzLocation(exact.lat, exact.lng);
-    const sex: Sex =
-      s.requestedSex === "female" || s.requestedSex === "male" || s.requestedSex === "unknown"
-        ? s.requestedSex
-        : a.probably_female_by_coat
-          ? "female"
-          : "unknown";
-    const [cat] = await tx
-      .insert(cats)
-      .values({
-        name: await uniqueName(tx, cleanName(a.suggested_name)),
-        sex,
-        flags: flagsOf(a),
-        coat: { colors: a.colors, markings: a.markings },
-        coatPattern: a.coat_pattern,
-        areaName: COLONY.area_name,
-        exactLat: exact.lat,
-        exactLng: exact.lng,
-        fuzzedLat: fuzzed.lat,
-        fuzzedLng: fuzzed.lng,
-        locationApproximate: !hasPoint,
-        bio: a.short_bio.trim() || null,
-      })
-      .returning({ id: cats.id });
+    const cat = await insertNewCat(tx, s, a);
     if (earConfident) await resolveEarTip(tx, cat.id, a.ear_tip === "present");
     const review = !earConfident;
     await tx
@@ -343,8 +317,42 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
   return outcome.result;
 }
 
+/**
+ * A new cat from a sighting. The fuzz is computed here, once, and never again. A caretaker
+ * confirming a sighting the AI could not settle passes no assessment and gets plain defaults.
+ */
+export async function insertNewCat(tx: Tx, s: SightingRow, a: Assessment | null): Promise<{ id: string }> {
+  const hasPoint = s.exactLat !== null && s.exactLng !== null;
+  const exact = hasPoint ? { lat: s.exactLat!, lng: s.exactLng! } : COLONY.centre;
+  const fuzzed = fuzzLocation(exact.lat, exact.lng);
+  const sex: Sex =
+    s.requestedSex === "female" || s.requestedSex === "male" || s.requestedSex === "unknown"
+      ? s.requestedSex
+      : a?.probably_female_by_coat
+        ? "female"
+        : "unknown";
+  const [cat] = await tx
+    .insert(cats)
+    .values({
+      name: await uniqueName(tx, cleanName(a?.suggested_name ?? "")),
+      sex,
+      flags: a ? flagsOf(a) : [],
+      coat: a ? { colors: a.colors, markings: a.markings } : null,
+      coatPattern: a?.coat_pattern ?? null,
+      areaName: COLONY.area_name,
+      exactLat: exact.lat,
+      exactLng: exact.lng,
+      fuzzedLat: fuzzed.lat,
+      fuzzedLng: fuzzed.lng,
+      locationApproximate: !hasPoint,
+      bio: a?.short_bio.trim() || null,
+    })
+    .returning({ id: cats.id });
+  return cat;
+}
+
 /** Ear-tipped cats are already neutered. Clean ears mean the cat joins the queue. */
-async function resolveEarTip(tx: Tx, catId: string, tipped: boolean): Promise<void> {
+export async function resolveEarTip(tx: Tx, catId: string, tipped: boolean): Promise<void> {
   if (tipped) {
     await tx.update(cats).set({ earTipped: true }).where(eq(cats.id, catId));
     await transitionCat(tx, catId, "neutered");
@@ -356,7 +364,7 @@ async function resolveEarTip(tx: Tx, catId: string, tipped: boolean): Promise<vo
 }
 
 /** Only an assessment that listed its sensitive regions (even none) makes a photo public. Never fails the catch. */
-async function publishPhoto(sightingId: string, originalKey: string, regions: unknown): Promise<void> {
+export async function publishPhoto(sightingId: string, originalKey: string, regions: unknown): Promise<void> {
   if (!Array.isArray(regions)) return;
   try {
     const { key } = await publishScrubbed(originalKey, regions as Box[]);

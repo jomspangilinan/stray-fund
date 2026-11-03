@@ -53,6 +53,19 @@ async function VetNavItem() {
   );
 }
 
+/** Reads the session cookie, so render it inside Suspense. Only caretakers ever receive this link. */
+async function CaretakerNavItem() {
+  const session = await getSession();
+  if (session?.role !== "caretaker") return null;
+  return (
+    <li>
+      <Link href="/caretaker" className={NAV_LINK}>
+        Caretaker
+      </Link>
+    </li>
+  );
+}
+
 export function SiteNav() {
   return (
     <nav aria-label="Main" className="mx-auto w-full max-w-xl px-4 pb-2">
@@ -66,6 +79,9 @@ export function SiteNav() {
         ))}
         <Suspense fallback={null}>
           <VetNavItem />
+        </Suspense>
+        <Suspense fallback={null}>
+          <CaretakerNavItem />
         </Suspense>
       </ul>
     </nav>

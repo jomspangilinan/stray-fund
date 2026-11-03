@@ -1,0 +1,283 @@
+import { and, eq, sql } from "drizzle-orm";
+import { insertNewCat, publishPhoto, resolveEarTip } from "../catch";
+import { IllegalTransition, MoneyAlreadyMoved, markAlreadyNeutered, transitionCat } from "../catTransitions";
+import { AssessmentSchema } from "../ai/schemas";
+import { withColonyLock, type Tx } from "../db/client";
+import { cats, guardrails, sightings, wakeups } from "../db/schema";
+import { publishScrubbed, type Box } from "../photos";
+import { StoredObjectMissing } from "../storage";
+import { audit, flag, reqUuid, Refusal, type Handler } from "./shared";
+import type { CatStatus } from "@/lib/catState";
+
+const SEXES = ["female", "male", "unknown"] as const;
+const FLAGS = ["pregnant", "injured", "sick", "kitten"] as const;
+
+type Sighting = typeof sightings.$inferSelect;
+
+const reasonOf = (s: Sighting): string | undefined =>
+  (s.assessment as { review_reason?: unknown } | null)?.review_reason as string | undefined;
+
+/** Locks the row and refuses anything that is not waiting for a person. */
+async function loadWaiting(tx: Tx, id: string): Promise<Sighting> {
+  const [s] = await tx.select().from(sightings).where(eq(sightings.id, id)).for("update");
+  if (!s) throw new Refusal(404, "There is no such sighting.");
+  if (s.state !== "needs_review") throw new Refusal(409, "This sighting has already been settled.");
+  return s;
+}
+
+/** The photo is published after the commit, since storage is not part of the transaction. */
+async function publishAfter(s: Sighting): Promise<void> {
+  const regions = (s.assessment as { sensitive_regions?: unknown } | null)?.sensitive_regions;
+  await publishPhoto(s.id, s.originalKey, regions);
+}
+
+export const sightingConfirmNew: Handler = async (caretakerId, body) => {
+  const sightingId = reqUuid(body, "sightingId", "The sighting");
+  const s = await withColonyLock(async (tx) => {
+    const s = await loadWaiting(tx, sightingId);
+    const parsed = AssessmentSchema.safeParse(s.assessment);
+    const assessment = parsed.success ? parsed.data : null;
+
+    let catId = s.catId;
+    if (catId) {
+      // A cat card was already started from this photo only when the ear could not be read.
+      if (reasonOf(s) !== "ear_tip") {
+        throw new Refusal(409, "This photo was matched to a cat we already know. Confirm that match, or choose another cat.");
+      }
+    } else {
+      catId = (await insertNewCat(tx, s, assessment)).id;
+      const [limits] = await tx.select().from(guardrails).where(eq(guardrails.id, 1));
+      if (assessment && assessment.ear_tip !== "unknown" && assessment.ear_tip_confidence >= limits.earTipConfidenceMin) {
+        await resolveEarTip(tx, catId, assessment.ear_tip === "present");
+      }
+    }
+    await tx.update(sightings).set({ catId, state: "new_cat" }).where(and(eq(sightings.id, s.id), eq(sightings.state, "needs_review")));
+    await audit(tx, {
+      action: "sighting_reviewed",
+      caretakerId,
+      reason: "A caretaker settled a sighting.",
+      inputs: { sightingId, catId, outcome: "new_cat" },
+    });
+    return { ...s, catId };
+  });
+  await publishAfter(s);
+  return "Confirmed as a new cat. Set the ear-tip below if it is not decided yet.";
+};
+
+export const sightingMerge: Handler = async (caretakerId, body) => {
+  const sightingId = reqUuid(body, "sightingId", "The sighting");
+  const catId = reqUuid(body, "catId", "The cat");
+  const s = await withColonyLock(async (tx) => {
+    const s = await loadWaiting(tx, sightingId);
+    if (s.catId && s.catId !== catId && reasonOf(s) === "ear_tip") {
+      throw new Refusal(409, "A new cat card was already started from this photo. Confirm it as a new cat, or reject it.");
+    }
+    const [cat] = await tx.select({ id: cats.id }).from(cats).where(eq(cats.id, catId)).for("share");
+    if (!cat) throw new Refusal(404, "There is no such cat.");
+    // Only the sighting moves. The cat keeps its fuzzed location.
+    await tx.update(sightings).set({ catId, state: "matched" }).where(and(eq(sightings.id, s.id), eq(sightings.state, "needs_review")));
+    await audit(tx, {
+      action: "sighting_reviewed",
+      caretakerId,
+      reason: "A caretaker settled a sighting.",
+      inputs: { sightingId, catId, outcome: "merged" },
+    });
+    return { ...s, catId };
+  });
+  await publishAfter(s);
+  return "Merged. The photo now belongs to that cat.";
+};
+
+export const sightingReject: Handler = async (caretakerId, body) => {
+  const sightingId = reqUuid(body, "sightingId", "The sighting");
+  return withColonyLock(async (tx) => {
+    const s = await loadWaiting(tx, sightingId);
+    if (s.catId && reasonOf(s) === "ear_tip") {
+      throw new Refusal(409, "A new cat card was already started from this photo, so it cannot be rejected. Confirm it instead.");
+    }
+    await tx.update(sightings).set({ state: "rejected" }).where(and(eq(sightings.id, s.id), eq(sightings.state, "needs_review")));
+    await audit(tx, {
+      action: "sighting_reviewed",
+      caretakerId,
+      reason: "A caretaker settled a sighting.",
+      inputs: { sightingId, catId: s.catId, outcome: "rejected" },
+    });
+    return "Rejected. The photo will not be used.";
+  });
+};
+
+export const catSetDetails: Handler = async (caretakerId, body) => {
+  const catId = reqUuid(body, "catId", "The cat");
+  const sex = SEXES.find((x) => x === body.sex);
+  if (!sex) throw new Refusal(400, "Choose female, male or unknown.");
+  const raw = body.flags === undefined ? [] : body.flags;
+  if (!Array.isArray(raw) || raw.some((f) => !FLAGS.includes(f as (typeof FLAGS)[number]))) {
+    throw new Refusal(400, "Flags can only be pregnant, injured, sick or kitten.");
+  }
+  const flags = FLAGS.filter((f) => raw.includes(f));
+  return withColonyLock(async (tx) => {
+    const [cat] = await tx.select().from(cats).where(eq(cats.id, catId)).for("update");
+    if (!cat) throw new Refusal(404, "There is no such cat.");
+    await tx.update(cats).set({ sex, flags }).where(eq(cats.id, catId));
+    await audit(tx, {
+      action: "cat_updated",
+      caretakerId,
+      reason: "A caretaker updated a cat's card.",
+      inputs: { catId, sex, flags, oldSex: cat.sex, oldFlags: cat.flags },
+    });
+    return "Saved.";
+  });
+};
+
+const MONEY_MOVED =
+  "This cat already has money set aside or a payout on record, so it cannot be marked as already neutered. If it really was, ask a developer to settle the money first.";
+const IN_FLOW = "This cat is already in the funding steps, so its ear-tip cannot be changed here.";
+
+export const catSetEarTip: Handler = async (caretakerId, body) => {
+  const catId = reqUuid(body, "catId", "The cat");
+  const earTip = body.earTip;
+  if (earTip !== "present" && earTip !== "absent") throw new Refusal(400, "Say whether the ear-tip is present or absent.");
+
+  return withColonyLock(async (tx) => {
+    const [cat] = await tx.select().from(cats).where(eq(cats.id, catId)).for("update");
+    if (!cat) throw new Refusal(404, "There is no such cat.");
+    const status = cat.status as CatStatus;
+    const note = (message: string, change: string) => audit(tx, {
+      action: "cat_updated",
+      caretakerId,
+      reason: "A caretaker updated a cat's card.",
+      inputs: { catId, earTip, change, from: status },
+    }).then(() => message);
+
+    if (earTip === "present") {
+      if (cat.earTipped === true) return "Already marked as ear-tipped.";
+      if (status === "spotted" || status === "queued") {
+        try {
+          await markAlreadyNeutered(tx, catId);
+        } catch (e) {
+          if (e instanceof MoneyAlreadyMoved) throw new Refusal(409, MONEY_MOVED);
+          throw e;
+        }
+        return note("Marked as ear-tipped, so already neutered.", "already_neutered");
+      }
+      if (status === "neutered" || status === "adoptable" || status === "adopted") {
+        await tx.update(cats).set({ earTipped: true }).where(eq(cats.id, catId));
+        return note("Marked as ear-tipped.", "ear_tip_only");
+      }
+      throw new Refusal(409, IN_FLOW);
+    }
+
+    if (status === "queued" && cat.earTipped === false) return "Already marked as not ear-tipped.";
+    if (status !== "spotted") throw new Refusal(409, IN_FLOW);
+    await tx.update(cats).set({ earTipped: false, queuedAt: new Date() }).where(eq(cats.id, catId));
+    await transitionCat(tx, catId, "queued");
+    await tx.insert(wakeups).values({ kind: "cat_queued", payload: { catId } });
+    return note("Marked as not ear-tipped. The cat joins the queue for funding.", "queued");
+  });
+};
+
+function lifecycle(to: "adoptable" | "adopted", from: CatStatus, refusal: string, done: string): Handler {
+  return async (caretakerId, body) => {
+    const catId = reqUuid(body, "catId", "The cat");
+    return withColonyLock(async (tx) => {
+      const [cat] = await tx.select({ status: cats.status }).from(cats).where(eq(cats.id, catId));
+      if (!cat) throw new Refusal(404, "There is no such cat.");
+      if (cat.status === to) return done;
+      try {
+        await transitionCat(tx, catId, to);
+      } catch (e) {
+        if (e instanceof IllegalTransition) throw new Refusal(409, refusal);
+        throw e;
+      }
+      await audit(tx, {
+        action: "cat_updated",
+        caretakerId,
+        reason: "A caretaker updated a cat's card.",
+        inputs: { catId, change: to, from },
+      });
+      return done;
+    });
+  };
+}
+
+export const catAdoptable = lifecycle("adoptable", "neutered", "Only a neutered cat can be marked ready for a home.", "Marked ready for a home.");
+export const catAdopted = lifecycle("adopted", "adoptable", "Only a cat that is ready for a home can be marked adopted.", "Marked adopted.");
+
+// ---------- Photos ----------
+
+/** Stored regions when there are any. With none, a tick says nobody could read a sign or plate. */
+export const photoPublish: Handler = async (caretakerId, body) => {
+  const sightingId = reqUuid(body, "sightingId", "The sighting");
+  const [s] = await withColonyLock((tx) => tx.select().from(sightings).where(eq(sightings.id, sightingId)));
+  if (!s) throw new Refusal(404, "There is no such sighting.");
+  if (s.state === "pending" || s.state === "rejected") throw new Refusal(409, "This sighting has no photo that can be published.");
+  if (s.publicReady) throw new Refusal(409, "This photo is already public.");
+
+  const stored = (s.assessment as { sensitive_regions?: unknown } | null)?.sensitive_regions;
+  const regions: Box[] = Array.isArray(stored) ? (stored as Box[]) : [];
+  if (regions.length === 0 && !flag(body, "noSensitive")) {
+    throw new Refusal(400, "Tick the box to confirm no house numbers, signs or plates are visible. Without it the photo stays private.");
+  }
+
+  let key: string;
+  try {
+    key = (await publishScrubbed(s.originalKey, regions)).key;
+  } catch (e) {
+    if (e instanceof StoredObjectMissing) throw new Refusal(409, "The original photo is missing, so it cannot be published.");
+    throw e;
+  }
+  return withColonyLock(async (tx) => {
+    const moved = await tx
+      .update(sightings)
+      .set({ publicKey: key, publicReady: true })
+      .where(and(eq(sightings.id, sightingId), eq(sightings.publicReady, false)))
+      .returning({ id: sightings.id });
+    if (moved.length === 0) throw new Refusal(409, "This photo is already public.");
+    await audit(tx, {
+      action: "photo_published",
+      caretakerId,
+      reason: "A caretaker published a photo.",
+      inputs: { sightingId, catId: s.catId, regions: regions.length, confirmedNoSensitive: regions.length === 0 },
+    });
+    return "Published, with the marked areas blurred.";
+  });
+};
+
+export const photoHold: Handler = async (caretakerId, body) => {
+  const sightingId = reqUuid(body, "sightingId", "The sighting");
+  return withColonyLock(async (tx) => {
+    const moved = await tx
+      .update(sightings)
+      .set({ publicReady: false, publicKey: null })
+      .where(and(eq(sightings.id, sightingId), eq(sightings.publicReady, true)))
+      .returning({ id: sightings.id, catId: sightings.catId });
+    if (moved.length === 0) throw new Refusal(409, "This photo is not public.");
+    await audit(tx, {
+      action: "photo_held",
+      caretakerId,
+      reason: "A caretaker held back a photo.",
+      inputs: { sightingId, catId: moved[0].catId },
+    });
+    return "Held back. It no longer shows on any public page.";
+  });
+};
+
+// ---------- Wakeups the agent gave up on ----------
+
+function moveFailed(to: "pending" | "done", done: string): Handler {
+  return async (_caretakerId, body) => {
+    const wakeupId = reqUuid(body, "wakeupId", "The wakeup");
+    const moved = await withColonyLock((tx) =>
+      tx
+        .update(wakeups)
+        .set(to === "pending" ? { status: "pending", attempts: 0, claimedAt: null, runAfter: sql`now()` } : { status: "done" })
+        .where(and(eq(wakeups.id, wakeupId), eq(wakeups.status, "failed")))
+        .returning({ id: wakeups.id }),
+    );
+    if (moved.length === 0) throw new Refusal(409, "This job is no longer marked as failed.");
+    return done;
+  };
+}
+
+export const wakeupRetry = moveFailed("pending", "Queued again. The treasurer will try it shortly.");
+export const wakeupDismiss = moveFailed("done", "Dismissed.");
