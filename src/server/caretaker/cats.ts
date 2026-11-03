@@ -185,11 +185,17 @@ export const catRename: Handler = async (caretakerId, body) => {
     if (!cat) throw new Refusal(404, "There is no such cat.");
     const name = await uniqueName(tx, parsed.name, cat.id);
     await tx.update(cats).set({ name, nameLocked: true }).where(eq(cats.id, catId));
+    // The cat has its name now, so the waiting ideas for it are closed.
+    const closed = await tx
+      .update(nameSuggestions)
+      .set({ status: "dismissed", decidedBy: caretakerId, decidedAt: new Date() })
+      .where(and(eq(nameSuggestions.catId, catId), eq(nameSuggestions.status, "pending")))
+      .returning({ id: nameSuggestions.id });
     await audit(tx, {
       action: NAME_SET,
       caretakerId,
       reason: "A caretaker set a cat's name.",
-      inputs: { catId, from: cat.name, to: name, wanted: parsed.name },
+      inputs: { catId, from: cat.name, to: name, wanted: parsed.name, othersDismissed: closed.length },
     });
     return namedMessage("Saved.", parsed.name, name);
   });

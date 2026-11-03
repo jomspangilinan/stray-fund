@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { NameControls } from "@/server/catNames";
+import { CaretakerRename } from "./CaretakerRename";
 import { NameSuggest } from "./NameSuggest";
 import { RenameAgain } from "./RenameAgain";
 
@@ -14,10 +15,13 @@ export function CatNameEditor({
   catId,
   name,
   names,
+  caretaker = false,
 }: {
   catId: string;
   name: string;
   names?: NameControls;
+  /** A caretaker sets the name directly. */
+  caretaker?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [sentName, setSentName] = useState<string | null>(null);
@@ -76,14 +80,20 @@ export function CatNameEditor({
             if (e.key === "Escape") close();
           }}
         >
-          <NameSuggest
-            catId={catId}
-            onSent={(n) => {
-              setSentName(n);
-              close();
-            }}
-          />
-          {names.canRename && <RenameAgain catId={catId} />}
+          {caretaker ? (
+            <CaretakerRename catId={catId} name={name} onSaved={close} />
+          ) : (
+            <>
+              <NameSuggest
+                catId={catId}
+                onSent={(n) => {
+                  setSentName(n);
+                  close();
+                }}
+              />
+              {names.canRename && <RenameAgain catId={catId} />}
+            </>
+          )}
           <button
             type="button"
             className="link justify-self-start"

@@ -1,6 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { landingAfterSwitch } from "@/lib/nav";
 import { useState } from "react";
 
 const PERSONAS = [
@@ -11,9 +12,10 @@ const PERSONAS = [
 /** Demo only, and simulated: it switches to a demo account and is not a real sign-in. The layout renders this only when DEMO_MODE is on; the API checks it again. */
 export function PersonaSwitcher({ current }: { current: string | null }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [error, setError] = useState<string | null>(null);
 
-  async function pick(key: string) {
+  async function pick(key: (typeof PERSONAS)[number]["key"]) {
     setError(null);
     const res = await fetch("/api/session", {
       method: "POST",
@@ -24,6 +26,8 @@ export function PersonaSwitcher({ current }: { current: string | null }) {
       setError("Could not switch");
       return;
     }
+    // The desk roles land on their desk; the layout and the page read the new cookie on this navigation.
+    router.push(landingAfterSwitch(key, pathname));
     router.refresh();
   }
 

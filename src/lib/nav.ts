@@ -39,3 +39,11 @@ export function consoleFor(role: Role | null | undefined): ConsoleLink | null {
 export function isActiveTab(tab: Tab, pathname: string): boolean {
   return tab.pages.some((page) => (page === "/" ? pathname === "/" : pathname === page || pathname.startsWith(`${page}/`)));
 }
+
+/** Where the demo role strip takes you. A desk role lands on its desk; any other role keeps the page unless it is a desk page, then the yard. */
+export function landingAfterSwitch(role: Role, pathname: string): string {
+  if (role === "caretaker") return "/caretaker";
+  if (role === "vet") return "/vet";
+  const onDesk = ["/caretaker", "/vet"].some((d) => pathname === d || pathname.startsWith(`${d}/`));
+  return onDesk ? "/" : pathname;
+}

@@ -4,6 +4,7 @@ import { db } from "../db/client";
 import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reviewRequests, sightings, users, wakeups } from "../db/schema";
 import { depositPaidOn, reasonMessages } from "../vetFlow";
 import { manilaDate } from "../public";
+import { deskTotal } from "@/lib/deskSections";
 
 export const LONG_SENT_MINUTES = 60;
 
@@ -265,6 +266,11 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     nameSuggestions: suggested.map((n) => ({ id: n.id, catId: n.catId, catName: n.catName, name: n.name, photoSightingId: n.photoSightingId, date: manilaDate(n.createdAt) })),
     catChoices: allCats,
   };
+}
+
+/** How many things wait for a caretaker: the same queue the desk lists, counted the way the desk counts. */
+export async function caretakerWaiting(): Promise<number> {
+  return deskTotal(await getCaretakerQueue());
 }
 
 export type RulesView = {

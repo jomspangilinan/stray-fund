@@ -18,6 +18,7 @@ export function CatDetail({
   earTip,
   names,
   askSex = false,
+  caretaker = false,
 }: {
   card: CatCardData;
   thanks?: Thanks[];
@@ -27,6 +28,8 @@ export function CatDetail({
   names?: NameControls;
   /** Set only for a signed-in person, and only while the card does not say girl or boy. */
   askSex?: boolean;
+  /** True for a caretaker: the pencil sets the name directly instead of suggesting one. */
+  caretaker?: boolean;
 }) {
   const { cat, sightings, health } = card;
   return (
@@ -38,7 +41,7 @@ export function CatDetail({
         <div className="relative mt-1 aspect-[4/5] overflow-hidden rounded-out">
           <CatPhoto url={cat.photoUrl} name={cat.name} sizes="(min-width: 576px) 36rem, 100vw" caption />
         </div>
-        <CatNameEditor catId={cat.id} name={cat.name} names={names} />
+        <CatNameEditor catId={cat.id} name={cat.name} names={names} caretaker={caretaker} />
         <p className="mt-1 soft">
           {cat.sex}, {cat.statusLabel.toLowerCase()}
         </p>

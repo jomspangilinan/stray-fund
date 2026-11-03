@@ -755,6 +755,8 @@ export type VetBookingRow = {
   scheduledFor: string | null;
   packagePrice: number;
   exact: ExactPlace;
+  /** Where the booking stands for the vet. "open" means the vet has evidence to send. */
+  evidence: EvidenceState["state"];
 };
 export type VetDashboard = { fundedCats: VetCat[]; bookings: VetBookingRow[] };
 
@@ -790,7 +792,7 @@ type VetBookingColumns = {
   locationApproximate: boolean;
 };
 
-const toVetBooking = (b: VetBookingColumns): VetBookingRow => ({
+const toVetBooking = (b: VetBookingColumns, evidence: EvidenceState["state"]): VetBookingRow => ({
   id: b.id,
   catId: b.catId,
   catName: b.catName,
@@ -799,6 +801,7 @@ const toVetBooking = (b: VetBookingColumns): VetBookingRow => ({
   scheduledFor: b.scheduledFor ? manilaDate(b.scheduledFor) : null,
   packagePrice: b.packagePrice,
   exact: exactOf(b),
+  evidence,
 });
 
 /** For a signed-in vet only. Callers check the role. Holds exact locations, so it is never public or cached. */
@@ -825,8 +828,18 @@ export async function listVetDashboard(vetId: string): Promise<VetDashboard> {
     .orderBy(desc(bookings.createdAt));
   return {
     fundedCats: funded.map((c) => ({ id: c.id, name: c.name, sex: effectiveSex(c), area: c.areaName, exact: exactOf(c) })),
-    bookings: mine.map(toVetBooking),
+    bookings: await Promise.all(
+      mine.map(async (b) => {
+        const state = await loadBookingState(db, b.id);
+        return toVetBooking(b, state ? evidenceStateOf(state).state : "closed");
+      }),
+    ),
   };
+}
+
+/** How many bookings wait for this vet to send evidence. Counted from the same list the vet desk shows. */
+export async function vetWaiting(vetId: string): Promise<number> {
+  return (await listVetDashboard(vetId)).bookings.filter((b) => b.evidence === "open").length;
 }
 
 export type VetPayout = { kind: string; amount: number; status: string; paypalRef: string | null; date: string };
@@ -885,7 +898,7 @@ export async function getVetBooking(vetId: string, bookingId: string): Promise<V
     .limit(1);
 
   return {
-    booking: toVetBooking(row),
+    booking: toVetBooking(row, evidenceStateOf(state).state),
     payouts: paid.map((p) => ({
       kind: p.kind,
       amount: p.amount,

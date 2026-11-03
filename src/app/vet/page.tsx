@@ -8,18 +8,39 @@ import { PageHead } from "@/components/PageHead";
 import { formatPeso } from "@/lib/money";
 import { manilaDate } from "@/server/public";
 import { getSession } from "@/server/session";
-import { listVetDashboard } from "@/server/vetFlow";
+import { listVetDashboard, type VetBookingRow } from "@/server/vetFlow";
 
 export const metadata: Metadata = { title: "Vet | Stray Fund" };
 
 const BOOKING_STATUS: Record<string, string> = { confirmed: "Confirmed", completed: "Completed" };
-const CAT_STATUS: Record<string, string> = {
-  booked: "Waiting for the deposit",
-  in_care: "In care, evidence needed",
-  neutered: "Neutered",
-  adoptable: "Ready for a home",
-  adopted: "Adopted",
+/** What happens next for a booking, in the vet's words. */
+const NEXT_STEP: Record<VetBookingRow["evidence"], string> = {
+  open: "Send the receipt and a photo of the ear-tip.",
+  waiting_deposit: "Waiting for the deposit to reach you.",
+  waiting_cat: "Waiting for the cat to come in.",
+  checking: "Being checked. Nothing to send.",
+  waiting_caretaker: "Waiting for a caretaker. Nothing to send.",
+  verified: "Verified. The treasurer pays the balance next.",
+  closed: "Closed.",
 };
+
+function BookingCard({ b }: { b: VetBookingRow }) {
+  return (
+    <>
+      <h3 className="text-base font-extrabold">{b.catName}</h3>
+      <p className="small">
+        {BOOKING_STATUS[b.status] ?? b.status}, visit on {b.scheduledFor ?? "a date to be set"}. Package {formatPeso(b.packagePrice)}.
+      </p>
+      <p className="mt-1 font-bold">{NEXT_STEP[b.evidence]}</p>
+      <div className="mt-2">
+        <ExactLocation exact={b.exact} />
+      </div>
+      <Link href={`/vet/bookings/${b.id}`} className={`${b.evidence === "open" ? "btn" : "btn-quiet"} mt-4 inline-flex items-center`}>
+        {b.evidence === "open" ? `Send for ${b.catName}` : `See ${b.catName}`}
+      </Link>
+    </>
+  );
+}
 
 async function Dashboard() {
   const session = await getSession();
@@ -37,9 +58,28 @@ async function Dashboard() {
 
   const { fundedCats, bookings } = await listVetDashboard(session.userId);
   const today = manilaDate(new Date());
+  const send = bookings.filter((b) => b.evidence === "open");
+  const rest = bookings.filter((b) => b.evidence !== "open");
   return (
     <>
-      <section className="mt-8" aria-labelledby="waiting">
+      <section className="mt-8" aria-labelledby="send">
+        <h2 id="send" className="h2">
+          Waiting for you {send.length > 0 && <span className="soft">({send.length})</span>}
+        </h2>
+        {send.length === 0 ? (
+          <p className="mt-3 soft">Nothing to send right now.</p>
+        ) : (
+          <ul className="mt-4 grid gap-3">
+            {send.map((b) => (
+              <li key={b.id} className="card">
+                <BookingCard b={b} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="mt-10" aria-labelledby="waiting">
         <h2 id="waiting" className="h2">
           Funded, waiting for a booking
         </h2>
@@ -65,27 +105,15 @@ async function Dashboard() {
 
       <section className="mt-10" aria-labelledby="mine">
         <h2 id="mine" className="h2">
-          Your bookings
+          Other bookings
         </h2>
-        {bookings.length === 0 ? (
-          <p className="mt-3 soft">You have no bookings yet.</p>
+        {rest.length === 0 ? (
+          <p className="mt-3 soft">{bookings.length === 0 ? "You have no bookings yet." : "Nothing else right now."}</p>
         ) : (
           <ul className="mt-4 grid gap-3">
-            {bookings.map((b) => (
+            {rest.map((b) => (
               <li key={b.id} className="card">
-                <h3 className="text-base font-extrabold">{b.catName}</h3>
-                <p className="small">
-                  {BOOKING_STATUS[b.status] ?? b.status}, visit on {b.scheduledFor ?? "a date to be set"}
-                </p>
-                <p className="small soft">
-                  {CAT_STATUS[b.catStatus] ?? b.catStatus}. Package {formatPeso(b.packagePrice)}.
-                </p>
-                <div className="mt-2">
-                  <ExactLocation exact={b.exact} />
-                </div>
-                <Link href={`/vet/bookings/${b.id}`} className="btn mt-4 inline-flex items-center">
-                  Open booking
-                </Link>
+                <BookingCard b={b} />
               </li>
             ))}
           </ul>

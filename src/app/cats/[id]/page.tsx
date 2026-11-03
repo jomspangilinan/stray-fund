@@ -21,7 +21,7 @@ async function Card({ params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   const mine = session ? (await ownFlags(db, session.userId, [card.cat.id])).get(card.cat.id) : undefined;
   const names = session ? await nameControls(card.cat.id, session.userId) : undefined;
-  return <CatDetail card={card} thanks={await getCatThanks(card.cat.id)} earTip={session ? (mine ?? "unsure") : undefined} names={names} askSex={session !== null && card.cat.sex === SEX_LABEL.unknown} />;
+  return <CatDetail card={card} thanks={await getCatThanks(card.cat.id)} earTip={session ? (mine ?? "unsure") : undefined} names={names} askSex={session !== null && card.cat.sex === SEX_LABEL.unknown} caretaker={session?.role === "caretaker"} />;
 }
 
 export default function CatPage({ params }: PageProps<"/cats/[id]">) {

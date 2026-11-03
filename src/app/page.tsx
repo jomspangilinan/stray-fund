@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { formatPesoShort } from "@/lib/money";
+import { DeskWaiting } from "@/components/DeskWaiting";
 import { HomeYou } from "@/components/HomeYou";
 import { CatPhoto } from "@/components/CatPhoto";
 import { Yard, YardSkeleton } from "@/components/Yard";
@@ -20,6 +21,9 @@ async function Home() {
   const mission = missions[0];
   return (
     <>
+      <Suspense fallback={null}>
+        <DeskWaiting />
+      </Suspense>
       <Yard yard={yard} />
 
       <section aria-label="The fund" className="yard-row">
