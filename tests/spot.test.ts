@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { desc, eq } from "drizzle-orm";
 import sharp from "sharp";
 import { closePool, db } from "../src/server/db/client";
-import { cats, earTipFlags, reviewRequests, sightings, users, wakeups } from "../src/server/db/schema";
+import { cats, earTipFlags, reports, reviewRequests, sightings, users, wakeups } from "../src/server/db/schema";
 import { truncateAll } from "./helpers/db";
 import { createTestPool } from "./helpers/db";
 import { CAT_NAMES } from "../src/lib/catNames";
@@ -275,11 +275,57 @@ describe("processSpot: new cats", () => {
     expect(bySex).toEqual({ A: "female", C: "unknown" });
   });
 
-  it("copies flags from the assessment", async () => {
-    script.assess = () => assessWith({ flags: { kitten: true, pregnant: false, injured: true, sick: false } });
+  it("writes only a kitten flag to the cat, and files a photo report for each claim of hurt, pregnant or sick", async () => {
+    script.assess = () => assessWith({ flags: { kitten: true, pregnant: true, injured: true, sick: false } });
     const u = await makeUser();
     await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
-    expect((await catRows())[0].flags.sort()).toEqual(["injured", "kitten"]);
+    const [cat] = await catRows();
+    expect(cat.flags).toEqual(["kitten"]);
+    const rows = await db.select().from(reports);
+    expect(rows.map((r) => r.claim).sort()).toEqual(["injured", "pregnant"]);
+    for (const r of rows) {
+      expect(r).toMatchObject({ source: "photo", status: "open", catId: cat.id, reporterId: null, note: null, photoAgrees: true });
+      expect(r.sightingId).not.toBeNull();
+    }
+    expect(await wakeupKinds()).toContain("report_changed");
+  });
+
+  it("files no report when the photo shows nothing wrong", async () => {
+    const u = await makeUser();
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect(await db.select().from(reports)).toHaveLength(0);
+  });
+
+  it("a mid band photo with a claim keeps its report with no cat", async () => {
+    const { cat } = await seedCat({});
+    script.assess = () => assessWith({ flags: { kitten: false, pregnant: false, injured: true, sick: false } });
+    script.match = () => ({ match_cat_id: cat.id, confidence: 0.6, reason: "maybe" });
+    const u = await makeUser();
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect(out.state).toBe("needs_review");
+    const [r] = await db.select().from(reports);
+    expect(r).toMatchObject({ claim: "injured", catId: null, status: "open" });
+    expect((await catRows())[0].flags).toEqual([]);
+  });
+
+  it("a photo that went to review because the match failed keeps its report too", async () => {
+    await seedCat({});
+    setAiForTests(async (params) => {
+      if (String(params.system).includes("same cat")) return { stop_reason: "refusal", content: [] };
+      const flags = { kitten: false, pregnant: false, injured: false, sick: true };
+      return { stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(assessWith({ flags })) }] };
+    });
+    const u = await makeUser();
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect(out.state).toBe("needs_review");
+    expect(await db.select().from(reports)).toMatchObject([{ claim: "sick", catId: null }]);
+  });
+
+  it("a rejected photo files no report", async () => {
+    script.assess = () => assessWith({ is_cat: false, flags: { kitten: false, pregnant: false, injured: true, sick: false } });
+    const u = await makeUser();
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect(await db.select().from(reports)).toHaveLength(0);
   });
 });
 
@@ -434,13 +480,24 @@ describe("processSpot: matching", () => {
     expect(await wakeupKinds()).toEqual([]);
   });
 
-  it("merges flags and never removes them", async () => {
+  it("keeps confirmed flags, adds a kitten flag, and files a report for a new claim instead of a flag", async () => {
     const { cat } = await seedCat({ status: "queued", earTipped: false, flags: ["injured"] });
-    script.assess = () => assessWith({ flags: { kitten: false, pregnant: true, injured: false, sick: false } });
+    script.assess = () => assessWith({ flags: { kitten: true, pregnant: true, injured: false, sick: false } });
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
     await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
-    expect((await catRows())[0].flags.sort()).toEqual(["injured", "pregnant"]);
+    expect((await catRows())[0].flags.sort()).toEqual(["injured", "kitten"]);
+    expect(await db.select().from(reports)).toMatchObject([{ claim: "pregnant", catId: cat.id, status: "open", source: "photo" }]);
+  });
+
+  it("does not pile up reports: a claim already confirmed or already open on the cat is not filed again", async () => {
+    const { cat } = await seedCat({ status: "queued", earTipped: false, flags: ["injured"] });
+    script.assess = () => assessWith({ flags: { kitten: false, pregnant: true, injured: true, sick: false } });
+    script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
+    const u = await makeUser();
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect((await db.select().from(reports)).map((r) => r.claim)).toEqual(["pregnant"]);
   });
 
   it("sends to review, not new cat, when the match call is refused", async () => {

@@ -11,6 +11,7 @@ import { NAME_APPROVED, NAME_DISMISSED, NAME_SET } from "../privateActions";
 import { parseCatName } from "@/lib/catNames";
 import { publishScrubbed, type Box } from "../photos";
 import { StoredObjectMissing } from "../storage";
+import { attachReports, fileStaffReport, HOLD_CLAIMS } from "../reports";
 import { enqueueWakeup } from "../wakeups";
 import { autoPublishable, needsHumanTick, regionsOf } from "../photoGate";
 import { audit, flag, reqUuid, Refusal, type Handler } from "./shared";
@@ -49,6 +50,7 @@ export const sightingConfirmNew: Handler = async (caretakerId, body) => {
     }
     const catId = (await insertNewCat(tx, s, assessment)).id;
     await tx.update(sightings).set({ catId, state: "new_cat" }).where(and(eq(sightings.id, s.id), eq(sightings.state, "needs_review")));
+    await attachReports(tx, s.id, catId);
     await audit(tx, {
       action: "sighting_reviewed",
       caretakerId,
@@ -70,6 +72,7 @@ export const sightingMerge: Handler = async (caretakerId, body) => {
     if (!cat) throw new Refusal(404, "There is no such cat.");
     // Only the sighting moves. The cat keeps its fuzzed location.
     await tx.update(sightings).set({ catId, state: "matched" }).where(and(eq(sightings.id, s.id), eq(sightings.state, "needs_review")));
+    await attachReports(tx, s.id, catId);
     await audit(tx, {
       action: "sighting_reviewed",
       caretakerId,
@@ -110,6 +113,13 @@ export const catSetDetails: Handler = async (caretakerId, body) => {
     const [cat] = await tx.select().from(cats).where(eq(cats.id, catId)).for("update");
     if (!cat) throw new Refusal(404, "There is no such cat.");
     await tx.update(cats).set({ sex, sexUnconfirmed: false, flags }).where(eq(cats.id, catId));
+    // A caretaker's word is a check. A newly set hurt, pregnant or sick flag is a confirmed report, so the cat is held
+    // until a vet clears it. A flag the cat already had is not filed again.
+    for (const claim of HOLD_CLAIMS) {
+      if (flags.includes(claim) && !cat.flags.includes(claim)) {
+        await fileStaffReport(tx, { catId, claim, source: "caretaker", reporterId: caretakerId });
+      }
+    }
     await audit(tx, {
       action: "cat_updated",
       caretakerId,

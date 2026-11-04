@@ -11,6 +11,7 @@ import {
   guardrails,
   payouts,
   receipts,
+  reports,
   reviewRequests,
   sightings,
   treatments,
@@ -18,6 +19,7 @@ import {
   wakeups,
 } from "../src/server/db/schema";
 import { fileReview } from "../src/server/agent/review";
+import { fileReport, heldCatIds } from "../src/server/reports";
 import { requestPayout } from "../src/server/moneyGate";
 import { storeOriginal } from "../src/server/photos";
 import { getCatCard, listAgentActions, manilaDate } from "../src/server/public";
@@ -597,6 +599,29 @@ describe("sighting review", () => {
     expect((await act("sighting_merge", { sightingId: s.id, catId: "00000000-0000-4000-8000-000000000000" })).status).toBe(409);
   });
 
+  it("merging attaches the photo's report to the chosen cat and holds it", async () => {
+    const cat = await makeCat("spotted");
+    const s = await reviewSighting({ assessment: { ...ASSESS, review_reason: "possible_match", candidate_cat_ids: [cat.id] } });
+    const { id } = await db.transaction((tx) => fileReport(tx, { sightingId: s.id, catId: null, claim: "injured", note: null, source: "photo", reporterId: null }));
+    expect(await db.transaction((tx) => heldCatIds(tx))).toEqual(new Set());
+    expect((await act("sighting_merge", { sightingId: s.id, catId: cat.id })).status).toBe(200);
+    expect((await db.select().from(reports).where(eq(reports.id, id)))[0].catId).toBe(cat.id);
+    expect(await db.transaction((tx) => heldCatIds(tx))).toEqual(new Set([cat.id]));
+  });
+
+  it("confirming as a new cat attaches the photo's report to the new cat", async () => {
+    const s = await reviewSighting();
+    const { id } = await db.transaction((tx) => fileReport(tx, { sightingId: s.id, catId: null, claim: "injured", note: "limping", source: "neighbour", reporterId: null }));
+    expect((await act("sighting_confirm_new", { sightingId: s.id })).status).toBe(200);
+    const r = (await db.select().from(reports).where(eq(reports.id, id)))[0];
+    const [cat] = await db.select().from(cats);
+    expect(r.catId).toBe(cat.id);
+    expect(r.status).toBe("open");
+    // The assessment's pregnant guess no longer writes a flag.
+    expect(cat.flags).toEqual([]);
+    expect(await db.transaction((tx) => heldCatIds(tx))).toEqual(new Set([cat.id]));
+  });
+
   it("refuses to merge into a cat that does not exist", async () => {
     const s = await reviewSighting();
     expect((await act("sighting_merge", { sightingId: s.id, catId: "00000000-0000-4000-8000-000000000000" })).status).toBe(404);
@@ -611,7 +636,7 @@ describe("sighting review", () => {
     expect(all).toHaveLength(1);
     const cat = all[0];
     expect(cat).toMatchObject({ name: "Muning", sex: "female", exactLat: 10.2, exactLng: 120.6, locationApproximate: false, status: "spotted", earTipped: null });
-    expect(cat.flags).toEqual(["pregnant"]);
+    expect(cat.flags).toEqual([]);
     const meters = Math.hypot((cat.fuzzedLat! - 10.2) * 111_320, (cat.fuzzedLng! - 120.6) * 111_320 * Math.cos((10.2 * Math.PI) / 180));
     expect(meters).toBeGreaterThan(290);
     expect(meters).toBeLessThan(710);
@@ -646,6 +671,20 @@ async function makeCat(status: string, over: Partial<typeof cats.$inferInsert> =
 }
 
 describe("cat details", () => {
+  it("setting pregnant, injured or sick files a confirmed caretaker report and holds the cat; kitten does not", async () => {
+    const cat = await makeCat("spotted");
+    expect((await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["sick", "kitten"] })).status).toBe(200);
+    const rows = await db.select().from(reports).where(eq(reports.catId, cat.id));
+    expect(rows).toMatchObject([{ claim: "sick", source: "caretaker", status: "confirmed", reporterId: caretaker.id }]);
+    expect(await db.transaction((tx) => heldCatIds(tx))).toEqual(new Set([cat.id]));
+    // Saving the card again, unchanged, files nothing new.
+    expect((await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["sick", "kitten"] })).status).toBe(200);
+    expect(await db.select().from(reports)).toHaveLength(1);
+    // Taking the flag off does not clear the hold: only a vet does.
+    expect((await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["kitten"] })).status).toBe(200);
+    expect(await db.transaction((tx) => heldCatIds(tx))).toEqual(new Set([cat.id]));
+  });
+
   it("sets sex and flags from validated values only", async () => {
     const cat = await makeCat("spotted");
     expect((await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["sick", "kitten"] })).status).toBe(200);

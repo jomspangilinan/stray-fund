@@ -11,6 +11,7 @@ import { catNamesInUse, uniqueName } from "./catNames";
 import { autoPublishable } from "./photoGate";
 import { nameIsSafe, safeBio } from "./placeText";
 import { fuzzLocation } from "./location";
+import { filePhotoReports } from "./reports";
 import { publishScrubbed, storeOriginal, type Box } from "./photos";
 import { getStorage } from "./storage";
 
@@ -212,21 +213,30 @@ async function loadCandidates(coatPattern: string): Promise<{ catId: string; pho
 
 /** The AI refused or returned nothing usable. A person decides; no cat is made. */
 async function markReview(sightingId: string, assessment: Assessment | null, candidateIds: string[]): Promise<SpotResult> {
-  const [row] = await db
-    .update(sightings)
-    .set({
-      state: "needs_review",
-      ...(assessment ? { assessment: { ...assessment, review_reason: "ai_unusable", candidate_cat_ids: candidateIds } } : {}),
-    })
-    .where(and(eq(sightings.id, sightingId), eq(sightings.state, "pending")))
-    .returning();
+  const row = await db.transaction(async (tx) => {
+    await lockColony(tx);
+    const [moved] = await tx
+      .update(sightings)
+      .set({
+        state: "needs_review",
+        ...(assessment ? { assessment: { ...assessment, review_reason: "ai_unusable", candidate_cat_ids: candidateIds } } : {}),
+      })
+      .where(and(eq(sightings.id, sightingId), eq(sightings.state, "pending")))
+      .returning();
+    // Only the run that moved the sighting files its claims. No cat yet, so they wait for a caretaker.
+    if (moved && assessment) await filePhotoReports(tx, moved.id, null, claimsOf(assessment));
+    return moved;
+  });
   if (row) return resultOf(row);
   const [now] = await db.select().from(sightings).where(eq(sightings.id, sightingId));
   return resultOf(now);
 }
 
-const FLAG_NAMES = ["kitten", "pregnant", "injured", "sick"] as const;
-const flagsOf = (a: Assessment) => FLAG_NAMES.filter((f) => a.flags[f]);
+// The photo's guess of hurt, pregnant or sick is only a claim, filed as a report. cats.flags holds confirmed facts,
+// and a kitten is the one guess a photo can state as fact.
+const REPORT_FLAGS = ["pregnant", "injured", "sick"] as const;
+const claimsOf = (a: Assessment) => REPORT_FLAGS.filter((f) => a.flags[f]);
+const flagsOf = (a: Assessment): string[] => (a.flags.kitten ? ["kitten"] : []);
 
 function cleanName(raw: string): string {
   const name = raw
@@ -271,6 +281,7 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
         .update(sightings)
         .set({ catId: cat.id, state: "matched", matchConfidence: m.confidence, assessment: a })
         .where(eq(sightings.id, s.id));
+      await filePhotoReports(tx, s.id, cat.id, claimsOf(a));
       return { done: true as const, result: result("matched", s.id, cat.id), sighting: s, catId: cat.id };
     }
 
@@ -284,6 +295,8 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
           assessment: { ...a, review_reason: "possible_match", candidate_cat_ids: ids },
         })
         .where(eq(sightings.id, s.id));
+      // No cat yet. The report waits and attaches when a caretaker sorts the photo.
+      await filePhotoReports(tx, s.id, null, claimsOf(a));
       return { done: true as const, result: result("needs_review", s.id), sighting: s, catId: null };
     }
 
@@ -292,6 +305,7 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
       .update(sightings)
       .set({ catId: cat.id, state: "new_cat", matchConfidence: m.catId ? m.confidence : null, assessment: a })
       .where(eq(sightings.id, s.id));
+    await filePhotoReports(tx, s.id, cat.id, claimsOf(a));
     return { done: true as const, result: result("new_cat", s.id, cat.id), sighting: s, catId: cat.id };
   });
 
