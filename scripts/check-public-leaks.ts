@@ -6,6 +6,10 @@
  * afterwards.
  *
  *   SESSION_SECRET=... DB_URL=postgres://... BASE_URL=http://localhost:3111 npx tsx scripts/check-public-leaks.ts
+ *
+ * It fetches as a signed-out visitor and as each demo role (neighbour, caretaker, vet). For the report story it adds a
+ * note holding a phone number, a street and a person's name, and Treasurer reasons that repeat that note. Run the
+ * server with DEMO_MODE=true, which is how the open demo hides a visitor's note from staff too.
  */
 import { randomUUID } from "node:crypto";
 import { SignJWT } from "jose";
@@ -28,7 +32,18 @@ const SENTINELS = [
   // The yard draws a look-alike from fixed palette names. The stored coat text, its column names and a hostile
   // avatar value must never reach a page.
   "coatmarkings-sentinel", "coatcolour-sentinel", "coat_pattern", "coatPattern", "hostile-avatar-sentinel",
+  // A neighbour's note can hold a phone number, a street and a name. None of it, and no field that carries it, may
+  // reach a page, a payload or the AI's public reasons.
+  "0917 555 0142", "555 0142", "Marites Dela Cruz", "Dela Cruz", "Mabini Street", "Mabini", "noteleak-sentinel", "check_question", "checkQuestion",
+  "photo_agrees", "photoAgrees", "reporter_id", "reporterId", "sighting_id", "sightingId", "decided_by", "decidedBy",
 ];
+
+/** Fields the staff desk legitimately carries (it draws the photo by sighting id and shows the AI's question). Never for a visitor. */
+const STAFF_FIELDS = ["sighting_id", "sightingId", "check_question", "checkQuestion", "photo_agrees", "photoAgrees"];
+
+const NOTE = "Call Marites Dela Cruz on 0917 555 0142, the cat is limping near 12 Mabini Street. noteleak-sentinel";
+/** The Treasurer's own words can repeat a note. These must show as the fixed line, never as written. */
+const ECHO_REASON = "Marites Dela Cruz says the cat is limping near 12 Mabini Street, so a caretaker should look at the cat first.";
 
 async function main() {
   const tag = randomUUID().slice(0, 8);
@@ -48,6 +63,8 @@ async function main() {
     "insert into users (username, role) values ($1,'donor') returning id",
     [`leakflagger_${tag}`],
   );
+  const { rows: [staff] } = await pool.query("insert into users (username, role) values ($1,'caretaker') returning id", [`leakcare_${tag}`]);
+  const { rows: [staffVet] } = await pool.query("insert into users (username, role, clinic_name) values ($1,'vet','Leakcheck Sentinel Clinic') returning id", [`leakstaffvet_${tag}`]);
   const { rows: [cat] } = await pool.query(
     `insert into cats (name, sex, status, area_name, exact_lat, exact_lng, fuzzed_lat, fuzzed_lng, location_approximate, flags)
      values ($1,'female','neutered','Brgy. San Antonio, near the market',10.987654321,120.123456789,10.55555555,120.66666666,true,'{pregnant}') returning id`,
@@ -76,6 +93,58 @@ async function main() {
      values ($1,'originals/00000000-0000-4000-8000-000000000001.jpg','photos/00000000-0000-4000-8000-000000000002.jpg',true,now(),11.246813579,121.135792468,'female','{"x":1}','new_cat')`,
     [cat.id],
   );
+  // The report story. A spotted cat with an open note (needs a person first), a queued cat the Treasurer moved citing a
+  // vet-cleared report (next to fund), and the neutered cat's own timeline with a dismissed and a confirmed report.
+  const place = "'Brgy. San Antonio, near the market',10.987654321,120.123456789,10.55555555,120.66666666,true";
+  const { rows: [openCat] } = await pool.query(
+    `insert into cats (name, sex, status, area_name, exact_lat, exact_lng, fuzzed_lat, fuzzed_lng, location_approximate, queued_at)
+     values ($1,'male','queued',${place}, now() - interval '3 days') returning id`,
+    [`LeakOpen ${tag}`],
+  );
+  const { rows: [movedCat] } = await pool.query(
+    `insert into cats (name, sex, status, area_name, exact_lat, exact_lng, fuzzed_lat, fuzzed_lng, location_approximate, queued_at, flags)
+     values ($1,'male','queued',${place}, now() - interval '5 days', '{injured}') returning id`,
+    [`LeakMoved ${tag}`],
+  );
+  const { rows: [firstCat] } = await pool.query(
+    `insert into cats (name, sex, status, area_name, exact_lat, exact_lng, fuzzed_lat, fuzzed_lng, location_approximate, queued_at)
+     values ($1,'female','queued',${place}, now() - interval '9 days') returning id`,
+    [`LeakFirst ${tag}`],
+  );
+  const { rows: [openSighting] } = await pool.query(
+    "insert into sightings (cat_id, original_key, caught_by_user_id, state, exact_lat, exact_lng) values ($1,'originals/00000000-0000-4000-8000-00000000000a.jpg',$2,'matched',11.246813579,121.135792468) returning id",
+    [openCat.id, donor.id],
+  );
+  await pool.query(
+    "insert into reports (cat_id, sighting_id, claim, note, source, reporter_id, reported_on, check_question) values ($1,$2,'injured',$3,'neighbour',$4,current_date,$5)",
+    [openCat.id, openSighting.id, NOTE, donor.id, `Can you look at the cat near 12 Mabini Street? noteleak-sentinel`],
+  );
+  const { rows: [clearedReport] } = await pool.query(
+    "insert into reports (cat_id, claim, note, source, reporter_id, status, decided_by, decided_at, reported_on) values ($1,'injured',$2,'neighbour',$3,'cleared',$4,now(),current_date) returning id",
+    [movedCat.id, NOTE, flagger.id, staffVet.id],
+  );
+  await pool.query(
+    "insert into cat_priority (cat_id, before_cat_id, report_id, passed_cat_ids, reason) values ($1,$2,$3,$4,$5)",
+    [movedCat.id, firstCat.id, clearedReport.id, [firstCat.id], ECHO_REASON],
+  );
+  await pool.query(
+    `insert into agent_actions (action, inputs, reason, status) values
+       ('set_cat_place', $1, $3, 'done'),
+       ('ask_for_check', $2, $3, 'done')`,
+    [JSON.stringify({ catId: movedCat.id, reportId: clearedReport.id }), JSON.stringify({ catId: openCat.id }), ECHO_REASON],
+  );
+  // The neutered cat's timeline: a dismissed and a confirmed report, and the Treasurer repeating the note.
+  await pool.query(
+    `insert into reports (cat_id, claim, note, source, reporter_id, status, decided_by, decided_at, reported_on) values
+       ($1,'sick',$2,'neighbour',$3,'dismissed',$4,now() - interval '2 days',current_date - 3),
+       ($1,'injured',$2,'neighbour',$5,'confirmed',$4,now() - interval '1 days',current_date - 2)`,
+    [cat.id, NOTE, flagger.id, staff.id, hidden.id],
+  );
+  await pool.query(
+    `insert into agent_actions (action, inputs, reason, status, created_at) values ('ask_for_check', $1, $2, 'done', now() - interval '1 days')`,
+    [JSON.stringify({ catId: cat.id }), ECHO_REASON],
+  );
+
   const { rows: [don] } = await pool.query(
     "insert into donations (user_id, gross, paypal_fee, net, paypal_order_id, status) values ($1,10000,0,10000,$2,'captured') returning id",
     [donor.id, `leak-${tag}`],
@@ -106,8 +175,11 @@ async function main() {
     [cat.id, vet.id, receipt.id],
   );
 
-  const token = await new SignJWT({ role: "donor", username: `leak_${tag}` })
-    .setProtectedHeader({ alg: "HS256" }).setSubject(donor.id).setIssuedAt().setExpirationTime("1h").sign(secret);
+  const sign = (role: string, username: string, id: string) =>
+    new SignJWT({ role, username }).setProtectedHeader({ alg: "HS256" }).setSubject(id).setIssuedAt().setExpirationTime("1h").sign(secret);
+  const token = await sign("donor", `leak_${tag}`, donor.id);
+  const careToken = await sign("caretaker", `leakcare_${tag}`, staff.id);
+  const vetToken = await sign("vet", `leakstaffvet_${tag}`, staffVet.id);
 
   await pool.query(
     `insert into agent_actions (action, inputs, reason, amount, status, approved_by, paypal_ref)
@@ -143,8 +215,13 @@ async function main() {
     [`leakreview-${tag}`, donor.id],
   );
 
-  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/helped", `/api/cats/${cat.id}`, `/cats/${askCat.id}`, `/api/cats/${askCat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/ledger", "/ledger?q=LEAKBATCH", "/impact", "/missions", "/api/ledger", "/api/impact", "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
-  const viewers: [string, Record<string, string>][] = [["anon", {}], ["donor", { cookie: `sf_session=${token}` }]];
+  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/helped", `/api/cats/${cat.id}`, `/cats/${askCat.id}`, `/api/cats/${askCat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/ledger", "/ledger?q=LEAKBATCH", "/impact", "/missions", "/api/ledger", "/api/impact", "/priority", "/api/priority", `/cats/${openCat.id}`, `/api/cats/${openCat.id}`, `/cats/${movedCat.id}`, `/api/cats/${movedCat.id}`, "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
+  const viewers: [string, Record<string, string>][] = [
+    ["anon", {}],
+    ["neighbour", { cookie: `sf_session=${token}` }],
+    ["caretaker", { cookie: `sf_session=${careToken}` }],
+    ["vet", { cookie: `sf_session=${vetToken}` }],
+  ];
   // Another person's name must not be found for any viewer, whatever they answered.
   SENTINELS.push(`leakflagger_${tag}`);
   let bad = 0, checked = 0;
@@ -166,7 +243,7 @@ async function main() {
           const res = await fetch(BASE + p, { headers: { ...base, ...(rsc ? { RSC: "1" } : {}) } });
           const text = await res.text();
           checked++;
-          const hits = SENTINELS.filter((s) => text.includes(s));
+          const hits = SENTINELS.filter((s) => text.includes(s) && !((who === "caretaker" || who === "vet") && STAFF_FIELDS.includes(s)));
           const note = `${who} ${rsc ? "rsc" : "html"} ${p} -> ${res.status} (${text.length} bytes)`;
           if (hits.length) { bad++; console.log(`LEAK ${note}: ${hits.join(", ")}`); } else console.log(`ok   ${note}`);
         }
@@ -195,6 +272,23 @@ async function main() {
       if (!text.includes("#e8a15a")) { bad++; console.log(`FAIL: ${who} home yard did not draw the seeded cat's palette colour`); }
       if (!text.includes(`href="/cats/${askCat.id}"`)) { bad++; console.log(`FAIL: ${who} home yard dropped the cat with a tampered avatar instead of showing the neutral cat`); }
     }
+    // The priority list and the timeline really rendered, so a clean scan means something, and the Treasurer's echo is the fixed line.
+    const priority = await (await fetch(`${BASE}/priority`)).text();
+    const priorityApi = await (await fetch(`${BASE}/api/priority`)).text();
+    for (const need of [`LeakOpen ${tag}`, `LeakMoved ${tag}`, `LeakFirst ${tag}`, "Needs a person first", "Neighbour says hurt", "The Treasurer changed the order after a check."]) {
+      if (!priority.includes(need)) { bad++; console.log(`FAIL: /priority did not carry "${need}"`); }
+    }
+    if (!priorityApi.includes(`LeakMoved ${tag}`)) { bad++; console.log("FAIL: /api/priority did not carry the moved cat"); }
+    const timeline = await (await fetch(`${BASE}/cats/${cat.id}`)).text();
+    for (const need of ["Neighbour reported hurt", "A caretaker checked this report and closed it.", "Treasurer asked a caretaker to check", "The Treasurer asked a caretaker to look at a cat."]) {
+      if (!timeline.includes(need)) { bad++; console.log(`FAIL: the cat page timeline did not carry "${need}"`); }
+    }
+    // A staff desk in the open demo hides a visitor's own note, and the area name stands in for coordinates.
+    for (const [who, c] of [["caretaker", careToken], ["vet", vetToken]] as const) {
+      const desk = await (await fetch(`${BASE}/caretaker`, { headers: { cookie: `sf_session=${c}` } })).text();
+      checked++;
+      if (who === "caretaker" && !desk.includes(`LeakOpen ${tag}`)) { bad++; console.log("FAIL: the caretaker desk did not show the open report, so the scan proved nothing"); }
+    }
     const feed = await (await fetch(`${BASE}/agent`)).text();
     if (!feed.includes("Leak check reason")) { bad++; console.log("FAIL: agent feed did not render the seeded action"); }
     const ledger = await (await fetch(`${BASE}/api/ledger`)).text();
@@ -207,6 +301,11 @@ async function main() {
     const helped = await (await fetch(`${BASE}/helped`, { headers: { cookie: `sf_session=${token}` } })).text();
     if (!helped.includes(`LeakCat ${tag}`)) { bad++; console.log("FAIL: helped page did not render the seeded cat"); }
   } finally {
+    await pool.query("delete from cat_priority where cat_id = any($1)", [[movedCat.id]]);
+    await pool.query("delete from reports where cat_id = any($1)", [[openCat.id, movedCat.id, cat.id]]);
+    await pool.query("delete from agent_actions where inputs->>'catId' = any($1) or reason = $2", [[openCat.id, movedCat.id], ECHO_REASON]);
+    await pool.query("delete from sightings where cat_id = $1", [openCat.id]);
+    await pool.query("delete from cats where id = any($1)", [[openCat.id, movedCat.id, firstCat.id]]);
     await pool.query("delete from review_requests where resolved_by=$1", [donor.id]);
     await pool.query("delete from payouts where booking_id=$1", [booking.id]);
     await pool.query("delete from agent_actions where approved_by=$1", [donor.id]);
@@ -224,6 +323,7 @@ async function main() {
     await pool.query("delete from users where id=$1", [hidden.id]);
     await pool.query("delete from cats where id=$1", [cat.id]);
     await pool.query("delete from users where id=$1", [vet.id]);
+    await pool.query("delete from users where id=any($1)", [[staff.id, staffVet.id]]);
     await pool.query("delete from users where id=$1", [donor.id]);
     await pool.end();
   }
