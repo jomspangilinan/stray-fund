@@ -684,12 +684,15 @@ describe("the public feed filters the treasurer's reasons", () => {
       { action: "set_cat_place", reason: "Tom goes ahead of Kit because a caretaker confirmed Tom is hurt.", status: "done", inputs: { catId: tom.id } },
       { action: "set_cat_place", reason: "Tom goes ahead of Kit because Tom is hurt near Mabini Street.", status: "done", inputs: { catId: tom.id } },
       { action: "set_cat_place", reason: "Tom goes ahead of Kit because Tom has waited 12 days.", status: "done", inputs: { catId: tom.id } },
+      { action: "set_cat_place", reason: "Tom goes ahead of Kit, call 0917 555 0100 for 12 Rizal St.", status: "done", inputs: { catId: tom.id } },
     ]);
     const reasons = (await listAgentActions()).map((a) => a.reason);
     expect(reasons).toContain("Tom goes ahead of Kit because a caretaker confirmed Tom is hurt.");
+    // A day count is allowed. A phone number, a street number and a street are not.
+    expect(reasons).toContain("Tom goes ahead of Kit because Tom has waited 12 days.");
     expect(reasons.filter((r) => r === "The Treasurer changed the order after a check.")).toHaveLength(2);
     expect(JSON.stringify(reasons)).not.toContain("Mabini");
-    expect(JSON.stringify(reasons)).not.toContain("12 days");
+    expect(JSON.stringify(reasons)).not.toContain("0917");
   });
 
   it("the feed route sends the same filtered text", async () => {

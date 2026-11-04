@@ -523,6 +523,22 @@ describe("the priority list", () => {
     expect(row.labels).toEqual(["Neighbour says sick"]);
   });
 
+  it("follows the report's state: an open report may show the Treasurer's question, a confirmed one waits for a vet", async () => {
+    const c = await cat("Bituin");
+    const r = await report(c.id);
+    await db.insert(agentActions).values({
+      action: "ask_for_check",
+      reason: "Bituin may be limping, so a caretaker should look.",
+      status: "done",
+      inputs: { catId: c.id, reportId: r.id, claim: "injured" },
+    });
+    expect((await getPriorityList(NOW)).needsPerson[0].reason).toBe("Bituin may be limping, so a caretaker should look.");
+    await db.update(reports).set({ status: "confirmed", source: "caretaker" }).where(eq(reports.id, r.id));
+    const row = (await getPriorityList(NOW)).needsPerson[0];
+    expect(row.reason).toBe("A caretaker confirmed this. A vet needs to check next.");
+    expect(row.labels).toEqual(["Hurt", "Caretaker confirmed"]);
+  });
+
   it("labels an open staff report by its source, and leaves a dismissed one out", async () => {
     const a = await cat("A2");
     const b = await cat("B2");

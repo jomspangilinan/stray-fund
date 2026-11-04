@@ -912,6 +912,7 @@ const claimTag = (claim: string) => (CLAIM_WORD[claim] ?? claim).replace(/^./, (
 const SAYS: Record<string, string> = { neighbour: "Neighbour says", photo: "Photo suggests", caretaker: "Caretaker says", vet: "Vet says" };
 const ASK_ACTION = "ask_for_check";
 const NEEDS_CHECK = "A person needs to check this first.";
+const WAITING_FOR_VET = "A caretaker confirmed this. A vet needs to check next.";
 
 /**
  * What the Treasurer is doing for each waiting cat. A held cat (a hurt, pregnant or sick report that is open or
@@ -980,15 +981,16 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
     .map((c) => ({ c, h: holdLabels(c.id) }))
     .sort((a, b) => Number(b.h.confirmed) - Number(a.h.confirmed) || a.h.since - b.h.since || a.c.id.localeCompare(b.c.id))
     .map(({ c, h }): PriorityRow => {
-      // An old question counts only while the report it was about still holds the cat.
+      // The Treasurer's question counts only while the report it was about is still open. Once a caretaker confirmed
+      // a report, the cat waits for a vet, whatever was asked before.
       const reportId = askedAbout.get(c.id);
-      const current = reportId != null && reportRows.some((r) => r.id === reportId && r.catId === c.id && ["open", "confirmed"].includes(r.status));
+      const current = reportId != null && !h.confirmed && reportRows.some((r) => r.id === reportId && r.catId === c.id && r.status === "open");
       const asked = current ? reasonOf.get(`${ASK_ACTION}:${c.id}`) : undefined;
       return {
         catId: c.id,
         name: c.name,
         photoUrl: photoOf(c.id),
-        reason: asked === undefined ? NEEDS_CHECK : safe(asked, c.name, "The Treasurer asked a caretaker to look at a cat."),
+        reason: h.confirmed ? WAITING_FOR_VET : asked === undefined ? NEEDS_CHECK : safe(asked, c.name, "The Treasurer asked a caretaker to look at a cat."),
         labels: h.labels,
         position: null,
         fundNote: null,
