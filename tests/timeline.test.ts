@@ -186,6 +186,16 @@ describe("a cat's timeline", () => {
     expect(t.find((e) => e.title === "Dewormed")).toMatchObject({ done: false });
   });
 
+  it("a care step with only a date sorts after the timed events of that Manila day, and before the next day's", async () => {
+    const c = await cat({ status: "neutered", createdAt: new Date(Date.UTC(2026, 10, 1)) });
+    await db.insert(treatments).values({ catId: c.id, type: "neuter", date: "2026-11-09" });
+    await report({ catId: c.id, createdAt: day(9, 0) }); // 08:00 Manila on the 9th
+    await report({ catId: c.id, claim: "sick", createdAt: day(9, 10), reportedOn: "2026-11-09" }); // 18:00 Manila on the 9th
+    await report({ catId: c.id, claim: "pregnant", createdAt: day(9, 17), reportedOn: "2026-11-10" }); // 01:00 Manila on the 10th
+    const done = (await catTimeline(c.id)).filter((e) => e.done).map((e) => e.title);
+    expect(done).toEqual(["First spotted", "Neighbour reported hurt", "Neighbour reported sick", "Neutered", "Neighbour reported pregnant"]);
+  });
+
   it("keeps the first row and the newest ones when the history is long", async () => {
     const c = await cat({ createdAt: new Date(Date.UTC(2026, 8, 1)) });
     for (let i = 0; i < TIMELINE_LIMIT + 8; i++) {

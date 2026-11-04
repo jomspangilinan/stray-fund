@@ -150,8 +150,16 @@ export async function catTimeline(catId: string, journeySteps?: JourneyStep[]): 
     else out.push(entry(s.date ?? null, { kind: "person", title, detail: s.note ?? null }));
   }
 
-  const rank = (e: TimelineEntry) => (e.at === null ? (e.title === "First spotted" ? "" : "￿") : e.at);
-  const done = out.sort((a, b) => rank(a).localeCompare(rank(b)));
+  // By Manila day. Within a day First spotted leads, then the timed events in time order, then a care step that has only
+  // a date, so "Neutered" never reads as earlier than a report made that morning. A spotted date it does not know goes first.
+  const rank = (e: TimelineEntry): [string, number, string] => {
+    if (e.title === "First spotted") return [e.day ?? "", -1, ""];
+    return e.at === null ? ["\uffff", 1, ""] : [e.day ?? e.at, e.at.includes("T") ? 0 : 1, e.at];
+  };
+  const done = out.sort((a, b) => {
+    const [x, y] = [rank(a), rank(b)];
+    return x[0].localeCompare(y[0]) || x[1] - y[1] || x[2].localeCompare(y[2]);
+  });
   // Past the limit the first row stays, so the story still starts at the start.
   const kept = done.length > TIMELINE_LIMIT ? [done[0], ...done.slice(done.length - (TIMELINE_LIMIT - 1))] : done;
   return [...kept, ...todo];
