@@ -13,6 +13,8 @@ import {
   getHelpedEntries,
   getHelped,
   getPriorityList,
+  listAgentActions,
+  noteEchoes,
   getUnallocated,
   journey,
   listCats,
@@ -505,6 +507,78 @@ describe("the priority list", () => {
     expect(by2("Pogi").reason).toBe("The Treasurer changed the order after a check.");
   });
 
+  it("does not show an old question when a new report holds the cat again", async () => {
+    const c = await cat("Bituin");
+    const old = await report(c.id, { status: "cleared", source: "vet" });
+    await db.insert(agentActions).values({
+      action: "ask_for_check",
+      reason: "Bituin may be limping, so a caretaker should look.",
+      status: "done",
+      inputs: { catId: c.id, reportId: old.id, claim: "injured" },
+    });
+    await report(c.id, { claim: "sick" });
+    const row = (await getPriorityList(NOW)).needsPerson[0];
+    expect(row.reason).toBe("A person needs to check this first.");
+    expect(row.labels).toEqual(["Neighbour says sick"]);
+  });
+
+  it("labels an open staff report by its source, and leaves a dismissed one out", async () => {
+    const a = await cat("A2");
+    const b = await cat("B2");
+    await report(a.id, { source: "vet", status: "open" });
+    await report(b.id, { status: "dismissed" });
+    const list = await getPriorityList(NOW);
+    expect(list.needsPerson.map((r) => [r.name, r.labels])).toEqual([["A2", ["Vet says hurt"]]]);
+    expect(names(list.nextToFund)).toEqual(["B2"]);
+    expect(list.nextToFund[0].labels).toEqual([]);
+  });
+
+  it("shows a held cat that is only spotted", async () => {
+    const c = await cat("Nami", { status: "spotted", queuedAt: null });
+    await report(c.id, { claim: "pregnant" });
+    const list = await getPriorityList(NOW);
+    expect(names(list.needsPerson)).toEqual(["Nami"]);
+    expect(list.nextToFund).toEqual([]);
+  });
+
+  it("falls back to the rank reason when a move lapses with its report", async () => {
+    const old = await cat("Mocha", { queuedAt: daysAgo(20) });
+    const kitten = await cat("Pogi", { queuedAt: daysAgo(2) });
+    const checked = await report(kitten.id, { claim: "kitten", status: "confirmed", source: "caretaker" });
+    await db.transaction((tx) => placeCat(tx, { catId: kitten.id, beforeCatId: old.id, reason: "Pogi goes first.", reportId: checked.id }, NOW));
+    expect((await getPriorityList(NOW)).nextToFund[0].reason).toBe("Pogi goes first.");
+    await db.update(reports).set({ status: "dismissed" }).where(eq(reports.id, checked.id));
+    const after = await getPriorityList(NOW);
+    expect(names(after.nextToFund)).toEqual(["Mocha", "Pogi"]);
+    expect(after.nextToFund[1].reason).toMatch(/waits by time in the queue/);
+  });
+
+  it("hides a reason that repeats a report note, on the page and in the feed", async () => {
+    const c = await cat("Bituin");
+    const noted = await report(c.id, { note: "She hides under the red car near the gate" });
+    await db.insert(agentActions).values({
+      action: "ask_for_check",
+      reason: "Bituin hides under the red car, so a caretaker should look.",
+      status: "done",
+      inputs: { catId: c.id, reportId: noted.id },
+    });
+    const row = (await getPriorityList(NOW)).needsPerson[0];
+    expect(row.reason).toBe("The Treasurer asked a caretaker to look at a cat.");
+    expect((await listAgentActions())[0].reason).toBe("The Treasurer asked a caretaker to look at a cat.");
+    await db.update(agentActions).set({ reason: "Bituin was by the red car, so a caretaker should look." });
+    expect((await getPriorityList(NOW)).needsPerson[0].reason).toBe("Bituin was by the red car, so a caretaker should look.");
+  });
+
+  it("noteEchoes needs four words in a row", () => {
+    const note = "She hides under the red car near the gate!";
+    expect(noteEchoes("It hides under the red car.", [note])).toBe(true);
+    expect(noteEchoes("HIDES, under the RED car", [note])).toBe(true);
+    expect(noteEchoes("She is near the red car", [note])).toBe(false);
+    expect(noteEchoes("Under the red car is a hint", [note])).toBe(true);
+    expect(noteEchoes("under the red", [note])).toBe(false);
+    expect(noteEchoes("anything at all here", [])).toBe(false);
+  });
+
   it("says what the fund can cover on the first cat only", async () => {
     await cat("Mocha");
     await cat("Pogi");
@@ -541,6 +615,6 @@ describe("the priority list", () => {
     expect(html).toContain(`href="/cats/${h.id}"`);
     expect(html).not.toContain("—");
     const empty = renderToStaticMarkup(createElement(PriorityList, { initial: { needsPerson: [], nextToFund: [] } }));
-    expect(empty).toContain("No cats are waiting right now.");
+    expect(empty).toContain("No cats need funding or a check right now.");
   });
 });

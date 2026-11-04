@@ -16,7 +16,7 @@ function tagClass(label: string): string {
 
 function Row({ row }: { row: PriorityRow }) {
   return (
-    <li>
+    <li className="min-w-0">
       <Link href={`/cats/${row.catId}`} className="press row !items-start !py-3">
         <span className="relative mt-0.5 h-[52px] w-[52px] flex-none overflow-hidden rounded-in">
           <CatPhoto url={row.photoUrl} name={row.name} sizes="52px" />
@@ -33,7 +33,7 @@ function Row({ row }: { row: PriorityRow }) {
             )}
             <span className="min-w-0 truncate text-base font-bold leading-tight">{row.name}</span>
           </span>
-          <span className="mt-1 block leading-snug">{row.reason}</span>
+          <span className="mt-1 block [overflow-wrap:anywhere] leading-snug">{row.reason}</span>
           {row.fundNote && <span className="small mt-1 block font-bold text-main">{row.fundNote}</span>}
           {row.labels.length > 0 && (
             <span className="mt-2 flex flex-wrap gap-1.5">
@@ -101,7 +101,7 @@ export function PriorityList({ initial }: { initial: PriorityData }) {
       )}
       {empty ? (
         <div className="card mt-5">
-          <p className="font-bold">No cats are waiting right now.</p>
+          <p className="font-bold">No cats need funding or a check right now.</p>
           <p className="mt-1 soft">When someone spots a cat, it shows up here.</p>
           <Link href="/spot" className="btn mt-4">
             Spot a cat

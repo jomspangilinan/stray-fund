@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { COLONY } from "@/lib/config";
 import { NEUTRAL_AVATAR, parseAvatar } from "@/lib/avatar";
 import { goalPercent } from "@/lib/goal";
@@ -372,7 +372,24 @@ const GUARDED_REASONS: Record<string, string> = {
  * reason that weighs one cat against another has to name both, and a name is not a stray capital. Digits, address
  * words and area names still fail. Names that are themselves unsafe are not taken out. Task 5 reuses this.
  */
-export function reasonIsSafe(reason: string, catName: string, knownNames: readonly string[]): boolean {
+const words = (text: string): string[] => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+const NOTE_ECHO_WORDS = 4;
+
+/** Whether a reason repeats a note: four or more words in a row in common, ignoring case and punctuation. */
+export function noteEchoes(reason: string, notes: readonly string[]): boolean {
+  const r = words(reason);
+  if (r.length < NOTE_ECHO_WORDS) return false;
+  const grams = new Set<string>();
+  for (const note of notes) {
+    const n = words(note);
+    for (let i = 0; i + NOTE_ECHO_WORDS <= n.length; i++) grams.add(n.slice(i, i + NOTE_ECHO_WORDS).join(" "));
+  }
+  for (let i = 0; i + NOTE_ECHO_WORDS <= r.length; i++) if (grams.has(r.slice(i, i + NOTE_ECHO_WORDS).join(" "))) return true;
+  return false;
+}
+
+export function reasonIsSafe(reason: string, catName: string, knownNames: readonly string[], notes: readonly string[] = []): boolean {
+  if (noteEchoes(reason, notes)) return false;
   let text = reason;
   const names = [...new Set([catName, ...knownNames].map((n) => n.trim()).filter((n) => n && nameIsSafe(n)))].sort((a, b) => b.length - a.length);
   for (const n of names) {
@@ -382,12 +399,12 @@ export function reasonIsSafe(reason: string, catName: string, knownNames: readon
   return bioIsSafe(text, "");
 }
 
-export function publicAgentAction(row: AgentActionInput, knownNames: readonly string[] = []): PublicAgentAction {
+export function publicAgentAction(row: AgentActionInput, knownNames: readonly string[] = [], notes: readonly string[] = []): PublicAgentAction {
   const fallback = GUARDED_REASONS[row.action];
   return {
     id: row.id,
     action: ACTION_LABEL[row.action] ?? "Treasurer action",
-    reason: fallback !== undefined && !reasonIsSafe(row.reason, row.cat ?? "", knownNames) ? fallback : row.reason,
+    reason: fallback !== undefined && !reasonIsSafe(row.reason, row.cat ?? "", knownNames, notes) ? fallback : row.reason,
     amount: row.amount ?? null,
     status: ACTION_STATUS_LABEL[row.status] ?? "Recorded",
     refused: ["denied", "failed", "rejected"].includes(row.status),
@@ -405,7 +422,7 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
   // Cat names are public. A reason that weighs one cat against another names both.
   const knownNames = (await db.select({ name: cats.name }).from(cats)).map((c) => c.name);
   const { rows } = await db.execute(sql`
-    select a.id, a.action, a.reason, a.amount, a.status, a.paypal_ref, a.created_at, c.name as cat,
+    select a.id, a.action, a.reason, a.amount, a.status, a.paypal_ref, a.created_at, c.name as cat, c.id as cat_id,
            (a.approved_by is not null) as approved_by_person
     from agent_actions a
     left join payouts p on p.action_id = a.id
@@ -418,7 +435,7 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
     order by a.created_at desc, a.id desc
     limit ${Math.min(Math.max(1, Math.trunc(limit)), MAX_AGENT_ACTIONS)}
   `);
-  return (rows as {
+  const feed = (rows as {
     id: string;
     action: string;
     reason: string;
@@ -427,8 +444,13 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
     paypal_ref: string | null;
     created_at: Date | string;
     cat: string | null;
+    cat_id: string | null;
     approved_by_person: boolean;
-  }[]).map((r) =>
+  }[]);
+  // A reason must not repeat a note on its own cat's reports.
+  const noteRows = await db.select({ catId: reports.catId, note: reports.note }).from(reports).where(isNotNull(reports.note));
+  const notesOf = (catId: string | null) => noteRows.filter((n) => n.catId === catId).map((n) => n.note as string);
+  return feed.map((r) =>
     publicAgentAction(
       {
       id: r.id,
@@ -442,6 +464,7 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
       signedOffByPerson: r.approved_by_person === true,
       },
       knownNames,
+      notesOf(r.cat_id),
     ),
   );
 }
@@ -846,7 +869,7 @@ export type PriorityList = { needsPerson: PriorityRow[]; nextToFund: PriorityRow
 
 const CLAIM_WORD: Record<string, string> = { injured: "hurt", pregnant: "pregnant", sick: "sick", kitten: "kitten" };
 const claimTag = (claim: string) => (CLAIM_WORD[claim] ?? claim).replace(/^./, (c) => c.toUpperCase());
-const SAYS: Record<string, string> = { neighbour: "Neighbour says", photo: "Photo suggests" };
+const SAYS: Record<string, string> = { neighbour: "Neighbour says", photo: "Photo suggests", caretaker: "Caretaker says", vet: "Vet says" };
 const ASK_ACTION = "ask_for_check";
 const NEEDS_CHECK = "A person needs to check this first.";
 
@@ -868,12 +891,12 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
 
   const [reportRows, actionRows, sights, knownNames, pool, limits] = await Promise.all([
     db
-      .select({ catId: reports.catId, claim: reports.claim, source: reports.source, status: reports.status, createdAt: reports.createdAt })
+      .select({ id: reports.id, catId: reports.catId, note: reports.note, claim: reports.claim, source: reports.source, status: reports.status, createdAt: reports.createdAt })
       .from(reports)
       .where(and(inArray(reports.catId, ids), inArray(reports.status, ["open", "confirmed", "cleared"])))
       .orderBy(asc(reports.createdAt), asc(reports.id)),
     db.execute(sql`
-      select distinct on (a.action, a.inputs->>'catId') a.action, a.inputs->>'catId' as cat_id, a.reason
+      select distinct on (a.action, a.inputs->>'catId') a.action, a.inputs->>'catId' as cat_id, a.inputs->>'reportId' as report_id, a.reason
       from agent_actions a
       where a.action in (${SET_PLACE_ACTION}, ${ASK_ACTION})
         and a.inputs->>'catId' in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})
@@ -886,8 +909,14 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
   ]);
 
   const reasonOf = new Map<string, string>();
-  for (const a of actionRows.rows as { action: string; cat_id: string; reason: string }[]) reasonOf.set(`${a.action}:${a.cat_id}`, a.reason);
-  const safe = (reason: string, name: string, fallback: string) => (reasonIsSafe(reason, name, knownNames) ? reason : fallback);
+  const askedAbout = new Map<string, string | null>();
+  for (const a of actionRows.rows as { action: string; cat_id: string; report_id: string | null; reason: string }[]) {
+    reasonOf.set(`${a.action}:${a.cat_id}`, a.reason);
+    if (a.action === ASK_ACTION) askedAbout.set(a.cat_id, a.report_id);
+  }
+  const notesOf = (id: string) => reportRows.filter((r) => r.catId === id && r.note !== null).map((r) => r.note as string);
+  const safe = (reason: string, name: string, id: string, fallback: string) =>
+    reasonIsSafe(reason, name, knownNames, notesOf(id)) ? reason : fallback;
   const photoOf = (id: string) => {
     const photo = sights.filter((s) => s.catId === id).reverse().find((s) => s.publicReady && s.publicKey);
     return photoUrl(photo?.publicKey ?? null);
@@ -900,22 +929,25 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
     const labels = [...new Set(confirmed.map((r) => claimTag(r.claim)))];
     if (confirmed.length) labels.push("Caretaker confirmed");
     for (const r of open) {
-      const l = `${SAYS[r.source] ?? SAYS.neighbour} ${CLAIM_WORD[r.claim]}`;
+      const l = `${SAYS[r.source]} ${CLAIM_WORD[r.claim]}`;
       if (!labels.includes(l)) labels.push(l);
     }
-    return { labels, confirmed: confirmed.length > 0, since: Math.min(...mine.map((r) => r.createdAt.getTime())) };
+    return { labels, confirmed: confirmed.length > 0, since: mine.length ? Math.min(...mine.map((r) => r.createdAt.getTime())) : 0 };
   };
 
   const needsPerson = heldRows
     .map((c) => ({ c, h: holdLabels(c.id) }))
     .sort((a, b) => Number(b.h.confirmed) - Number(a.h.confirmed) || a.h.since - b.h.since || a.c.id.localeCompare(b.c.id))
     .map(({ c, h }): PriorityRow => {
-      const asked = reasonOf.get(`${ASK_ACTION}:${c.id}`);
+      // An old question counts only while the report it was about still holds the cat.
+      const reportId = askedAbout.get(c.id);
+      const current = reportId != null && reportRows.some((r) => r.id === reportId && r.catId === c.id && ["open", "confirmed"].includes(r.status));
+      const asked = current ? reasonOf.get(`${ASK_ACTION}:${c.id}`) : undefined;
       return {
         catId: c.id,
         name: c.name,
         photoUrl: photoOf(c.id),
-        reason: asked === undefined ? NEEDS_CHECK : safe(asked, c.name, "The Treasurer asked a caretaker to look at a cat."),
+        reason: asked === undefined ? NEEDS_CHECK : safe(asked, c.name, c.id, "The Treasurer asked a caretaker to look at a cat."),
         labels: h.labels,
         position: null,
         fundNote: null,
@@ -932,7 +964,7 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
       catId: o.cat.id,
       name: o.cat.name,
       photoUrl: photoOf(o.cat.id),
-      reason: placed === undefined ? o.why : safe(placed, o.cat.name, "The Treasurer changed the order after a check."),
+      reason: placed === undefined ? o.why : safe(placed, o.cat.name, o.cat.id, "The Treasurer changed the order after a check."),
       labels: vetReady ? ["Vet ready"] : [],
       position: i + 1,
       fundNote: i === 0 ? firstNote : null,

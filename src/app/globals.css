@@ -1101,10 +1101,15 @@ input[type="checkbox"] {
     background-color 120ms var(--ease-out),
     color 120ms var(--ease-out);
 }
-/* Four labels share the width, so they get a little less padding and type. */
-.seg:has(a:nth-child(4)) a {
-  padding: 0 0.125rem;
-  font-size: 0.9375rem;
+/* Four labels need the whole row, so the action drops under the switch. */
+.page-switch-wide {
+  flex-wrap: wrap;
+}
+.page-switch-wide .seg {
+  flex-basis: 100%;
+}
+.page-switch-wide .btn-pop {
+  margin-left: auto;
 }
 .seg a[aria-current="page"] {
   background: var(--surface);
