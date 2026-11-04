@@ -39,7 +39,7 @@ describe("checkSpend", () => {
   const retireWorldBooking = () => db.update(bookings).set({ status: "completed" }).where(eq(bookings.id, w.booking.id));
 
   it("allows a valid deposit", async () => {
-    expect(await check(depositRequest(w))).toEqual({ verdict: "allow" });
+    expect(await check(depositRequest(w))).toEqual({ verdict: "needs_approval" });
   });
 
   it("refuses a non-positive or fractional amount outright", async () => {
@@ -49,9 +49,27 @@ describe("checkSpend", () => {
   });
 
   describe("approval threshold", () => {
-    it("needs approval only strictly above the threshold", async () => {
-      expect(await check(depositRequest(w, 200000))).toEqual({ verdict: "allow" });
+    it("needs approval for a deposit whatever its amount", async () => {
+      expect(await check(depositRequest(w, 1))).toEqual({ verdict: "needs_approval" });
+      expect(await check(depositRequest(w, 200000))).toEqual({ verdict: "needs_approval" });
       expect(await check(depositRequest(w, 200001))).toEqual({ verdict: "needs_approval" });
+    });
+
+    it("keeps the threshold for a balance: strictly above needs approval", async () => {
+      await addPayout(w, { amount: 1000, status: "succeeded" });
+      const receipt = await addReceipt(w.booking.id);
+      const balance = (amount: number) => ({ ...depositRequest(w, amount), kind: "balance" as const, receiptId: receipt.id });
+      expect(await check(balance(200000))).toEqual({ verdict: "allow" });
+      expect(await check(balance(200001))).toEqual({ verdict: "needs_approval" });
+    });
+
+    it("still denies a deposit that breaks a rule, however small", async () => {
+      expect(await check(depositRequest(w, 250001))).toEqual(denied("OVER_CAT_CAP"));
+    });
+
+    it("lets the approval step of a small deposit pass", async () => {
+      const p = await addPayout(w, { amount: 1000, status: "awaiting_approval" });
+      expect(await check(depositRequest(w, 1000), { approvingPayoutId: p.id })).toEqual({ verdict: "allow" });
     });
 
     it("runs deny checks first", async () => {
@@ -127,7 +145,7 @@ describe("checkSpend", () => {
 
     it("allows a new payout after one failed", async () => {
       await addPayout(w, { amount: 100, status: "failed" });
-      expect(await check(depositRequest(w))).toEqual({ verdict: "allow" });
+      expect(await check(depositRequest(w))).toEqual({ verdict: "needs_approval" });
     });
 
     it("denies a new payout after a caretaker rejected one, since that needs a person", async () => {
@@ -158,7 +176,7 @@ describe("checkSpend", () => {
     });
 
     it("does not ask a deposit for a confirmed ear-tip", async () => {
-      expect(await check(depositRequest(w))).toEqual({ verdict: "allow" });
+      expect(await check(depositRequest(w))).toEqual({ verdict: "needs_approval" });
     });
 
     it("denies without a receipt", async () => {
@@ -202,7 +220,7 @@ describe("checkSpend", () => {
       await fundCat(w.cat.id, 1000000);
       const other = await makeBooking(w.cat.id, w.vet.id, "completed");
       await addPayout({ ...w, booking: other }, { amount: 100000, status: "succeeded" });
-      expect(await check(depositRequest(w, 150000))).toEqual({ verdict: "allow" });
+      expect(await check(depositRequest(w, 150000))).toEqual({ verdict: "needs_approval" });
       expect(await check(depositRequest(w, 150001))).toEqual(denied("OVER_CAT_CAP"));
     });
 
@@ -211,7 +229,7 @@ describe("checkSpend", () => {
       const b = await makeBooking(w.cat.id, w.vet.id, "completed");
       await addPayout({ ...w, booking: a }, { amount: 240000, status: "failed" });
       await addPayout({ ...w, booking: b }, { amount: 240000, status: "rejected" });
-      expect(await check(depositRequest(w, 200000))).toEqual({ verdict: "allow" });
+      expect(await check(depositRequest(w, 200000))).toEqual({ verdict: "needs_approval" });
     });
   });
 
@@ -239,7 +257,7 @@ describe("checkSpend", () => {
       });
       await setGuardrails({ maxPerDay: 145000 });
 
-      expect(await check(depositRequest(w, 45000))).toEqual({ verdict: "allow" });
+      expect(await check(depositRequest(w, 45000))).toEqual({ verdict: "needs_approval" });
       expect(await check(depositRequest(w, 45001))).toEqual(denied("OVER_DAY_CAP"));
     });
 
@@ -260,7 +278,7 @@ describe("checkSpend", () => {
         lastAttemptAt: longAgo,
       });
       await setGuardrails({ maxPerDay: 145000 });
-      expect(await check(depositRequest(w, 45000))).toEqual({ verdict: "allow" });
+      expect(await check(depositRequest(w, 45000))).toEqual({ verdict: "needs_approval" });
       expect(await check(depositRequest(w, 45001))).toEqual(denied("OVER_DAY_CAP"));
     });
 
@@ -270,14 +288,14 @@ describe("checkSpend", () => {
       await addPayout(w2, { amount: 900000, status: "failed" });
       await addPayout(w3, { amount: 900000, status: "rejected" });
       await setGuardrails({ maxPerDay: 45000 });
-      expect(await check(depositRequest(w, 45000))).toEqual({ verdict: "allow" });
+      expect(await check(depositRequest(w, 45000))).toEqual({ verdict: "needs_approval" });
     });
 
     it("counts in-flight payouts from other cats", async () => {
       const w2 = await makeWorld();
       await addPayout(w2, { amount: 20000, status: "awaiting_approval" });
       await setGuardrails({ maxPerDay: 60000 });
-      expect(await check(depositRequest(w, 40000))).toEqual({ verdict: "allow" });
+      expect(await check(depositRequest(w, 40000))).toEqual({ verdict: "needs_approval" });
       expect(await check(depositRequest(w, 40001))).toEqual(denied("OVER_DAY_CAP"));
     });
   });
@@ -289,7 +307,7 @@ describe("checkSpend", () => {
       await addPayout({ ...w2, booking: other }, { amount: 30000, status: "succeeded" });
       const third = await makeBooking(w2.cat.id, w2.vet.id, "completed");
       await addPayout({ ...w2, booking: third }, { amount: 20000, status: "queued" });
-      expect(await check(depositRequest(w2, 50000))).toEqual({ verdict: "allow" });
+      expect(await check(depositRequest(w2, 50000))).toEqual({ verdict: "needs_approval" });
       expect(await check(depositRequest(w2, 50001))).toEqual(denied("OVER_ALLOCATION"));
     });
 
@@ -298,7 +316,7 @@ describe("checkSpend", () => {
       await db
         .insert(allocations)
         .values({ donationId, catId: w.cat.id, purpose: "vet", amount: -210000 });
-      expect(await check(depositRequest(w, 40000))).toEqual({ verdict: "allow" });
+      expect(await check(depositRequest(w, 40000))).toEqual({ verdict: "needs_approval" });
       expect(await check(depositRequest(w, 40001))).toEqual(denied("OVER_ALLOCATION"));
     });
 
@@ -319,7 +337,7 @@ describe("checkSpend", () => {
         .set({ status: "refunded" })
         .where(eq(donations.id, alloc.donationId));
       expect(await check(depositRequest(w, 150001))).toEqual(denied("OVER_ALLOCATION"));
-      expect(await check(depositRequest(w, 150000))).toEqual({ verdict: "allow" });
+      expect(await check(depositRequest(w, 150000))).toEqual({ verdict: "needs_approval" });
     });
   });
 

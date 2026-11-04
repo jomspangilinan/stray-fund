@@ -25,6 +25,7 @@ import {
   depositRequest,
   makeBooking,
   makeCaretaker,
+  requestAndApprove,
   makeVet,
   makeWorld,
   setGuardrails,
@@ -163,7 +164,7 @@ describe("money gate", () => {
         const gw = new FakeGateway();
         const request = await build(gw);
         const before = (await db.select().from(payouts)).length;
-        const res = await requestPayout(request, gw);
+        const res = await requestAndApprove(request, gw);
 
         expect(res).toMatchObject({ status: "rejected", code });
         expect(res.payoutId).toBeUndefined();
@@ -188,7 +189,7 @@ describe("money gate", () => {
   describe("sending", () => {
     it("sends with the payout id as sender batch id and the payee's email, then records the batch", async () => {
       const gw = new FakeGateway([SENT("B-1")]);
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
 
       expect(res.status).toBe("sent");
       expect(gw.calls).toEqual([
@@ -229,7 +230,7 @@ describe("money gate", () => {
           ]);
           seen += 1;
         };
-        const res = await requestPayout(ask(w), gw);
+        const res = await requestAndApprove(ask(w), gw);
         expect(res.status).toBe("sent");
         expect(seen).toBe(1);
       } finally {
@@ -241,7 +242,7 @@ describe("money gate", () => {
       await addPayout(w, { amount: 45000, status: "succeeded" });
       const receipt = await addReceipt(w.booking.id);
       const gw = new FakeGateway();
-      const res = await requestPayout(
+      const res = await requestAndApprove(
         { ...ask(w, 105000), kind: "balance", receiptId: receipt.id },
         gw,
       );
@@ -251,7 +252,7 @@ describe("money gate", () => {
 
     it("first-attempt rejection fails the payout and frees the reservation", async () => {
       const gw = new FakeGateway([REJECTED]);
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
       expect(res.status).toBe("failed");
       expect((await actionRow(res.actionId)).status).toBe("failed");
       expect(await reserved()).toBe(0);
@@ -261,7 +262,7 @@ describe("money gate", () => {
     });
 
     it("a move to sent enqueues no wakeup", async () => {
-      await requestPayout(ask(w), new FakeGateway());
+      await requestAndApprove(ask(w), new FakeGateway());
       expect(await allWakeups()).toEqual([]);
     });
 
@@ -434,8 +435,8 @@ describe("money gate", () => {
       const gw = new FakeGateway();
       gw.onCreate = () => new Promise((r) => setTimeout(r, 50));
       const results = await Promise.all([
-        requestPayout(ask(w), gw),
-        requestPayout(ask(w), gw),
+        requestAndApprove(ask(w), gw),
+        requestAndApprove(ask(w), gw),
       ]);
 
       expect(new Set(hooks.pids).size).toBe(2);
@@ -447,7 +448,7 @@ describe("money gate", () => {
 
     it("the row's ids win over anything a caller put in inputs", async () => {
       await addPayout(w, { amount: 45000, status: "sent" });
-      const res = await requestPayout(
+      const res = await requestAndApprove(
         { ...ask(w), inputs: { bookingId: "forged", code: "forged" } },
         new FakeGateway(),
       );
@@ -493,8 +494,8 @@ describe("money gate", () => {
       hooks.forceAllow = true;
       const gw = new FakeGateway();
       const results = await Promise.all([
-        requestPayout(ask(w), gw),
-        requestPayout(ask(w), gw),
+        requestAndApprove(ask(w), gw),
+        requestAndApprove(ask(w), gw),
       ]);
 
       expect(gw.calls).toHaveLength(1);
@@ -532,7 +533,7 @@ describe("money gate", () => {
 
     it("concurrent sweeps send a stuck payout once", async () => {
       const first = new FakeGateway([UNKNOWN]);
-      const res = await requestPayout(ask(w), first);
+      const res = await requestAndApprove(ask(w), first);
       await ageQueuedPayouts();
 
       const gw = new FakeGateway();
@@ -546,7 +547,7 @@ describe("money gate", () => {
   describe("lost responses", () => {
     it("lost response keeps money reserved; retry reuses the id; a rejection becomes needs_review", async () => {
       const gw = new FakeGateway([UNKNOWN, UNKNOWN, REJECTED]);
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
       expect(res.status).toBe("queued");
       expect(await reserved()).toBe(45000);
 
@@ -571,13 +572,13 @@ describe("money gate", () => {
       await retryUnknownPayouts(gw);
       expect(gw.calls).toHaveLength(3);
       // The reservation also blocks a replacement payout.
-      const again = await requestPayout(ask(w), gw);
+      const again = await requestAndApprove(ask(w), gw);
       expect(again.code).toBe("DUPLICATE_PAYOUT");
     });
 
     it("keeps the last gateway error on the row, and enqueues nothing while still queued", async () => {
       const gw = new FakeGateway([{ kind: "unknown", error: "first" }, { kind: "unknown", error: "second" }]);
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
       expect((await payoutRow(res.payoutId!)).lastGatewayError).toBe("first");
       await ageQueuedPayouts();
       await retryUnknownPayouts(gw);
@@ -592,7 +593,7 @@ describe("money gate", () => {
         await ageQueuedPayouts();
         await retryUnknownPayouts(sweepGw);
       };
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
 
       expect(res.status).toBe("queued");
       expect(sweepGw.calls[0].senderBatchId).toBe(res.payoutId);
@@ -612,7 +613,7 @@ describe("money gate", () => {
         await ageQueuedPayouts();
         await retryUnknownPayouts(sweepGw);
       };
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
       expect((await payoutRow(res.payoutId!)).lastGatewayError).toBe("newer");
     });
 
@@ -623,7 +624,7 @@ describe("money gate", () => {
         await ageQueuedPayouts();
         await retryUnknownPayouts(sweepGw);
       };
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
 
       expect(res.status).toBe("sent");
       expect(await payoutRow(res.payoutId!)).toMatchObject({
@@ -642,7 +643,7 @@ describe("money gate", () => {
         await retryUnknownPayouts(sweepGw);
         expect((await payoutRow(gw.calls[0].senderBatchId)).status).toBe("needs_review");
       };
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
 
       expect(res.status).toBe("sent");
       expect(await payoutRow(res.payoutId!)).toMatchObject({
@@ -666,7 +667,7 @@ describe("money gate", () => {
 
     it("a late sent on a failed row keeps the evidence and asks for a person, without reviving it", async () => {
       const error = vi.spyOn(console, "error").mockImplementation(() => {});
-      const res = await requestPayout(ask(w), failedWhileInFlight(SENT("B-late")));
+      const res = await requestAndApprove(ask(w), failedWhileInFlight(SENT("B-late")));
 
       expect(res.status).toBe("failed");
       const row = await payoutRow(res.payoutId!);
@@ -687,7 +688,7 @@ describe("money gate", () => {
 
     it("a duplicate with a batch id on a failed row is handled the same way", async () => {
       const error = vi.spyOn(console, "error").mockImplementation(() => {});
-      const res = await requestPayout(ask(w), failedWhileInFlight(DUPLICATE("B-dup")));
+      const res = await requestAndApprove(ask(w), failedWhileInFlight(DUPLICATE("B-dup")));
       expect(await payoutRow(res.payoutId!)).toMatchObject({
         status: "failed",
         paypalPayoutBatchId: "B-dup",
@@ -698,7 +699,7 @@ describe("money gate", () => {
 
     it("a duplicate with no batch id on a failed row flags it and asks for a person", async () => {
       const error = vi.spyOn(console, "error").mockImplementation(() => {});
-      const res = await requestPayout(ask(w), failedWhileInFlight(DUPLICATE()));
+      const res = await requestAndApprove(ask(w), failedWhileInFlight(DUPLICATE()));
       const row = await payoutRow(res.payoutId!);
       expect(row).toMatchObject({ status: "failed", paypalPayoutBatchId: null });
       expect(row.lastGatewayError).toBe(`${BATCH_EXISTS_FLAG}: ${DUPLICATE_ERROR}`);
@@ -736,7 +737,7 @@ describe("money gate", () => {
       const error = vi.spyOn(console, "error").mockImplementation(() => {});
       const w2 = await makeWorld();
       await addPayout(w2, { amount: 1, status: "sent", batchId: "B-taken" });
-      const res = await requestPayout(ask(w), failedWhileInFlight(SENT("B-taken")));
+      const res = await requestAndApprove(ask(w), failedWhileInFlight(SENT("B-taken")));
       expect((await payoutRow(res.payoutId!)).paypalPayoutBatchId).toBeNull();
       expect(await allWakeups()).toHaveLength(1);
       error.mockRestore();
@@ -751,7 +752,7 @@ describe("money gate", () => {
         await retryUnknownPayouts(sweepGw);
         await db.update(payouts).set({ paypalPayoutBatchId: "B-first" }).where(eq(payouts.id, i.senderBatchId));
       };
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
       expect(await payoutRow(res.payoutId!)).toMatchObject({
         status: "sent",
         paypalPayoutBatchId: "B-first",
@@ -804,7 +805,7 @@ describe("money gate", () => {
       it.each(REPLIES)("on a retry, %s goes to needs_review, keeps the reservation and is never sent again", async (_n, reply) => {
         // The first send is lost (a timeout), the retry meets the reply.
         const sent = livePayPal([() => json(500, { name: "INTERNAL_SERVICE_ERROR" }), reply]);
-        const res = await requestPayout(ask(w), restPayoutGateway);
+        const res = await requestAndApprove(ask(w), restPayoutGateway);
         expect(res.status).toBe("queued");
         await ageQueuedPayouts();
         await retryUnknownPayouts(restPayoutGateway);
@@ -820,14 +821,14 @@ describe("money gate", () => {
         await retryUnknownPayouts(restPayoutGateway);
         expect(sent).toHaveLength(2);
         // Nor can the booking be asked for a second time while this one is live.
-        const again = await requestPayout(ask(w), new FakeGateway());
+        const again = await requestAndApprove(ask(w), new FakeGateway());
         expect(again).toMatchObject({ status: "rejected", code: "DUPLICATE_PAYOUT" });
         expect(await db.select().from(payouts)).toHaveLength(1);
       });
 
       it("on a first attempt the same replies are a refusal that never reached PayPal's books, so failed is still right", async () => {
         livePayPal([() => json(422, { name: "UNPROCESSABLE_ENTITY" })]);
-        const res = await requestPayout(ask(w), restPayoutGateway);
+        const res = await requestAndApprove(ask(w), restPayoutGateway);
         expect(res.status).toBe("failed");
         expect(await reserved()).toBe(0);
       });
@@ -836,7 +837,7 @@ describe("money gate", () => {
     describe("duplicate results", () => {
       it("on a retry, a batch id moves the row to sent, and reconcile settles it for real", async () => {
         const gw = new FakeGateway([UNKNOWN, DUPLICATE("B-dup")]);
-        const res = await requestPayout(ask(w), gw);
+        const res = await requestAndApprove(ask(w), gw);
         await ageQueuedPayouts();
         await retryUnknownPayouts(gw);
 
@@ -855,7 +856,7 @@ describe("money gate", () => {
       });
 
       it("on a first attempt, a batch id also moves the row to sent, never failed", async () => {
-        const res = await requestPayout(ask(w), new FakeGateway([DUPLICATE("B-dup")]));
+        const res = await requestAndApprove(ask(w), new FakeGateway([DUPLICATE("B-dup")]));
         expect(res.status).toBe("sent");
         expect(await payoutRow(res.payoutId!)).toMatchObject({
           status: "sent",
@@ -866,7 +867,7 @@ describe("money gate", () => {
 
       it("on a retry, no batch id goes to needs_review, flagged, and not_paid is refused", async () => {
         const gw = new FakeGateway([UNKNOWN, DUPLICATE()]);
-        const res = await requestPayout(ask(w), gw);
+        const res = await requestAndApprove(ask(w), gw);
         await ageQueuedPayouts();
         await retryUnknownPayouts(gw);
 
@@ -883,7 +884,7 @@ describe("money gate", () => {
       });
 
       it("on a first attempt, no batch id also goes to needs_review, never failed", async () => {
-        const res = await requestPayout(ask(w), new FakeGateway([DUPLICATE()]));
+        const res = await requestAndApprove(ask(w), new FakeGateway([DUPLICATE()]));
         expect(res.status).toBe("needs_review");
         expect(await reserved()).toBe(45000);
         expect((await payoutRow(res.payoutId!)).lastGatewayError).toContain(BATCH_EXISTS_FLAG);
@@ -896,7 +897,7 @@ describe("money gate", () => {
           await ageQueuedPayouts();
           await retryUnknownPayouts(sweepGw);
         };
-        const res = await requestPayout(ask(w), gw);
+        const res = await requestAndApprove(ask(w), gw);
         expect((await payoutRow(res.payoutId!)).lastGatewayError).toContain(BATCH_EXISTS_FLAG);
         // Only the move to needs_review woke anyone.
         await expectOneWakeup(res.payoutId!, "needs_review", "queued");
@@ -909,7 +910,7 @@ describe("money gate", () => {
           await ageQueuedPayouts();
           await retryUnknownPayouts(sweepGw);
         };
-        const res = await requestPayout(ask(w), gw);
+        const res = await requestAndApprove(ask(w), gw);
         expect(res.status).toBe("needs_review");
       });
 
@@ -920,7 +921,7 @@ describe("money gate", () => {
           await ageQueuedPayouts();
           await retryUnknownPayouts(sweepGw);
         };
-        const res = await requestPayout(ask(w), gw);
+        const res = await requestAndApprove(ask(w), gw);
         expect(res.status).toBe("sent");
         expect((await payoutRow(res.payoutId!)).paypalPayoutBatchId).toBe("B-1");
       });
@@ -928,7 +929,7 @@ describe("money gate", () => {
 
     it("a retry that lands records the batch", async () => {
       const gw = new FakeGateway([UNKNOWN, SENT("B-2")]);
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
       await ageQueuedPayouts();
       await retryUnknownPayouts(gw);
       expect(await payoutRow(res.payoutId!)).toMatchObject({
@@ -940,7 +941,7 @@ describe("money gate", () => {
 
     it("moves to needs_review after 5 retries still unknown, and never sends a sixth", async () => {
       const gw = new FakeGateway(Array.from({ length: 10 }, () => UNKNOWN));
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
       for (let retry = 1; retry <= 4; retry++) {
         await ageQueuedPayouts();
         await retryUnknownPayouts(gw);
@@ -961,14 +962,14 @@ describe("money gate", () => {
 
     it("a gateway that throws is treated as unknown, and money stays reserved", async () => {
       const gw = new FakeGateway([new Error("socket hang up")]);
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
       expect(res.status).toBe("queued");
       expect(await reserved()).toBe(45000);
     });
 
     it("does not retry a payout attempted within the last 30 seconds", async () => {
       const gw = new FakeGateway([UNKNOWN]);
-      await requestPayout(ask(w), gw);
+      await requestAndApprove(ask(w), gw);
       await retryUnknownPayouts(gw);
       expect(gw.calls).toHaveLength(1);
     });
@@ -1041,7 +1042,7 @@ describe("money gate", () => {
 
     it("a payee who lost their email goes to needs_review with no call", async () => {
       const first = new FakeGateway([UNKNOWN]);
-      const res = await requestPayout(ask(w), first);
+      const res = await requestAndApprove(ask(w), first);
       await db.update(users).set({ paypalEmail: null }).where(eq(users.id, w.vet.id));
       await ageQueuedPayouts();
       const gw = new FakeGateway();
@@ -1063,7 +1064,7 @@ describe("money gate", () => {
 
     it("a retry's rejection enqueues one needs_review wakeup", async () => {
       const gw = new FakeGateway([UNKNOWN, REJECTED]);
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
       await ageQueuedPayouts();
       await retryUnknownPayouts(gw);
       await expectOneWakeup(res.payoutId!, "needs_review", "queued");
@@ -1072,7 +1073,7 @@ describe("money gate", () => {
 
     it("retries running out enqueues one needs_review wakeup", async () => {
       const gw = new FakeGateway(Array.from({ length: 6 }, () => UNKNOWN));
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
       for (let retry = 1; retry <= 5; retry++) {
         await ageQueuedPayouts();
         await retryUnknownPayouts(gw);
@@ -1163,7 +1164,7 @@ describe("money gate", () => {
       expect(audit).toMatchObject({ status: "failed", approvedBy: caretakerId });
       expect(audit.inputs).toMatchObject({ outcome: "not_paid", note: "No batch in PayPal" });
       await expectOneWakeup(p.id, "failed", "needs_review");
-      expect((await requestPayout(ask(w), new FakeGateway())).status).toBe("sent");
+      expect((await requestAndApprove(ask(w), new FakeGateway())).status).toBe("sent");
     });
 
     describe("not_paid cannot free money that has left", () => {
@@ -1369,12 +1370,12 @@ describe("money gate", () => {
 
     it("failed payout frees reservation", async () => {
       const gw = new FakeGateway([SENT("B-5")]);
-      const res = await requestPayout(ask(w), gw);
+      const res = await requestAndApprove(ask(w), gw);
       expect(await reserved()).toBe(45000);
       await applyPayoutStatus("B-5", { itemStatus: "FAILED", itemId: "I-5" });
       expect((await payoutRow(res.payoutId!)).status).toBe("failed");
       expect(await reserved()).toBe(0);
-      const again = await requestPayout(ask(w), gw);
+      const again = await requestAndApprove(ask(w), gw);
       expect(again.status).toBe("sent");
       expect(again.payoutId).not.toBe(res.payoutId);
     });
@@ -1706,7 +1707,7 @@ describe("the retry block is enforced by the gate itself", () => {
   it("requestPayout refuses without the agent's own check", async () => {
     const w = await blockedWorld();
     const gw = new FakeGateway();
-    const r = await requestPayout({ ...ask(w), reason: "Again.", inputs: {} }, gw);
+    const r = await requestAndApprove({ ...ask(w), reason: "Again.", inputs: {} }, gw);
     expect(r).toMatchObject({ status: "rejected", code: "REVIEW_REQUIRED" });
     expect(gw.calls).toHaveLength(0);
     expect(await db.select().from(payouts).where(eq(payouts.bookingId, w.booking.id))).toHaveLength(1);

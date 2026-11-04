@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { closePool, db } from "../src/server/db/client";
-import { aiUsage, agentActions, allocations, cats, donations, reviewRequests, wakeups } from "../src/server/db/schema";
+import { aiUsage, agentActions, allocations, cats, donations, payouts, reviewRequests, wakeups } from "../src/server/db/schema";
 import {
   MAX_WAKEUP_ATTEMPTS,
   claimNextWakeup,
@@ -345,7 +345,7 @@ describe("payout wakeups", () => {
       await db.insert(allocations).values({ donationId: d.id, catId, purpose: "vet", amount: 150000 });
     };
 
-    it("files a review when the model ends its turn after the second failure", async () => {
+    it("a retry waits for a caretaker, so nothing is sent and no review is filed yet", async () => {
       const w = await bookedCat();
       await fund(w.cat.id);
       const first = await addPayout(w, { amount: 45000, status: "failed" });
@@ -361,8 +361,11 @@ describe("payout wakeups", () => {
 
       await processNextWakeup(d);
 
-      expect(gw.calls).toHaveLength(1);
-      expect(await db.select().from(reviewRequests)).toHaveLength(1);
+      // The retry is a deposit, and every deposit waits for a caretaker. The second failure, if it comes,
+      // arrives with that approval and is the case in the next test.
+      expect(gw.calls).toHaveLength(0);
+      expect(await db.select().from(reviewRequests)).toHaveLength(0);
+      expect((await db.select().from(payouts).where(eq(payouts.status, "awaiting_approval")))).toHaveLength(1);
     });
 
     it("files a review when two failures already stand and the model does nothing", async () => {

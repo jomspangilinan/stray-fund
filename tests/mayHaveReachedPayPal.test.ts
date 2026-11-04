@@ -5,12 +5,12 @@ import { payouts } from "../src/server/db/schema";
 import { runAction } from "../src/server/caretaker";
 import { getCaretakerQueue } from "../src/server/caretaker/queue";
 import { createAgentTools, payoutRetryBlocked } from "../src/server/agent/tools";
-import { applyPayoutStatus, requestPayout, resolveNeedsReview, retryUnknownPayouts } from "../src/server/moneyGate";
+import { applyPayoutStatus, resolveNeedsReview, retryUnknownPayouts } from "../src/server/moneyGate";
 import { truncateAll } from "./helpers/db";
-import { FakeGateway, addPayout, ageQueuedPayouts, depositRequest, makeCaretaker, makeWorld, type World } from "./helpers/payoutFixtures";
+import { FakeGateway, addPayout, ageQueuedPayouts, depositRequest, makeCaretaker, makeWorld, requestAndApprove, type World } from "./helpers/payoutFixtures";
 
 let w: World;
-const ask = (gw = new FakeGateway()) => requestPayout({ ...depositRequest(w), reason: "Try.", inputs: {} }, gw);
+const ask = (gw = new FakeGateway()) => requestAndApprove({ ...depositRequest(w), reason: "Try.", inputs: {} }, gw);
 const row = async (id: string) => (await db.select().from(payouts).where(eq(payouts.id, id)))[0];
 const allow = async (payoutId: string) => runAction("payout_allow_retry", (await makeCaretaker()).id, { payoutId, note: "Checked." });
 const queueRow = async (id: string) => {

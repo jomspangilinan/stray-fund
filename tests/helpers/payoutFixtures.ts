@@ -12,6 +12,7 @@ import {
   receipts,
   users,
 } from "../../src/server/db/schema";
+import { approvePayout, requestPayout, type PayoutRequest } from "../../src/server/moneyGate";
 import type { PayoutGateway } from "../../src/server/paypal/payouts";
 
 let seq = 0;
@@ -182,4 +183,16 @@ export class FakeGateway implements PayoutGateway {
     if (status instanceof Error) throw status;
     return status ?? { batchStatus: "PROCESSING" };
   }
+}
+
+/**
+ * Asks for a payout the way the agent does, and when the gate holds it for a caretaker,
+ * has one approve it, so a test about what happens after the send still gets a sent payout.
+ * A payout the gate did not hold for approval, or one it kept waiting for a reason, comes back as it was.
+ */
+export async function requestAndApprove(r: PayoutRequest, gw: PayoutGateway) {
+  const asked = await requestPayout(r, gw);
+  if (asked.status !== "awaiting_approval" || asked.code || !asked.payoutId) return asked;
+  const caretaker = await makeCaretaker();
+  return approvePayout(asked.payoutId, caretaker.id, gw);
 }

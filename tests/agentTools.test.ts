@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { closePool, db } from "../src/server/db/client";
 import {
   agentActions,
@@ -13,7 +13,7 @@ import {
   users,
   wakeups,
 } from "../src/server/db/schema";
-import { applyPayoutStatus } from "../src/server/moneyGate";
+import { applyPayoutStatus, approvePayout } from "../src/server/moneyGate";
 import { BATCH_EXISTS_FLAG } from "../src/server/payoutRetry";
 import { resolveReview } from "../src/server/agent/review";
 import { runAction } from "../src/server/caretaker";
@@ -77,6 +77,15 @@ function setup(gw = new FakeGateway()) {
     }
   }
   return { gw, call, actions };
+}
+
+/** A caretaker approves the deposit waiting for this booking, as the desk's Send step does. */
+async function approveWaitingDeposit(bookingId: string, gw: FakeGateway) {
+  const [row] = await db.select().from(payouts).where(and(eq(payouts.bookingId, bookingId), eq(payouts.status, "awaiting_approval")));
+  const caretaker = await makeCaretaker();
+  const out = await approvePayout(row.id, caretaker.id, gw);
+  await syncCatForPayout(row.id);
+  return out;
 }
 
 const counts = async () => ({
@@ -411,7 +420,11 @@ describe("pay_vet_deposit", () => {
     const { isError, body } = await call("pay_vet_deposit", { booking_id: w.booking.id, reason: "Deposit for the visit." });
 
     expect(isError).toBe(false);
-    expect(body).toMatchObject({ status: "sent", amount: 45000 });
+    expect(body).toMatchObject({ status: "awaiting_approval", amount: 45000 });
+    expect(gw.calls).toHaveLength(0);
+    expect(await catStatus(w.cat.id)).toBe("booked");
+
+    expect((await approveWaitingDeposit(w.booking.id, gw)).status).toBe("sent");
     expect(gw.calls).toHaveLength(1);
     expect(gw.calls[0].amount).toBe(45000);
     expect(gw.calls[0].receiver).toBe(w.vet.paypalEmail);
@@ -425,6 +438,7 @@ describe("pay_vet_deposit", () => {
     const w = await bookedWorld();
     await db.update(bookings).set({ packagePrice: 100001 }).where(eq(bookings.id, w.booking.id));
     await call("pay_vet_deposit", { booking_id: w.booking.id, reason: "Deposit." });
+    await approveWaitingDeposit(w.booking.id, gw);
     expect(gw.calls[0].amount).toBe(33000);
   });
 
@@ -467,7 +481,8 @@ describe("pay_vet_deposit", () => {
     await call("pay_vet_deposit", { booking_id: w.booking.id, reason: "Deposit." });
     const second = await call("pay_vet_deposit", { booking_id: w.booking.id, reason: "Deposit." });
     expect(second.body.code).toBe("DUPLICATE_PAYOUT");
-    expect(gw.calls).toHaveLength(1);
+    expect(gw.calls).toHaveLength(0);
+    expect(await db.select().from(payouts).where(eq(payouts.bookingId, w.booking.id))).toHaveLength(1);
   });
 
   it("refuses when an earlier payout is flagged as possibly paid", async () => {
@@ -639,9 +654,11 @@ describe("pay_vet_deposit", () => {
     const w = await bookedWorld();
 
     const first = await call("pay_vet_deposit", { booking_id: w.booking.id, reason: "Deposit." });
-    expect(first.body.status).toBe("failed");
+    expect(first.body.status).toBe("awaiting_approval");
+    expect((await approveWaitingDeposit(w.booking.id, gw)).status).toBe("failed");
     const retry = await call("pay_vet_deposit", { booking_id: w.booking.id, reason: "Retrying once." });
-    expect(retry.body.status).toBe("failed");
+    expect(retry.body.status).toBe("awaiting_approval");
+    expect((await approveWaitingDeposit(w.booking.id, gw)).status).toBe("failed");
     const third = await call("pay_vet_deposit", { booking_id: w.booking.id, reason: "Again." });
 
     expect(third.isError).toBe(true);
@@ -680,7 +697,7 @@ describe("pay_vet_deposit", () => {
     const w = await bookedWorld();
     const tool = tools.find((t) => t.name === "pay_vet_deposit")!;
     const out = await tool.run(tool.parse({ booking_id: w.booking.id, reason: "Deposit." }));
-    expect(JSON.parse(out as string).status).toBe("sent");
+    expect(JSON.parse(out as string).status).toBe("awaiting_approval");
   });
 });
 

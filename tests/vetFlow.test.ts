@@ -23,7 +23,7 @@ import { createAgentTools } from "../src/server/agent/tools";
 import { runMaintenance } from "../src/server/agent/worker";
 import { syncCatForPayout } from "../src/server/catTransitions";
 import { getPoolStatus } from "../src/server/ledger";
-import { applyPayoutStatus, requestPayout } from "../src/server/moneyGate";
+import { applyPayoutStatus, approvePayout, requestPayout } from "../src/server/moneyGate";
 import { storeOriginal } from "../src/server/photos";
 import { getCatCard, manilaDate } from "../src/server/public";
 import { SESSION_COOKIE, signSession, type Role } from "../src/server/session";
@@ -1128,7 +1128,12 @@ describe("surplus returns to the pool and balance equals receipt minus deposit",
     expectConservation(await pool());
 
     const deposit = await call("pay_vet_deposit", { booking_id: booking.id, reason: "The vet booked Mimi." });
-    expect(deposit.body.status).toBe("sent");
+    // Every deposit waits for a caretaker, whatever its amount.
+    expect(deposit.body.status).toBe("awaiting_approval");
+    expect((await catRow(cat.id)).status).toBe("booked");
+    const [waiting] = await db.select().from(payouts).where(eq(payouts.kind, "deposit"));
+    expect((await approvePayout(waiting.id, (await makeCaretaker()).id, gw)).status).toBe("sent");
+    await syncCatForPayout(waiting.id);
     expect((await catRow(cat.id)).status).toBe("in_care");
     const settle = async (kind: "deposit" | "balance") => {
       const [p] = await db.select().from(payouts).where(eq(payouts.kind, kind));

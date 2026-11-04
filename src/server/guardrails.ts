@@ -38,7 +38,7 @@ export type SpendVerdict = { verdict: "allow" | "needs_approval" } | SpendDenial
 
 export type CheckOptions = {
   /**
-   * Set when a caretaker approves a waiting payout: skips the approval threshold
+   * Set when a caretaker approves a waiting payout: skips the approval step
    * and leaves that payout out of the cap sums and the duplicate check.
    */
   approvingPayoutId?: string;
@@ -173,7 +173,8 @@ export async function checkSpend(
     return deny("OVER_ALLOCATION", "The money held for cats cannot cover this payout.");
   }
 
-  if (!excluded && r.amount > limits.approvalThreshold) {
+  // A person approves every deposit. The threshold applies to balances only.
+  if (!excluded && (r.kind === "deposit" || r.amount > limits.approvalThreshold)) {
     return { verdict: "needs_approval" };
   }
   return { verdict: "allow" };
