@@ -708,13 +708,13 @@ describe("cat details", () => {
     expect((await db.select().from(reports).where(eq(reports.id, id)))[0]).toMatchObject({ status: "dismissed", catId: null, decidedBy: caretaker.id });
   });
 
-  it("settling a sighting never fails because of a duplicate report", async () => {
+  it("settling a sighting never fails because of a repeated report", async () => {
     const cat = await makeCat("spotted");
     const [me] = await db.insert(users).values({ username: `neighbour_${++seq}`, role: "donor" }).returning();
     const s = await reviewSighting({ caughtByUserId: me.id });
-    for (let i = 0; i < 2; i++) {
-      await db.transaction((tx) => fileReport(tx, { sightingId: s.id, catId: null, claim: "injured", note: null, source: "neighbour", reporterId: me.id }));
-    }
+    const again = () => db.transaction((tx) => fileReport(tx, { sightingId: s.id, catId: null, claim: "injured", note: null, source: "neighbour", reporterId: me.id }));
+    await again();
+    await expect(again()).rejects.toMatchObject({ reason: "already_today" });
     expect((await act("sighting_merge", { sightingId: s.id, catId: cat.id })).status).toBe(200);
   });
 

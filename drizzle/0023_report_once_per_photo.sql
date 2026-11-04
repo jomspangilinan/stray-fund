@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "reports_sighting_claim_source_idx" ON "reports" USING btree ("sighting_id","claim","source") WHERE "reports"."sighting_id" is not null;

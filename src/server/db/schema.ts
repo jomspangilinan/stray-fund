@@ -179,6 +179,8 @@ export const reports = pgTable(
     check("reports_source_check", sql`${t.source} in ('neighbour', 'photo', 'caretaker', 'vet')`),
     check("reports_status_check", sql`${t.status} in ('open', 'confirmed', 'dismissed', 'cleared')`),
     uniqueIndex("reports_cat_reporter_claim_day_idx").on(t.catId, t.reporterId, t.claim, t.reportedOn),
+    // One photo makes one claim once per source, with or without a cat, so a retry or a double tap files nothing new.
+    uniqueIndex("reports_sighting_claim_source_idx").on(t.sightingId, t.claim, t.source).where(sql`${t.sightingId} is not null`),
     index("reports_cat_idx").on(t.catId),
     index("reports_sighting_idx").on(t.sightingId),
   ],

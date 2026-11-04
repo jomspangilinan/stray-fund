@@ -365,19 +365,14 @@ describe("the audit trail", () => {
 });
 
 describe("one gate for attaching (I1, I2, I5)", () => {
-  it("two cat-less duplicates from one reporter attach one and close the other, and settling does not throw", async () => {
+  it("a second cat-less report of the same claim on one photo is refused, so settling attaches the one", async () => {
     const cat = await makeCat();
     const me = await makeUser();
     const s = await makeSighting({ state: "needs_review", caughtByUserId: me.id });
     const a = await file({ catId: null, sightingId: s.id, reporterId: me.id });
-    const b = await file({ catId: null, sightingId: s.id, reporterId: me.id });
+    await expect(file({ catId: null, sightingId: s.id, reporterId: me.id })).rejects.toMatchObject({ reason: "already_today" });
     expect(await db.transaction((tx) => attachReports(tx, s.id, cat.id))).toBe(1);
-    const rows = [await reportRow(a.id), await reportRow(b.id)];
-    expect(rows.map((r) => r.status).sort()).toEqual(["dismissed", "open"]);
-    const closed = rows.find((r) => r.status === "dismissed")!;
-    expect(closed).toMatchObject({ catId: null, decidedBy: null });
-    expect(closed.decidedAt).not.toBeNull();
-    expect((await db.select().from(agentActions)).map((r) => r.action)).toContain("report_dismissed");
+    expect(await reportRow(a.id)).toMatchObject({ status: "open", catId: cat.id });
   });
 
   it("a reporter whose claim on the cat was dismissed gets a cat-less repeat closed, not attached", async () => {

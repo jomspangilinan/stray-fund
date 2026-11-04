@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 type Claim = "injured" | "pregnant" | "sick" | "kitten";
 
@@ -13,6 +13,8 @@ const CHIPS: { claim: Claim; label: string }[] = [
 
 const NOTE_MAX = 280;
 const THANKS = "Thanks. A caretaker will check.";
+/** A stalled connection must not leave the form stuck on Sending. */
+const TIMEOUT_MS = 15_000;
 
 type Answer = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -22,11 +24,13 @@ async function send(sightingId: string, claim: Claim, note: string): Promise<Ans
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sightingId, claim, ...(note.trim() ? { note: note.trim() } : {}) }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const body = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string; error?: string };
     if (res.ok && body.ok) return { ok: true, message: body.message };
     return { ok: false, error: body.error ?? "Could not send that. Try again." };
-  } catch {
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "TimeoutError") return { ok: false, error: "That took too long. Check your connection and try again." };
     return { ok: false, error: "Could not reach the server. Check your connection and try again." };
   }
 }
@@ -44,6 +48,14 @@ export function ReportCat({ sightingId, photo }: { sightingId: string; photo: st
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const noteId = useId();
+  const sending = useRef(false);
+  // Only the first request carries the note, so two picks make one card with it and not two.
+  const noteSent = useRef(false);
+  const result = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (done) result.current?.focus();
+  }, [done]);
 
   function toggle(c: Claim) {
     setError(null);
@@ -51,88 +63,99 @@ export function ReportCat({ sightingId, photo }: { sightingId: string; photo: st
   }
 
   async function submit() {
+    // A second tap before the screen redraws does nothing.
+    if (sending.current) return;
+    sending.current = true;
     setBusy(true);
     setError(null);
+    const sent: Claim[] = [];
     let filed = false;
     let repeat: string | null = null;
     let failure: string | null = null;
     const left: Claim[] = [];
     for (const claim of picked) {
-      const a = await send(sightingId, claim, note);
+      const a = await send(sightingId, claim, noteSent.current ? "" : note);
       if (!a.ok) {
         failure ??= a.error;
         left.push(claim);
-      } else if (a.message) repeat ??= a.message;
+        continue;
+      }
+      noteSent.current = true;
+      sent.push(claim);
+      if (a.message) repeat ??= a.message;
       else filed = true;
     }
+    sending.current = false;
     setBusy(false);
     if (failure) {
       setPicked(left);
-      setError(failure);
+      const name = (c: Claim) => CHIPS.find((x) => x.claim === c)?.label ?? c;
+      setError(sent.length ? `Sent: ${sent.map(name).join(", ")}. ${left.map(name).join(", ")} didn't send. Try again.` : failure);
       return;
     }
     setDone(filed ? THANKS : (repeat ?? THANKS));
   }
 
-  if (done) {
-    return (
-      <p className="reveal-more font-bold" role="status">
+  return (
+    <section className="reveal-more grid gap-3" aria-labelledby={done ? undefined : `${noteId}-h`} aria-label={done ? "Report" : undefined}>
+      {/* Always in the page, so a screen reader hears the text when it changes. */}
+      <p ref={result} tabIndex={-1} role="status" aria-live="polite" className="font-bold outline-none empty:hidden">
         {done}
       </p>
-    );
-  }
-
-  return (
-    <section className="reveal-more grid gap-3" aria-labelledby={`${noteId}-h`}>
-      <div className="flex items-center gap-3">
-        {photo && (
-          // The photo just taken, kept on this device, so it is the evidence the report rests on.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={photo} alt="The photo this report is about" className="h-14 w-14 flex-none rounded-in bg-pale object-cover" />
-        )}
-        <div>
-          <h2 id={`${noteId}-h`} className="font-extrabold leading-tight">
-            Is something wrong?
-          </h2>
-          <p className="small soft">Tap any that fit.</p>
-        </div>
-      </div>
-      <div role="group" aria-labelledby={`${noteId}-h`} className="flex flex-wrap gap-2">
-        {CHIPS.map((c) => {
-          const on = picked.includes(c.claim);
-          return (
-            <button key={c.claim} type="button" className="chip" role="checkbox" aria-checked={on} disabled={busy} onClick={() => toggle(c.claim)}>
-              {on ? "✓ " : ""}
-              {c.label}
-            </button>
-          );
-        })}
-      </div>
-      {picked.length > 0 && (
+      {!done && (
         <>
-          <div className="grid gap-1">
-            <label htmlFor={noteId} className="small font-bold">
-              Add a detail (only caretakers see this)
-            </label>
-            <textarea
-              id={noteId}
-              className="field"
-              rows={2}
-              maxLength={NOTE_MAX}
-              value={note}
-              disabled={busy}
-              onChange={(e) => setNote(e.target.value)}
-            />
+          <div className="flex items-center gap-3">
+            {photo && (
+              // The photo just taken, kept on this device, so it is the evidence the report rests on.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={photo} alt="The photo this report is about" className="h-14 w-14 flex-none rounded-in bg-pale object-cover" />
+            )}
+            <div>
+              <h2 id={`${noteId}-h`} className="font-extrabold leading-tight">
+                Is something wrong?
+              </h2>
+              <p className="small soft">Tap any that fit.</p>
+            </div>
           </div>
-          <button type="button" className="btn" disabled={busy} onClick={submit}>
-            {busy ? "Sending" : "Send to a caretaker"}
-          </button>
+          <div role="group" aria-labelledby={`${noteId}-h`} className="flex flex-wrap gap-2">
+            {CHIPS.map((c) => {
+              const on = picked.includes(c.claim);
+              return (
+                <button key={c.claim} type="button" className="chip" role="checkbox" aria-checked={on} disabled={busy} onClick={() => toggle(c.claim)}>
+                  {on ? "✓ " : ""}
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
+          {picked.length > 0 && (
+            <>
+              <div className="grid gap-1">
+                <label htmlFor={noteId} className="small font-bold">
+                  Add a detail (only caretakers see this)
+                </label>
+                <textarea
+                  id={noteId}
+                  className="field"
+                  rows={2}
+                  maxLength={NOTE_MAX}
+                  value={note}
+                  disabled={busy}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </div>
+              {/* aria-disabled, not disabled, so focus stays on the button while it sends. */}
+              <button type="button" className="btn" aria-disabled={busy} onClick={submit}>
+                {busy ? "Sending" : "Send to a caretaker"}
+              </button>
+            </>
+          )}
+          {error && (
+            <p role="alert" className="note note-bad font-bold">
+              {error}
+            </p>
+          )}
         </>
-      )}
-      {error && (
-        <p role="alert" className="note note-bad font-bold">
-          {error}
-        </p>
       )}
     </section>
   );

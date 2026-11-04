@@ -95,6 +95,14 @@ export async function fileReport(tx: Tx, input: NeighbourOrPhoto): Promise<{ id:
   if ((sighting.catId ?? null) !== (input.catId ?? null)) throw new ReportRefused("sighting_mismatch");
   if (input.source === "neighbour" && input.reporterId && sighting.caughtBy !== input.reporterId) throw new ReportRefused("not_your_photo");
 
+  // Whatever the cat id: the same photo, claim and source is one report. The unique index backs this up.
+  const [repeat] = await tx
+    .select({ id: reports.id })
+    .from(reports)
+    .where(and(eq(reports.sightingId, input.sightingId), eq(reports.claim, input.claim), eq(reports.source, input.source)))
+    .limit(1);
+  if (repeat) throw new ReportRefused("already_today");
+
   if (input.reporterId && input.catId) {
     const mine = and(eq(reports.catId, input.catId), eq(reports.reporterId, input.reporterId), eq(reports.claim, input.claim));
     const [dismissed] = await tx.select({ id: reports.id }).from(reports).where(and(mine, eq(reports.status, "dismissed"))).limit(1);

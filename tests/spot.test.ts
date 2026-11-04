@@ -1101,4 +1101,24 @@ describe("POST /api/spot/report", () => {
     expect(await json(dismissed)).toEqual({ ok: true, message: "A caretaker already checked this." });
     expect(await reportRows()).toHaveLength(1);
   });
+
+  it("files one report when the same photo is reported twice with no cat yet, whatever the retry", async () => {
+    const u = await signIn();
+    const s = await photoOf(u.id);
+    expect(await json(await send({ sightingId: s.id, claim: "injured", note: "limping" }))).toEqual({ ok: true });
+    const again = await send({ sightingId: s.id, claim: "injured", note: "limping" });
+    expect(again.status).toBe(200);
+    expect(await json(again)).toEqual({ ok: true, message: "You already told us about this today." });
+    const both = await Promise.all([send({ sightingId: s.id, claim: "sick" }), send({ sightingId: s.id, claim: "sick" })]);
+    expect(both.map((r) => r.status)).toEqual([200, 200]);
+    expect((await reportRows()).map((r) => r.claim).sort()).toEqual(["injured", "sick"]);
+  });
+
+  it("refuses a photo the AI or a caretaker rejected, like an unknown one", async () => {
+    const u = await signIn();
+    const s = await photoOf(u.id);
+    await db.update(sightings).set({ state: "rejected" }).where(eq(sightings.id, s.id));
+    expect((await send({ sightingId: s.id, claim: "injured" })).status).toBe(404);
+    expect(await reportRows()).toHaveLength(0);
+  });
 });

@@ -61,12 +61,13 @@ export async function POST(req: Request) {
         .select({
           catId: sightings.catId,
           caughtBy: sightings.caughtByUserId,
+          state: sightings.state,
           stale: sql<boolean>`${sightings.createdAt} < now() - make_interval(mins => ${MAX_PHOTO_AGE_MINUTES})`,
         })
         .from(sightings)
         .where(eq(sightings.id, sightingId));
       // Someone else's photo looks the same as no photo, so a guess reveals nothing.
-      if (!s || s.caughtBy !== session.userId) return fail(NOT_FOUND, 404);
+      if (!s || s.caughtBy !== session.userId || s.state === "rejected") return fail(NOT_FOUND, 404);
       if (s.stale) return fail(TOO_OLD, 409);
       try {
         await fileReport(tx, {
