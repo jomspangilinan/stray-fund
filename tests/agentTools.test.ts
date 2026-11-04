@@ -177,6 +177,7 @@ describe("fund_next_cat", () => {
 
     const { isError, body } = await call("fund_next_cat", { cat_id: mimi.id, reason: REASON });
 
+    expect(isError).toBe(false);
     expect(body.amount).toBe(150000);
     expect(await catStatus(mimi.id)).toBe("funded");
     const alloc = await db.select().from(allocations).where(eq(allocations.catId, mimi.id));
