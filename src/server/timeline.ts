@@ -4,7 +4,7 @@ import { cats, payouts, reports } from "./db/schema";
 import { effectiveSex } from "./agent/rank";
 import { SET_PLACE_ACTION } from "./agent/priority";
 import { PRIVATE_ACTIONS, REPORT_CONFIRMED } from "./privateActions";
-import { allNotes, knownCatNames, getCatCard, manilaDate, publicReason, type JourneyStep } from "./public";
+import { allNoteGrams, knownCatNames, getCatCard, manilaDate, publicReason, type JourneyStep } from "./public";
 
 /**
  * One cat's story, built for a public page. Every field is written here by hand: no note, reporter, place, amount,
@@ -82,7 +82,7 @@ export async function catTimeline(catId: string, journeySteps?: JourneyStep[]): 
       .where(eq(payouts.catId, catId))
       .orderBy(asc(payouts.createdAt), asc(payouts.id)),
     knownCatNames(),
-    allNotes(),
+    allNoteGrams(),
     journeySteps ? Promise.resolve(journeySteps) : getCatCard(catId).then((c) => c?.cat.journey ?? []),
   ]);
   const cat = catRows[0];
@@ -111,7 +111,7 @@ export async function catTimeline(catId: string, journeySteps?: JourneyStep[]): 
     if (r.status === "confirmed" && decidedAt && !staffFiled) {
       out.push(entry(decidedAt, { kind: "person", title: `Caretaker confirmed ${sex} ${predicate(r.claim)}` }));
     } else if (r.status === "dismissed" && decidedAt) {
-      out.push(entry(decidedAt, { kind: "person", title: `Caretaker checked: not ${predicate(r.claim)}` }));
+      out.push(entry(decidedAt, { kind: "person", title: "A caretaker checked this report and closed it." }));
     } else if (r.status === "cleared" && decidedAt) {
       const confirmed = confirmedAt.get(r.id);
       if (confirmed && !staffFiled) out.push(entry(confirmed, { kind: "person", title: `Caretaker confirmed ${sex} ${predicate(r.claim)}` }));

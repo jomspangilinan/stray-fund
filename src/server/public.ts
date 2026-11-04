@@ -380,20 +380,27 @@ const OTHER_FALLBACK = "The Treasurer recorded this.";
 const words = (text: string): string[] => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 const NOTE_ECHO_WORDS = 4;
 
-/** Whether a reason repeats a note: four or more words in a row in common, ignoring case and punctuation. */
-export function noteEchoes(reason: string, notes: readonly string[]): boolean {
-  const r = words(reason);
-  if (r.length < NOTE_ECHO_WORDS) return false;
+/** Every run of four words from the notes, built once and checked against each reason. Holds note text, so never returned. */
+export type NoteGrams = ReadonlySet<string>;
+
+export function noteGramsOf(notes: readonly string[]): NoteGrams {
   const grams = new Set<string>();
   for (const note of notes) {
     const n = words(note);
     for (let i = 0; i + NOTE_ECHO_WORDS <= n.length; i++) grams.add(n.slice(i, i + NOTE_ECHO_WORDS).join(" "));
   }
+  return grams;
+}
+
+/** Whether a reason repeats a note: four or more words in a row in common, ignoring case and punctuation. */
+export function noteEchoes(reason: string, grams: NoteGrams): boolean {
+  if (grams.size === 0) return false;
+  const r = words(reason);
   for (let i = 0; i + NOTE_ECHO_WORDS <= r.length; i++) if (grams.has(r.slice(i, i + NOTE_ECHO_WORDS).join(" "))) return true;
   return false;
 }
 
-export function reasonIsSafe(reason: string, catName: string, knownNames: readonly string[], notes: readonly string[] = []): boolean {
+export function reasonIsSafe(reason: string, catName: string, knownNames: readonly string[], notes: NoteGrams = new Set()): boolean {
   if (noteEchoes(reason, notes)) return false;
   let text = reason;
   const names = [...new Set([catName, ...knownNames].map((n) => n.trim()).filter((n) => n && nameIsSafe(n)))].sort((a, b) => b.length - a.length);
@@ -405,11 +412,11 @@ export function reasonIsSafe(reason: string, catName: string, knownNames: readon
 }
 
 /** The reason to print for an action: as written if it is safe, else that action's fixed line. */
-export function publicReason(action: string, reason: string, catName: string | null, knownNames: readonly string[], notes: readonly string[]): string {
+export function publicReason(action: string, reason: string, catName: string | null, knownNames: readonly string[], notes: NoteGrams): string {
   return reasonIsSafe(reason, catName ?? "", knownNames, notes) ? reason : (REASON_FALLBACK[action] ?? OTHER_FALLBACK);
 }
 
-export function publicAgentAction(row: AgentActionInput, knownNames: readonly string[] = [], notes: readonly string[] = []): PublicAgentAction {
+export function publicAgentAction(row: AgentActionInput, knownNames: readonly string[] = [], notes: NoteGrams = new Set()): PublicAgentAction {
   return {
     id: row.id,
     action: ACTION_LABEL[row.action] ?? "Treasurer action",
@@ -438,9 +445,9 @@ export async function knownCatNames(tx: Pick<typeof db, "select" | "execute"> = 
   return [...current.map((c) => c.name), ...(former.rows as { name: string }[]).map((r) => r.name)];
 }
 
-/** Every report note, for the filter only. Never returned. */
-export async function allNotes(tx: Pick<typeof db, "select"> = db): Promise<string[]> {
-  return (await tx.select({ note: reports.note }).from(reports).where(isNotNull(reports.note))).map((n) => n.note as string);
+/** Every report note as word groups, for the filter only. Read once per request, never returned as text. */
+export async function allNoteGrams(tx: Pick<typeof db, "select"> = db): Promise<NoteGrams> {
+  return noteGramsOf((await tx.select({ note: reports.note }).from(reports).where(isNotNull(reports.note))).map((n) => n.note as string));
 }
 
 /** Newest first. The cat comes from the action's payout, or for funding from its recorded id. */
@@ -474,7 +481,7 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
     approved_by_person: boolean;
   }[]);
   // A reason must not repeat any note, on its own cat or another: a reason can name several cats.
-  const notes = await allNotes();
+  const notes = await allNoteGrams();
   return feed.map((r) =>
     publicAgentAction(
       {
@@ -931,7 +938,7 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
     knownCatNames(),
     db.transaction((tx) => getPoolStatus(tx)),
     db.select({ packagePrice: guardrails.packagePrice }).from(guardrails).where(eq(guardrails.id, 1)),
-    allNotes(),
+    allNoteGrams(),
   ]);
 
   const reasonOf = new Map<string, string>();

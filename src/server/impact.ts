@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { db, type Tx } from "./db/client";
 import { CAPTURED, getPoolStatus, toInt, type PoolStatus } from "./ledger";
 import { PERSONAS } from "./session";
-import { allNotes, knownCatNames, NEUTERED_CATS_SQL, publicLedgerRow, publicReason, STATUS_GROUPS, type PublicLedgerRow } from "./public";
+import { allNoteGrams, knownCatNames, NEUTERED_CATS_SQL, publicLedgerRow, publicReason, STATUS_GROUPS, type PublicLedgerRow } from "./public";
 
 /*
  * The impact page and the public ledger. Both are aggregates or whitelisted rows: the ledger query selects
@@ -101,7 +101,7 @@ async function ledgerRows(tx: Tx): Promise<PublicLedgerRow[]> {
     order by l.created_at desc, l.paypal_id desc nulls last
   `);
   // A payout's reason is the Treasurer's own words, so it passes the same filter as the feed.
-  const [names, notes] = await Promise.all([knownCatNames(tx), allNotes(tx)]);
+  const [names, notes] = await Promise.all([knownCatNames(tx), allNoteGrams(tx)]);
   const payoutAction = (type: string) => (type === PAYOUT_TYPE.deposit ? "payout_deposit" : "payout_balance");
   return (rows as Record<string, unknown>[]).map((r) =>
     publicLedgerRow({

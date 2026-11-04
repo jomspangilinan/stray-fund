@@ -15,6 +15,7 @@ import {
   getPriorityList,
   listAgentActions,
   noteEchoes,
+  noteGramsOf,
   getUnallocated,
   journey,
   listCats,
@@ -571,12 +572,19 @@ describe("the priority list", () => {
 
   it("noteEchoes needs four words in a row", () => {
     const note = "She hides under the red car near the gate!";
-    expect(noteEchoes("It hides under the red car.", [note])).toBe(true);
-    expect(noteEchoes("HIDES, under the RED car", [note])).toBe(true);
-    expect(noteEchoes("She is near the red car", [note])).toBe(false);
-    expect(noteEchoes("Under the red car is a hint", [note])).toBe(true);
-    expect(noteEchoes("under the red", [note])).toBe(false);
-    expect(noteEchoes("anything at all here", [])).toBe(false);
+    const grams = noteGramsOf([note]);
+    expect(noteEchoes("It hides under the red car.", grams)).toBe(true);
+    expect(noteEchoes("HIDES, under the RED car", grams)).toBe(true);
+    expect(noteEchoes("She is near the red car", grams)).toBe(false);
+    expect(noteEchoes("Under the red car is a hint", grams)).toBe(true);
+    expect(noteEchoes("under the red", grams)).toBe(false);
+    expect(noteEchoes("anything at all here", noteGramsOf([]))).toBe(false);
+  });
+
+  it("noteGramsOf is built once and holds only four-word groups, so a short note adds nothing", () => {
+    const grams = noteGramsOf(["Hides under the red car!", "too short"]);
+    expect([...grams].sort()).toEqual(["hides under the red", "under the red car"]);
+    expect(noteEchoes("a b hides under the red", grams)).toBe(true);
   });
 
   it("says what the fund can cover on the first cat only", async () => {

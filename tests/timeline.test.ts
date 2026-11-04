@@ -89,7 +89,7 @@ describe("a cat's timeline", () => {
     await report({ catId: c.id, claim: "sick", status: "dismissed", decidedBy: null, decidedAt: day(4) });
     const t = await titles(c.id);
     expect(t).toContain("Neighbour reported hurt");
-    expect(t).toContain("Caretaker checked: not hurt");
+    expect(t).toContain("A caretaker checked this report and closed it.");
     expect(t.some((x) => /sick/.test(x))).toBe(false);
   });
 
