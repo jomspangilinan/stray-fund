@@ -27,6 +27,7 @@ import {
   retryPendingSightings,
 } from "../src/server/spot";
 import { POST as spotPost } from "../src/app/api/spot/route";
+import { POST as reportPost } from "../src/app/api/spot/report/route";
 import { POST as earTipPost } from "../src/app/api/cats/[id]/ear-tip/route";
 
 const ASSESS = {
@@ -950,5 +951,154 @@ describe("POST /api/spot", () => {
       "Too many photos in the last minute. Wait a moment and try again.",
     );
     expect(seen.assess).toBe(0);
+  });
+});
+
+describe("POST /api/spot/report", () => {
+  async function signIn() {
+    const u = await makeUser();
+    jar.set(SESSION_COOKIE, await signSession({ userId: u.id, role: "donor", username: u.username }));
+    return u;
+  }
+  const send = (payload: unknown, type = "application/json") =>
+    reportPost(
+      new Request("http://localhost/api/spot/report", {
+        method: "POST",
+        headers: { "content-type": type },
+        body: typeof payload === "string" ? payload : JSON.stringify(payload),
+      }),
+    );
+  const json = async (res: Response) => (await res.json()) as Record<string, unknown>;
+  const reportRows = () => db.select().from(reports);
+
+  /** A photo the user took, matched to a cat, or still waiting on a caretaker when no cat is given. */
+  async function photoOf(userId: string | null, opts: { catId?: string | null; ageMinutes?: number } = {}) {
+    const { key } = await storeOriginal(await jpeg());
+    const [s] = await db
+      .insert(sightings)
+      .values({
+        originalKey: key,
+        caughtByUserId: userId,
+        catId: opts.catId ?? null,
+        state: opts.catId ? "matched" : "needs_review",
+        exactLat: 10.2,
+        exactLng: 120.6,
+      })
+      .returning();
+    if (opts.ageMinutes) {
+      await db.execute(
+        (await import("drizzle-orm")).sql`update sightings set created_at = now() - make_interval(mins => ${opts.ageMinutes}) where id = ${s.id}`,
+      );
+    }
+    return s;
+  }
+
+  it("needs a signed-in person and a JSON body", async () => {
+    expect((await send({})).status).toBe(401);
+    await signIn();
+    expect((await send("claim=injured", "text/plain")).status).toBe(415);
+  });
+
+  it("files a report on the sighting's cat, and the answer is only ok", async () => {
+    const u = await signIn();
+    const { cat } = await seedCat({});
+    const s = await photoOf(u.id, { catId: cat.id });
+    const res = await send({ sightingId: s.id, claim: "injured", note: "limping on the left leg" });
+    expect(res.status).toBe(200);
+    expect(await json(res)).toEqual({ ok: true });
+    expect(await reportRows()).toMatchObject([
+      { catId: cat.id, sightingId: s.id, claim: "injured", note: "limping on the left leg", source: "neighbour", reporterId: u.id, status: "open" },
+    ]);
+  });
+
+  it("takes the cat from the sighting and ignores a catId in the body", async () => {
+    const u = await signIn();
+    const { cat } = await seedCat({});
+    const { cat: other } = await seedCat({});
+    const s = await photoOf(u.id, { catId: cat.id });
+    const res = await send({ sightingId: s.id, claim: "sick", catId: other.id });
+    expect(res.status).toBe(200);
+    expect((await reportRows())[0].catId).toBe(cat.id);
+  });
+
+  it("files a report for a photo still waiting on a caretaker with no cat, to attach when sorted", async () => {
+    const u = await signIn();
+    const s = await photoOf(u.id);
+    expect((await send({ sightingId: s.id, claim: "pregnant" })).status).toBe(200);
+    expect(await reportRows()).toMatchObject([{ catId: null, sightingId: s.id, claim: "pregnant", status: "open" }]);
+  });
+
+  it("answers with no coordinates, storage keys or note text", async () => {
+    const u = await signIn();
+    const { cat } = await seedCat({});
+    const s = await photoOf(u.id, { catId: cat.id });
+    const res = await send({ sightingId: s.id, claim: "injured", note: "NOTE-SECRET 0917 000 0000" });
+    const text = JSON.stringify(await json(res));
+    expect(text).not.toMatch(/NOTE-SECRET|10\.2|120\.6|original|key|lat|lng/i);
+  });
+
+  it("refuses a missing, malformed or unknown sighting", async () => {
+    await signIn();
+    expect((await send({ claim: "injured" })).status).toBe(400);
+    expect((await send({ sightingId: "nope", claim: "injured" })).status).toBe(400);
+    expect((await send({ sightingId: "00000000-0000-4000-8000-000000000000", claim: "injured" })).status).toBe(404);
+    expect(await reportRows()).toHaveLength(0);
+  });
+
+  it("refuses a sighting caught by someone else, or by nobody", async () => {
+    await signIn();
+    const other = await makeUser();
+    const theirs = await photoOf(other.id);
+    const nobody = await photoOf(null);
+    expect((await send({ sightingId: theirs.id, claim: "injured" })).status).toBe(404);
+    expect((await send({ sightingId: nobody.id, claim: "injured" })).status).toBe(404);
+    expect(await reportRows()).toHaveLength(0);
+  });
+
+  it("refuses a photo older than 30 minutes, and accepts one just inside", async () => {
+    const u = await signIn();
+    const old = await photoOf(u.id, { ageMinutes: 31 });
+    const fresh = await photoOf(u.id, { ageMinutes: 29 });
+    const res = await send({ sightingId: old.id, claim: "injured" });
+    expect(res.status).toBe(409);
+    expect((await json(res)).error).toBe("That photo is too old. Take a new photo to report something.");
+    expect((await send({ sightingId: fresh.id, claim: "injured" })).status).toBe(200);
+    expect(await reportRows()).toHaveLength(1);
+  });
+
+  it("refuses an unknown claim and a note over 280 characters", async () => {
+    const u = await signIn();
+    const s = await photoOf(u.id);
+    expect((await send({ sightingId: s.id, claim: "dead" })).status).toBe(400);
+    expect((await send({ sightingId: s.id })).status).toBe(400);
+    expect((await send({ sightingId: s.id, claim: "sick", note: "x".repeat(281) })).status).toBe(400);
+    expect((await send({ sightingId: s.id, claim: "sick", note: 5 })).status).toBe(400);
+    expect(await reportRows()).toHaveLength(0);
+    expect((await send({ sightingId: s.id, claim: "sick", note: "x".repeat(280) })).status).toBe(200);
+  });
+
+  it("keeps a blank note as no note", async () => {
+    const u = await signIn();
+    const s = await photoOf(u.id);
+    await send({ sightingId: s.id, claim: "kitten", note: "   " });
+    expect((await reportRows())[0].note).toBeNull();
+  });
+
+  it("answers a repeat today, or a claim a caretaker already dismissed, with a plain message and not an error", async () => {
+    const u = await signIn();
+    const { cat } = await seedCat({});
+    const s = await photoOf(u.id, { catId: cat.id });
+    expect((await json(await send({ sightingId: s.id, claim: "sick" })))).toEqual({ ok: true });
+    const again = await send({ sightingId: s.id, claim: "sick" });
+    expect(again.status).toBe(200);
+    expect(await json(again)).toEqual({ ok: true, message: "You already told us about this today." });
+
+    await db.update(reports).set({ status: "dismissed" });
+    await db.execute((await import("drizzle-orm")).sql`update reports set reported_on = reported_on - 1`);
+    const s2 = await photoOf(u.id, { catId: cat.id });
+    const dismissed = await send({ sightingId: s2.id, claim: "sick" });
+    expect(dismissed.status).toBe(200);
+    expect(await json(dismissed)).toEqual({ ok: true, message: "A caretaker already checked this." });
+    expect(await reportRows()).toHaveLength(1);
   });
 });

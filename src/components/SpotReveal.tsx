@@ -6,6 +6,7 @@ import { AnotherNameButton } from "./AnotherNameButton";
 import { CatAvatar } from "./CatAvatar";
 import { COURT } from "@/lib/courtyard";
 import { EarTipAsk } from "./EarTipAsk";
+import { ReportCat } from "./ReportCat";
 import { SaveImage } from "./SaveImage";
 import { SexAsk } from "./SexAsk";
 import { revealCopy, type RevealState } from "@/lib/spotCopy";
@@ -18,6 +19,7 @@ import type { SpotReveal as Reveal } from "@/server/spotReveal";
 export function SpotReveal({
   state,
   catId,
+  sightingId,
   reveal,
   capturedUrl,
   locationMissing,
@@ -25,6 +27,7 @@ export function SpotReveal({
 }: {
   state: RevealState;
   catId: string | null;
+  sightingId: string | null;
   reveal: Reveal;
   capturedUrl: string | null;
   locationMissing: boolean;
@@ -115,6 +118,8 @@ export function SpotReveal({
             </button>
           </div>
         </div>
+
+        {sightingId && <ReportCat sightingId={sightingId} photo={capturedUrl ?? reveal.photoUrl} />}
 
         {hasMore && catId && (
           <div className="reveal-more grid gap-4">

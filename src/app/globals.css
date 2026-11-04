@@ -625,6 +625,7 @@ input[type="checkbox"] {
 .reveal-more .chip { background: var(--pale); }
 .reveal-card .chip[aria-checked="true"],
 .reveal-more .chip[aria-checked="true"] { background: var(--ink); }
+.reveal-more .field { background: var(--pale); }
 /* Optional questions: a flat white block under the next step, quieter than the card. */
 .reveal-more {
   border-radius: var(--r-out);

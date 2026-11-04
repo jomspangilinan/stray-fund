@@ -15,6 +15,7 @@ import { useCatDetector } from "./useCatDetector";
 type Done = {
   state: "new_cat" | "matched" | "needs_review" | "rejected" | "queued_for_ai";
   catId: string | null;
+  sightingId: string | null;
   message: string;
   reveal: Reveal | null;
   locationMissing: boolean;
@@ -142,6 +143,7 @@ export function SpotFlow({ username, demo = false }: { username: string | null; 
       const done: Done = {
         state: body.state,
         catId: body.catId ?? null,
+        sightingId: body.sightingId ?? null,
         message: body.message,
         reveal: body.reveal ?? null,
         locationMissing: where.lat === null,
@@ -162,6 +164,7 @@ export function SpotFlow({ username, demo = false }: { username: string | null; 
         <SpotReveal
           state={done.state}
           catId={done.catId}
+          sightingId={done.sightingId}
           reveal={done.reveal}
           capturedUrl={capturedUrl}
           locationMissing={done.locationMissing}
