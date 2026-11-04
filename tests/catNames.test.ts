@@ -638,9 +638,21 @@ describe("privacy of names", () => {
     expect(JSON.stringify(feed)).not.toContain(SENTINEL_USER);
   });
 
-  it("the private set is one named list that holds the ear-tip answer, the sex answer and every name action", () => {
+  it("the private set is one named list that holds the ear-tip answer, the sex answer, every name action and every report action", () => {
     expect([...PRIVATE_ACTIONS].sort()).toEqual(
-      ["ear_tip_answered", "name_another", "name_approved", "name_dismissed", "name_set", "name_suggested", "sex_answered"].sort(),
+      [
+        "ear_tip_answered",
+        "name_another",
+        "name_approved",
+        "name_dismissed",
+        "name_set",
+        "name_suggested",
+        "report_cleared",
+        "report_confirmed",
+        "report_dismissed",
+        "report_filed",
+        "sex_answered",
+      ].sort(),
     );
   });
 });

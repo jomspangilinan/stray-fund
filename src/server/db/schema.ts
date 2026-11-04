@@ -148,6 +148,43 @@ export const earTipFlags = pgTable(
 );
 
 /**
+ * A claim that something is wrong with a cat: hurt, pregnant, sick or a kitten. A neighbour's or a photo's claim
+ * starts open and holds the cat from funding until a person checks. Only a confirmed claim reaches cats.flags.
+ * Private: the note is free text and never public. The cat is empty until a caretaker sorts a photo the AI could
+ * not match.
+ */
+export const reports = pgTable(
+  "reports",
+  {
+    id: id(),
+    catId: uuid("cat_id").references(() => cats.id),
+    sightingId: uuid("sighting_id").references(() => sightings.id),
+    claim: text("claim").notNull(),
+    note: text("note"),
+    source: text("source").notNull(),
+    reporterId: uuid("reporter_id").references(() => users.id),
+    status: text("status").notNull().default("open"),
+    checkQuestion: text("check_question"),
+    decidedBy: uuid("decided_by").references(() => users.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    sample: boolean("sample").notNull().default(false),
+    // Whether the photo's own assessment raised the same flag. Null when the photo has no assessment.
+    photoAgrees: boolean("photo_agrees"),
+    // The Manila day, for the one-report-per-day rule.
+    reportedOn: date("reported_on").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("reports_claim_check", sql`${t.claim} in ('injured', 'pregnant', 'sick', 'kitten')`),
+    check("reports_source_check", sql`${t.source} in ('neighbour', 'photo', 'caretaker', 'vet')`),
+    check("reports_status_check", sql`${t.status} in ('open', 'confirmed', 'dismissed', 'cleared')`),
+    uniqueIndex("reports_cat_reporter_claim_day_idx").on(t.catId, t.reporterId, t.claim, t.reportedOn),
+    index("reports_cat_idx").on(t.catId),
+    index("reports_sighting_idx").on(t.sightingId),
+  ],
+);
+
+/**
  * A neighbour's idea of a cat's real name. One pending row per person and cat; a new one replaces it. The name
  * is not public until a caretaker approves it, and who asked is never public. Private, like ear_tip_flags.
  */

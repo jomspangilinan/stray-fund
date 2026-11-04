@@ -12,4 +12,9 @@ export const NAME_APPROVED = "name_approved";
 export const NAME_DISMISSED = "name_dismissed";
 export const NAME_SET = "name_set";
 
-export const PRIVATE_ACTIONS: readonly string[] = [EAR_TIP_ANSWERED, SEX_ANSWERED, NAME_SUGGESTED, NAME_ANOTHER, NAME_APPROVED, NAME_DISMISSED, NAME_SET];
+export const REPORT_FILED = "report_filed";
+export const REPORT_CONFIRMED = "report_confirmed";
+export const REPORT_DISMISSED = "report_dismissed";
+export const REPORT_CLEARED = "report_cleared";
+
+export const PRIVATE_ACTIONS: readonly string[] = [EAR_TIP_ANSWERED, SEX_ANSWERED, NAME_SUGGESTED, NAME_ANOTHER, NAME_APPROVED, NAME_DISMISSED, NAME_SET, REPORT_FILED, REPORT_CONFIRMED, REPORT_DISMISSED, REPORT_CLEARED];
