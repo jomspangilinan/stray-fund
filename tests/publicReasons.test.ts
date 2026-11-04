@@ -101,4 +101,31 @@ describe("every AI-written reason on a public page passes the filter", () => {
     for (const r of ok) expect(shown).toContain(r);
     for (const r of bad) expect(shown).not.toContain(r);
   });
+
+  it("cannot be used to carry digits: at most two peso amounts and two day counts are let through, and odd shapes are not", async () => {
+    const { a } = await twoCats();
+    await db.insert(cats).values({ name: "Kit", areaName: "Brgy 1", status: "queued" });
+    await db.insert(cats).values({ name: "Tom2", areaName: "Brgy 1", status: "queued" });
+    const ok = [
+      "Tom goes ahead of Kit, who has waited 12 days. The fund has ₱1,500.",
+      "Mimi waited 3 days and Kit waited 12 days, and the fund holds ₱1,500 and ₱450.50.",
+    ];
+    const bad = [
+      "call ₱0917 ₱555 ₱0100",
+      "₱ 0917 ₱ 5550100",
+      "09 days 17 days 555 days 01 days 00 days",
+      "Mimi waited 1 day, 2 days, 3 days.",
+      "Mimi has ₱100, ₱200 and ₱300.",
+      "Mimi has ₱1234567.",
+      "Mimi has ₱01500.",
+      "Mimi waited 0012 days.",
+      "Mimi waited 12345 days.",
+      "Mimi waited 012 days.",
+      "Mimi has ₱ 1,500.",
+    ];
+    await db.insert(agentActions).values([...ok, ...bad].map((reason) => ({ action: "fund_cat", reason, status: "done", inputs: { catId: a.id } })));
+    const shown = (await listAgentActions()).map((r) => r.reason);
+    for (const r of ok) expect(shown, r).toContain(r);
+    for (const r of bad) expect(shown, r).not.toContain(r);
+  });
 });

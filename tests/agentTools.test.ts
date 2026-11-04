@@ -112,7 +112,7 @@ describe("fund_next_cat: a person-checked cat must be named (WEIGHING_NOT_SHOWN)
     await addPool(200000);
     const mimi = await makeCat({ name: "Mimi", sex: "female", queuedAt: daysAgo(14) });
     const tom = await makeCat({ name: "Tom", sex: "male", queuedAt: daysAgo(6), flags: ["injured"] });
-    await db.insert(reports).values({ catId: tom.id, claim: "injured", source: "vet", status, reportedOn: "2026-11-01" });
+    await db.insert(reports).values({ catId: tom.id, claim: "injured", source: "vet", status, decidedAt: new Date(), reportedOn: "2026-11-01" });
     return { mimi, tom };
   }
   const allocationRows = () => db.select().from(allocations);
@@ -155,7 +155,7 @@ describe("fund_next_cat: a person-checked cat must be named (WEIGHING_NOT_SHOWN)
     await addPool(200000);
     const tom = await makeCat({ name: "Tom", sex: "female", queuedAt: daysAgo(14) });
     const mimi = await makeCat({ name: "Mimi", sex: "female", queuedAt: daysAgo(6) });
-    for (const c of [tom, mimi]) await db.insert(reports).values({ catId: c.id, claim: "injured", source: "vet", status: "cleared", reportedOn: "2026-11-01" });
+    for (const c of [tom, mimi]) await db.insert(reports).values({ catId: c.id, claim: "injured", source: "vet", status: "cleared", decidedAt: new Date(), reportedOn: "2026-11-01" });
     expect((await call("fund_next_cat", { cat_id: tom.id, reason: "Tom has waited longest." })).isError).toBe(false);
   });
 
@@ -1290,5 +1290,43 @@ describe("a final text that claims a tool failed (counted, never acted on)", () 
     await run([{ calls: [{ name: "fund_next_cat", input: { cat_id: "00000000-0000-4000-8000-000000000000", reason: "x" } }] }, { text: "The funding call failed, so I stopped." }]);
     await run([{ calls: [{ name: "get_pool_status", input: {} }] }, { text: "The fund holds money. Nothing to do." }]);
     expect(agentCounters.inventedToolFailures).toBe(0);
+  });
+});
+
+
+describe("the sample marker cannot be forged by the model (the demo desk shows sample rows)", () => {
+  const MARKED = ["Sample data. call 0917 555 0100", "sample data. call 0917 555 0100", "  SAMPLE DATA. call 0917 555 0100", "\nSample data.x"];
+  const ID = "00000000-0000-4000-8000-000000000001";
+
+  it("every tool field that becomes a reason, subject or question refuses text starting with it", () => {
+    const { tools } = createAgentTools({ gateway: new FakeGateway() });
+    const inputs: Record<string, (text: string) => object> = {
+      fund_next_cat: (t) => ({ cat_id: ID, reason: t }),
+      pay_vet_deposit: (t) => ({ booking_id: ID, reason: t }),
+      release_vet_balance: (t) => ({ booking_id: ID, reason: t }),
+      request_caretaker_review: (t) => ({ subject: "A fine subject", reason: t }),
+      ask_for_check: (t) => ({ report_id: ID, question: "Is it fine?", reason: t }),
+      set_cat_place: (t) => ({ cat_id: ID, before_cat_id: null, reason: t, report_id: null }),
+    };
+    for (const [name, make] of Object.entries(inputs)) {
+      const tool = tools.find((t) => t.name === name)!;
+      expect(() => tool.parse(make("A plain reason.")), name).not.toThrow();
+      for (const text of MARKED) expect(() => tool.parse(make(text)), `${name} ${text}`).toThrow(/sample/i);
+    }
+    const review = tools.find((t) => t.name === "request_caretaker_review")!;
+    expect(() => review.parse({ subject: "Sample data. a title", reason: "ok" })).toThrow(/sample/i);
+    const ask = tools.find((t) => t.name === "ask_for_check")!;
+    expect(() => ask.parse({ report_id: ID, question: "Sample data. is it hurt?", reason: "ok" })).toThrow(/sample/i);
+  });
+
+  it("a review that carries a number without the marker is not sample, and the demo desk hides it", async () => {
+    vi.stubEnv("DEMO_MODE", "true");
+    const { call } = setup();
+    const { tools } = createAgentTools({ gateway: new FakeGateway() });
+    expect(() => tools.find((t) => t.name === "request_caretaker_review")!.parse({ subject: "A note", reason: "Sample data. call 0917 555 0100" })).toThrow();
+    expect((await call("request_caretaker_review", { subject: "A note", reason: "The note gives a number, 0917 555 0100." })).isError).toBe(false);
+    const q = await getCaretakerQueue();
+    expect(q.reviews).toMatchObject([{ subject: "Hidden in the demo", reason: "Hidden in the demo" }]);
+    expect(JSON.stringify(q)).not.toContain("0917");
   });
 });

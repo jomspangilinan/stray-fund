@@ -401,16 +401,22 @@ export function noteEchoes(reason: string, grams: NoteGrams): boolean {
 }
 
 /**
- * What a reason may say without counting as a leak: a peso amount (₱450, ₱1,350.50), a day count (12 days) and the
+ * What a reason may say without counting as a leak: at most two peso amounts (₱450, ₱1,350.50: no leading zero, no space after the sign, six digits at most) and two day counts (12 days: four digits at most, no leading zero) and the
  * words PayPal and Treasurer. Taken out before the check only. A phone number or a street number has no such shape.
  */
-const PESOS = /₱\s?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?(?![\p{N}])|₱\s?\d{1,7}(?:\.\d{1,2})?(?![\p{N}])/gu;
-const DAYS = /(?<![\p{N}.,-])\d{1,3}\s+days?(?![\p{L}\p{N}])/giu;
+const PESOS = /₱(?:[1-9]\d{0,2},\d{3}|[1-9]\d{0,5}|0)(?:\.\d{1,2})?(?![\p{N}])/gu;
+const DAYS = /(?<![\p{N}.,-])(?:[1-9]\d{0,3}|0)\s+days?(?![\p{L}\p{N}])/giu;
 const FUND_WORDS = /(?<![\p{L}\p{N}])(?:PayPal|Treasurer)(?![\p{L}\p{N}])/gu;
+/** Only the first two of each shape are let through, so a string of odd groups cannot carry a number. */
+const MAX_LET_THROUGH = 2;
+const firstTwo = (text: string, re: RegExp, to: string): string => {
+  let n = 0;
+  return text.replace(re, (m) => (++n <= MAX_LET_THROUGH ? to : m));
+};
 
 export function reasonIsSafe(reason: string, catName: string, knownNames: readonly string[], notes: NoteGrams = new Set()): boolean {
   if (noteEchoes(reason, notes)) return false;
-  let text = reason.replace(PESOS, "money").replace(DAYS, "some time").replace(FUND_WORDS, "the fund");
+  let text = firstTwo(firstTwo(reason, PESOS, "money"), DAYS, "some time").replace(FUND_WORDS, "the fund");
   const names = [...new Set([catName, ...knownNames].map((n) => n.trim()).filter((n) => n && nameIsSafe(n)))].sort((a, b) => b.length - a.length);
   for (const n of names) {
     const escaped = n.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");

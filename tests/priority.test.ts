@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { ToolError } from "@anthropic-ai/sdk/lib/tools/ToolError";
 import { closePool, db } from "../src/server/db/client";
 import { agentActions, allocations, catPriority, cats, donations, payouts, reports, users, wakeups } from "../src/server/db/schema";
-import { applyMoves, fundingOrder, placeCat, type Move } from "../src/server/agent/priority";
+import { applyMoves, checkedCats, fundingOrder, placeCat, type Move } from "../src/server/agent/priority";
 import type { RankableCat, RankedCat } from "../src/server/agent/rank";
 import { createAgentTools } from "../src/server/agent/tools";
 import { runAgent } from "../src/server/agent/run";
@@ -28,7 +28,8 @@ async function makeCat(over: Partial<typeof cats.$inferInsert> = {}) {
 async function makeReport(over: Partial<typeof reports.$inferInsert> & { catId: string | null }) {
   const [r] = await db
     .insert(reports)
-    .values({ claim: "kitten", source: "neighbour", status: "open", reportedOn: "2026-11-03", ...over })
+    // A decided report always has a decision time, which the 30 day window for a clearance reads.
+    .values({ claim: "kitten", source: "neighbour", status: "open", reportedOn: "2026-11-03", ...(over.status && over.status !== "open" ? { decidedAt: new Date() } : {}), ...over })
     .returning();
   return r;
 }
@@ -703,5 +704,25 @@ describe("the public feed filters the treasurer's reasons", () => {
     const body = JSON.stringify(await (await GET()).json());
     expect(body).not.toContain("Rizal");
     expect(body).toContain("The Treasurer changed the order after a check.");
+  });
+});
+
+describe("checkedCats", () => {
+  it("counts a cleared report for 30 days, like list_reports, and a confirmed report for as long as it stands", async () => {
+    const [fresh, stale, confirmed, open] = [await makeCat(), await makeCat(), await makeCat(), await makeCat()];
+    const decidedAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
+    await makeReport({ catId: fresh.id, claim: "injured", status: "cleared", decidedAt: decidedAgo(29) });
+    await makeReport({ catId: stale.id, claim: "injured", status: "cleared", decidedAt: decidedAgo(31) });
+    await makeReport({ catId: confirmed.id, claim: "injured", status: "confirmed", decidedAt: decidedAgo(200) });
+    await makeReport({ catId: open.id, claim: "injured", status: "open" });
+    expect(await checkedCats(db)).toEqual(new Set([fresh.id, confirmed.id]));
+  });
+
+  it("a stale clearance no longer forces a funding reason to name the cat", async () => {
+    const { call } = setup();
+    await addPool(300000);
+    const { mimi, tom } = await trio();
+    await makeReport({ catId: tom.id, claim: "injured", status: "cleared", decidedAt: new Date(Date.now() - 40 * 86_400_000) });
+    expect((await call("fund_next_cat", { cat_id: mimi.id, reason: "Mimi is first in the ranking." })).isError).toBe(false);
   });
 });

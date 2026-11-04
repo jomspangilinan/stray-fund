@@ -16,7 +16,7 @@ import { manilaDate } from "../public";
 import { isPlainText } from "../plainText";
 import { fileReview } from "./review";
 import { HOLD_CLAIMS, heldCatIds } from "../reports";
-import { checkedCats, fundingOrder, placeCat } from "./priority";
+import { CLEARED_SHOWN_DAYS, checkedCats, fundingOrder, placeCat } from "./priority";
 import { effectiveSex } from "./rank";
 
 export const FUND_ACTION = "fund_cat";
@@ -28,7 +28,6 @@ const MAX_WAITING = 50;
 const MAX_REPORTS = 50;
 const MAX_QUESTION = 240;
 const MAX_NOTE_SHOWN = 500;
-const CLEARED_SHOWN_DAYS = 30;
 
 export type AgentToolDeps = {
   gateway?: PayoutGateway;
@@ -42,7 +41,9 @@ const plainText = (max: number) =>
     .trim()
     .min(1)
     .max(max)
-    .refine(isPlainText, "Plain words only: no markup, links or email addresses.");
+    .refine(isPlainText, "Plain words only: no markup, links or email addresses.")
+    // The demo desk shows rows that start with the sample marker, so the model may never write it.
+    .refine((s) => !s.trimStart().toLowerCase().startsWith("sample data"), "Do not start with the words 'Sample data'. Those are kept for our own sample rows.");
 
 const reason = plainText(MAX_REASON).describe(
   "Why, in plain words for neighbours, one or two sentences. Shown on the public page.",

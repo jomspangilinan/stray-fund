@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db, type Tx } from "../db/client";
 import { agentActions, catPriority, cats, reports } from "../db/schema";
 import { heldCatIds } from "../reports";
@@ -64,11 +64,21 @@ async function rankedAvailable(tx: Tx | typeof db, now: Date): Promise<RankedCat
 const CHECKED = ["confirmed", "cleared"];
 
 /** Cats with a report a person checked: confirmed by a caretaker, or cleared by a vet. Any claim. */
+/** A vet's clearance counts, and can be cited, for this many days. */
+export const CLEARED_SHOWN_DAYS = 30;
+
+/** Cats with a report a person checked: confirmed with no limit, cleared for 30 days only, as list_reports shows. */
 export async function checkedCats(tx: Tx | typeof db): Promise<Set<string>> {
   const rows = await tx
     .selectDistinct({ catId: reports.catId })
     .from(reports)
-    .where(and(inArray(reports.status, CHECKED), isNotNull(reports.catId)));
+    .where(
+      and(
+        inArray(reports.status, CHECKED),
+        isNotNull(reports.catId),
+        or(eq(reports.status, "confirmed"), sql`${reports.decidedAt} > now() - make_interval(days => ${CLEARED_SHOWN_DAYS})`),
+      ),
+    );
   return new Set(rows.flatMap((r) => (r.catId ? [r.catId] : [])));
 }
 
