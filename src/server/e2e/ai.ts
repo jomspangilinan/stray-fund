@@ -128,13 +128,26 @@ type OpenBooking = {
   balanceStatus: string;
 };
 
+type ReportRow = { cat_id: string; cat_name: string; cat_status: string; status: string };
+
 function funding(steps: Step[]): AiResponse {
   const last = steps.at(-1);
   const n = steps.length + 1;
-  if (!last || last.name === "fund_next_cat") return call(n, "get_pool_status", {});
+  // A report wakeup starts by reading the reports, then goes on as any other wakeup would.
+  if (!last || last.name === "fund_next_cat" || (last.name === "list_reports" && steps.length === 1)) return call(n, "get_pool_status", {});
   if (last.name === "get_pool_status") return call(n, "list_waiting_cats", {});
   const pool = [...steps].reverse().find((s) => s.name === "get_pool_status")?.data as { available?: number; packagePrice?: number } | undefined;
   const cats = (last.data.cats as WaitingCat[] | undefined) ?? [];
+  if (last.name === "list_waiting_cats" && cats.length === 0) {
+    // Nothing is free to fund. A pushy treasurer reads the reports and asks for a cat that is on hold anyway,
+    // so the test proves the real tool says no and does not depend on this fake choosing to wait.
+    return steps.some((s) => s.name === "fund_next_cat") ? say("No cat is waiting for funding, so there is nothing to do.") : call(n, "list_reports", {});
+  }
+  if (last.name === "list_reports") {
+    const held = ((last.data.reports as ReportRow[] | undefined) ?? []).find((r) => r.cat_status === "queued" && (r.status === "open" || r.status === "confirmed"));
+    if (!held) return say("No cat is waiting for funding, so there is nothing to do.");
+    return call(n, "fund_next_cat", { cat_id: held.cat_id, reason: `${held.cat_name} should be funded now, whatever the report says.` });
+  }
   if (cats.length === 0) return say("No cat is waiting for funding, so there is nothing to do.");
   const top = cats[0];
   if ((pool?.available ?? 0) < (pool?.packagePrice ?? Infinity)) {
@@ -180,9 +193,9 @@ function treasurer(p: Params): AiResponse {
   const lastStep = steps.at(-1);
   if (lastStep?.name === "fund_next_cat") log({ call: "treasurer.fund_next_cat", ok: lastStep.ok, code: lastStep.data.code ?? null });
   if (steps.at(-1)?.ok === false) return say("A step was refused, so I am stopping. A caretaker can look at it.");
-  // A report changed: the fake reads them and changes nothing, so the test controls the order itself.
-  if (kind === "report_changed") return steps.length === 0 ? call(1, "list_reports", {}) : say("I read the reports and the order stays as it is.");
-  return kind === "donation_captured" || kind === "cat_queued" ? funding(steps) : bookings(steps);
+  // A report changed: the fake reads the reports, never moves the order, and then funds the first free cat if the pool covers it.
+  if (kind === "report_changed" && steps.length === 0) return call(1, "list_reports", {});
+  return kind === "donation_captured" || kind === "cat_queued" || kind === "report_changed" ? funding(steps) : bookings(steps);
 }
 
 export const fakeAiTransport: AiTransport = async (params) => {

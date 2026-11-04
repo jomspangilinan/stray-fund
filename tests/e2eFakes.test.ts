@@ -8,7 +8,7 @@ import { assessPhoto } from "../src/server/ai/assess";
 import { readReceipt } from "../src/server/ai/receipt";
 import { treasurerClient } from "../src/server/ai/subscription";
 import { closePool, db } from "../src/server/db/client";
-import { allocations, cats, donations, users } from "../src/server/db/schema";
+import { allocations, cats, donations, reports, users } from "../src/server/db/schema";
 import { assertE2eFakesSafe, e2eFakesEnabled, FakesInProduction } from "../src/server/e2e/guard";
 import { fakeDonationFee, fakeOrdersGateway, fakePayoutFee, fakePayoutGateway, fakeVerifyWebhook, FAKE_SIGNATURE } from "../src/server/e2e/paypal";
 import { captureDonation, createDonationOrder, ordersGateway, sdkOrdersGateway } from "../src/server/paypal/orders";
@@ -193,10 +193,20 @@ describe("the fake AI", () => {
     expect((await db.select().from(cats))[0].status).toBe("queued");
   });
 
-  it("as the treasurer, reads the reports on a report wakeup and changes nothing", async () => {
+  it("as the treasurer, reads the reports on a report wakeup and then funds the first free cat the pool covers", async () => {
     vi.stubEnv("E2E_FAKES", "true");
-    await queuedCat("Mocha", new Date());
+    const mocha = await queuedCat("Mocha", new Date());
     await gift(150_000);
+    const result = await runAgent({ kind: "report_changed", payload: {} }, { client: treasurerClient(), loadToolkit: async () => [] });
+    expect(result).toMatchObject({ stop: "end_turn", actions: ["fund_next_cat"] });
+    expect((await db.select().from(allocations))[0]).toMatchObject({ catId: mocha.id, amount: 150_000 });
+  });
+
+  it("as the treasurer, asks for a cat on hold anyway and the real tool refuses it, with the pool full", async () => {
+    vi.stubEnv("E2E_FAKES", "true");
+    const mocha = await queuedCat("Mocha", new Date());
+    await gift(150_000);
+    await db.insert(reports).values({ catId: mocha.id, claim: "injured", source: "neighbour", status: "confirmed", reportedOn: "2026-11-01" });
     const result = await runAgent({ kind: "report_changed", payload: {} }, { client: treasurerClient(), loadToolkit: async () => [] });
     expect(result).toMatchObject({ stop: "end_turn", actions: [] });
     expect((await db.select().from(cats))[0].status).toBe("queued");

@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, request, test, type Page } from "@playwright/test";
+import { BASE_URL } from "./env";
 import { Db, fakePayPalCalls, PAYPAL_HEADERS, payoutEvent, pickRole, receiptImage, signInAs } from "./helpers";
 
 /*
- * The whole story, once, against the real app: a neighbour spots a cat, two neighbours agree it is not yet
- * neutered, donors give, the treasurer funds it, a vet books and is paid a deposit a caretaker approves (every deposit waits for one),
+ * The whole story, once, against the real app: a neighbour spots a cat and reports it hurt in the same screen, a
+ * caretaker confirms the report, the treasurer is refused when it asks to fund the cat, a vet clears it, two neighbours
+ * agree it is not yet neutered, donors give, the treasurer funds it, a vet books and is paid a deposit a caretaker approves (every deposit waits for one),
  * sends a receipt and a photo, a caretaker confirms the ear-tip, the balance is approved and paid, and every
  * peso adds up. Only PayPal and the AI are fake (E2E_FAKES). The database, the money gate, the guardrails,
  * the ledger, the worker and every page are the real ones. All money below is in centavos.
@@ -27,6 +29,13 @@ function coordinateForms(value: number): string[] {
 }
 
 const EXACT = { lat: "10.4321", lng: "120.8765" };
+
+// A hostile note: a phone number, a street and a real-looking name. None of it may reach a public page.
+const NOTE = "Call Marites Dela Cruz on 0917 555 0142, the cat is limping near 12 Mabini Street.";
+const NOTE_PIECES = ["Marites", "Dela Cruz", "0917", "555 0142", "Mabini", "limping near"];
+
+/** What the fake treasurer was told when it asked the real tool to fund a cat, in order. */
+const fundAsks = () => fakePayPalCalls().filter((c) => c.call === "treasurer.fund_next_cat");
 
 const fakeSdk = readFileSync(path.join(__dirname, "fake-paypal-sdk.js"), "utf8");
 const peso = (c: number) => `₱${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
@@ -85,6 +94,30 @@ async function paypalConfirms(page: Page, payoutId: string, fee: string, eventId
   expect(await res.json()).toEqual({ result: "processed" });
 }
 
+/** Public pages and answers for a stranger: no note text, and the exact place at no precision above 2 decimals. */
+async function publicPagesAreClean(catId: string) {
+  const sighting = await db.one<{ exact_lat: number; exact_lng: number }>("select exact_lat, exact_lng from sightings where cat_id = $1", [catId]);
+  const stranger = await request.newContext({ baseURL: BASE_URL });
+  try {
+    const paths = ["/priority", "/api/priority", `/cats/${catId}`, `/api/cats/${catId}`, "/agent", "/api/agent/feed", "/api/ledger"];
+    for (const p of paths) {
+      for (const rsc of [false, true]) {
+        const res = await stranger.get(p, rsc ? { headers: { RSC: "1" } } : {});
+        expect(res.status(), p).toBeLessThan(400);
+        const body = await res.text();
+        // The page really carries the cat, so a clean scan means something.
+        if (p.includes("priority") && !rsc) expect(body, `${p} must name the cat`).toContain("Mocha");
+        for (const piece of NOTE_PIECES) expect(body, `${p} must not contain "${piece}"`).not.toContain(piece);
+        for (const secret of [...coordinateForms(sighting.exact_lat), ...coordinateForms(sighting.exact_lng)]) {
+          expect(body, `${p} must not contain the coordinate ${secret}`).not.toContain(secret);
+        }
+      }
+    }
+  } finally {
+    await stranger.dispose();
+  }
+}
+
 test("a stray cat is spotted, funded, neutered and paid for, and every peso adds up", async ({ page, context }) => {
   await context.route("**/sdk/js**", (route) => route.fulfill({ contentType: "application/javascript", body: fakeSdk }));
 
@@ -101,6 +134,11 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     await shutter.click();
     await expect(page.getByRole("heading", { name: "New cat spotted!" })).toBeVisible();
     await expect(page.getByText("Mocha", { exact: true })).toBeVisible();
+    // The same screen asks whether something is wrong. The photo just taken is the evidence, and the note stays private.
+    await page.getByRole("checkbox", { name: "Hurt" }).click();
+    await page.getByLabel("Add a detail (only caretakers see this)").fill(NOTE);
+    await page.getByRole("button", { name: "Send to a caretaker" }).click();
+    await expect(page.getByText("Thanks. A caretaker will check.")).toBeVisible();
     await page.getByRole("link", { name: "See the card" }).first().click();
     await page.waitForURL(/\/cats\/[0-9a-f-]{36}$/);
     catId = page.url().split("/").pop()!;
@@ -114,6 +152,15 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     // The finder's phone sent the exact place, and the server keeps it private.
     expect([String(sighting.exact_lat), String(sighting.exact_lng)]).toEqual([EXACT.lat, EXACT.lng]);
     expect(await catRow(catId)).toMatchObject({ status: "spotted", name: "Mocha" });
+    // A neighbour's word is a claim: an open report tied to that photo, and no flag on the cat.
+    expect(await db.one("select claim, source, status, note, sighting_id is not null as has_photo from reports where cat_id = $1", [catId])).toEqual({
+      claim: "injured",
+      source: "neighbour",
+      status: "open",
+      note: NOTE,
+      has_photo: true,
+    });
+    expect(await db.one("select flags from cats where id = $1", [catId])).toEqual({ flags: [] });
   });
 
   await test.step("two neighbours say there is no ear-tip, so the cat joins the queue", async () => {
@@ -133,8 +180,41 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     await wakeupsSettled();
   });
 
+  // ---------------------------------------------------------------- the report
+  await test.step("the cat is on hold, the treasurer's ask to fund it is refused, and the public list holds no note", async () => {
+    await expect.poll(() => fundAsks().length, { timeout: 60_000 }).toBeGreaterThan(0);
+    for (const a of fundAsks()) expect(a).toMatchObject({ ok: false, code: "CAT_ON_HOLD" });
+    expect(await db.one("select count(*)::int as n from allocations where cat_id = $1", [catId])).toMatchObject({ n: 0 });
+
+    await page.goto("/priority");
+    await expect(page.getByRole("heading", { name: "Needs a person first" })).toBeVisible();
+    await expect(page.getByText("Neighbour says hurt").first()).toBeVisible();
+    await publicPagesAreClean(catId);
+  });
+
+  await test.step("the caretaker's desk shows the report first, and a caretaker confirms it", async () => {
+    await pickRole(page, "Caretaker");
+    await page.goto("/caretaker");
+    const first = page.getByRole("main").getByRole("listitem").first();
+    await expect(first).toContainText("Neighbour says");
+    await expect(first).toContainText("About Mocha");
+    await expect(first.getByRole("img", { name: "The photo this report is about" })).toBeVisible();
+    // The open demo hides a visitor's own note from the next visitor, even a caretaker.
+    for (const piece of NOTE_PIECES) await expect(page.locator("body")).not.toContainText(piece);
+    const before = fundAsks().length;
+    await first.getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect.poll(async () => (await db.one<{ status: string }>("select status from reports where cat_id = $1", [catId])).status).toBe("confirmed");
+    expect(await db.one("select flags from cats where id = $1", [catId])).toEqual({ flags: ["injured"] });
+    // Confirmed is not cleared: the treasurer wakes, asks again, and is refused again.
+    await expect.poll(() => fundAsks().length, { timeout: 60_000 }).toBeGreaterThan(before);
+    expect(fundAsks().at(-1)).toMatchObject({ ok: false, code: "CAT_ON_HOLD" });
+    await wakeupsSettled();
+    expect((await catRow(catId)).status).toBe("queued");
+  });
+
   // ---------------------------------------------------------------- donate
-  await test.step("a donor gives PHP 1,500: too little to cover the package after PayPal's fee, so the treasurer waits", async () => {
+  await test.step("a donor gives PHP 1,500: too little to cover the package after PayPal's fee, and the cat is still on hold", async () => {
+    const before = fundAsks().length;
     await donate(page, "e2e_donor", "₱1,500", DONATION_1.gross, DONATION_1.fee);
     await wakeupsSettled();
     expect((await catRow(catId)).status).toBe("queued");
@@ -143,14 +223,31 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     expect(DONATION_1.gross - DONATION_1.fee).toBeLessThan(PACKAGE);
 
     // The fake treasurer asked for the funding anyway. The real tool must have said no, so this proves the rule.
-    const asked = fakePayPalCalls().filter((c) => c.call === "treasurer.fund_next_cat");
+    // The hold is checked before the money, so a confirmed report is what it names.
+    const asked = fundAsks().slice(before);
     expect(asked.length).toBeGreaterThan(0);
-    for (const a of asked) expect(a).toMatchObject({ ok: false, code: "INSUFFICIENT_FUNDS" });
+    for (const a of asked) expect(a).toMatchObject({ ok: false, code: "CAT_ON_HOLD" });
     expect(await db.one("select count(*)::int as n from allocations where cat_id = $1", [catId])).toMatchObject({ n: 0 });
     expect(await db.one("select count(*)::int as n from agent_actions where action = 'fund_cat'")).toMatchObject({ n: 0 });
   });
 
-  await test.step("a second donor gives PHP 500 and the treasurer funds the cat through its real tools", async () => {
+  await test.step("a vet clears the cat for surgery; only then does the pool being short stop the treasurer", async () => {
+    const before = fundAsks().length;
+    await pickRole(page, "Vet");
+    await page.goto("/vet");
+    await page.getByRole("button", { name: "Clear Mocha for surgery" }).click();
+    await page.getByRole("group", { name: "Check before clearing" }).getByRole("button", { name: "Clear", exact: true }).click();
+    await expect.poll(async () => (await db.one<{ status: string }>("select status from reports where cat_id = $1", [catId])).status).toBe("cleared");
+    expect(await db.one("select flags from cats where id = $1", [catId])).toEqual({ flags: ["injured"] });
+    await expect.poll(() => fundAsks().length, { timeout: 60_000 }).toBeGreaterThan(before);
+    await wakeupsSettled();
+    // Not on hold now, so the refusal is about money.
+    expect(fundAsks().at(-1)).toMatchObject({ ok: false, code: "INSUFFICIENT_FUNDS" });
+    expect((await catRow(catId)).status).toBe("queued");
+    expect(await db.one("select count(*)::int as n from agent_actions where action = 'fund_cat'")).toMatchObject({ n: 0 });
+  });
+
+  await test.step("a second donor gives PHP 500 and the treasurer funds the cleared cat through its real tools", async () => {
     await donate(page, "e2e_donor2", "₱500", DONATION_2.gross, DONATION_2.fee);
     await expect.poll(async () => (await catRow(catId)).status, { timeout: 60_000 }).toBe("funded");
     await wakeupsSettled();
@@ -339,6 +436,23 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     await expect(page.getByRole("heading", { name: "Ledger" })).toBeVisible();
   });
 
+  await test.step("the cat's page tells the story in one timeline: who reported, who checked, the treasurer's decision and each payment", async () => {
+    await signInAs(page, "e2e_finder");
+    await page.goto(`/cats/${catId}`);
+    const titles = await page.locator("ol li > div.min-w-0 > p:first-child").allTextContents();
+    // Each step, in the order it happened. Care steps with only a day sort by that day, so they are not in this list.
+    const story = ["Neighbour reported hurt", "Caretaker confirmed this cat is hurt", "Vet cleared this cat for surgery", "Treasurer funded this cat", "Deposit paid through PayPal", "Balance paid through PayPal"];
+    expect(titles.filter((t) => story.includes(t))).toEqual(story);
+    // Steps still ahead are shown, and marked as not yet done.
+    expect(titles).toEqual(expect.arrayContaining(["Adoptable (not yet)", "Adopted (not yet)"]));
+    // The page names who did each one, and links the payments to the Ledger.
+    const list = page.getByRole("list").filter({ hasText: "Neighbour reported hurt" });
+    await expect(list.getByText("The Treasurer (AI)")).toBeVisible();
+    await expect(list.getByText("PayPal", { exact: true }).first()).toBeVisible();
+    await expect(list.getByRole("link", { name: "See it on the Ledger" }).first()).toBeVisible();
+    for (const piece of NOTE_PIECES) await expect(page.locator("body")).not.toContainText(piece);
+  });
+
   await test.step("Helped shows the cat to the people whose money stayed with it, and Cats shows it neutered", async () => {
     // The surplus goes back newest gift first: the second donor's share returns whole, and the rest comes off the first donor's.
     const kept = await db.rows<{ username: string; kept: number }>(
@@ -409,7 +523,8 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
   });
 
   // ---------------------------------------------------------------- privacy
-  await test.step("no public page or answer holds the exact place, a private key or an email", async () => {
+  await test.step("no public page or answer holds the exact place, a note, a private key or an email", async () => {
+    await publicPagesAreClean(catId);
     const sighting = await db.one<{ exact_lat: number; exact_lng: number }>("select exact_lat, exact_lng from sightings where cat_id = $1", [catId]);
     const cat = await db.one<{ fuzzed_lat: number; fuzzed_lng: number }>("select fuzzed_lat, fuzzed_lng from cats where id = $1", [catId]);
     expect([cat.fuzzed_lat, cat.fuzzed_lng]).not.toEqual([Number(EXACT.lat), Number(EXACT.lng)]);
