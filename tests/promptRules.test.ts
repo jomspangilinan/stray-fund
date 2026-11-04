@@ -47,6 +47,12 @@ describe("prompt rules that the money and privacy checks lean on", () => {
     expect(SYSTEM_PROMPT).toContain("a vet cleared for surgery");
   });
 
+  it("a checked report on a cat behind another must be weighed and the reason must show it, and tools are called before they are described", () => {
+    expect(SYSTEM_PROMPT).toContain("you must weigh the two cats and show it");
+    expect(SYSTEM_PROMPT).toContain("A reason that never mentions the checked report is not enough.");
+    expect(SYSTEM_PROMPT).toContain("Never say a tool is unavailable unless a call to it failed.");
+  });
+
   it("the money rules stay word for word", () => {
     for (const line of [
       "You never choose an amount or a payee. The tools work these out, and a code-enforced gate can refuse any payment.",
