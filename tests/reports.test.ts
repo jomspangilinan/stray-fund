@@ -6,6 +6,7 @@ import {
   REPORT_WAKEUP,
   attachReports,
   clearCatForSurgery,
+  filePhotoReports,
   confirmReport,
   dismissReport,
   fileReport,
@@ -42,7 +43,7 @@ const held = () => db.transaction((tx) => heldCatIds(tx));
 const wakeKinds = async () => (await db.select().from(wakeups)).map((w) => w.kind);
 
 async function file(over: Partial<Parameters<typeof fileReport>[1]> & { catId: string | null }) {
-  const sighting = over.sightingId ? { id: over.sightingId } : await makeSighting({ catId: over.catId });
+  const sighting = over.sightingId ? { id: over.sightingId } : await makeSighting({ catId: over.catId, caughtByUserId: over.reporterId ?? null });
   return db.transaction((tx) =>
     fileReport(tx, {
       sightingId: sighting.id,
@@ -247,6 +248,7 @@ describe("a report with no cat yet", () => {
     const [a, b] = [await makeCat(), await makeCat()];
     const s = await makeSighting();
     const other = await makeSighting({ state: "needs_review" });
+    await db.update(sightings).set({ catId: a.id }).where(eq(sightings.id, s.id));
     const withCat = await file({ catId: a.id, sightingId: s.id });
     const unrelated = await file({ catId: null, sightingId: other.id });
     await db.transaction((tx) => attachReports(tx, s.id, b.id));
@@ -315,15 +317,20 @@ describe("waking the treasurer", () => {
     expect(await wakeKinds()).toHaveLength(2);
   });
 
-  it("fileReport wakes again once the pending one is older than 15 minutes or no longer pending", async () => {
+  it("fileReport wakes again once the last wakeup is older than 15 minutes", async () => {
     const cat = await makeCat();
     await file({ catId: cat.id });
     await db.update(wakeups).set({ createdAt: new Date(Date.now() - 16 * 60_000) });
     await file({ catId: cat.id, claim: "sick" });
     expect(await wakeKinds()).toHaveLength(2);
+  });
+
+  it("fileReport counts a wakeup the worker already took: at most one per cat per 15 minutes, whatever its status", async () => {
+    const cat = await makeCat();
+    await file({ catId: cat.id });
     await db.update(wakeups).set({ status: "done" });
-    await file({ catId: cat.id, claim: "pregnant" });
-    expect(await wakeKinds()).toHaveLength(3);
+    await file({ catId: cat.id, claim: "sick" });
+    expect(await wakeKinds()).toHaveLength(1);
   });
 
   it("a report with no cat yet wakes nothing", async () => {
@@ -354,5 +361,126 @@ describe("the audit trail", () => {
     await db.transaction((tx) => confirmReport(tx, id, care.id));
     expect(await db.select().from(agentActions)).not.toHaveLength(0);
     expect(await listAgentActions()).toEqual([]);
+  });
+});
+
+describe("one gate for attaching (I1, I2, I5)", () => {
+  it("two cat-less duplicates from one reporter attach one and close the other, and settling does not throw", async () => {
+    const cat = await makeCat();
+    const me = await makeUser();
+    const s = await makeSighting({ state: "needs_review", caughtByUserId: me.id });
+    const a = await file({ catId: null, sightingId: s.id, reporterId: me.id });
+    const b = await file({ catId: null, sightingId: s.id, reporterId: me.id });
+    expect(await db.transaction((tx) => attachReports(tx, s.id, cat.id))).toBe(1);
+    const rows = [await reportRow(a.id), await reportRow(b.id)];
+    expect(rows.map((r) => r.status).sort()).toEqual(["dismissed", "open"]);
+    const closed = rows.find((r) => r.status === "dismissed")!;
+    expect(closed).toMatchObject({ catId: null, decidedBy: null });
+    expect(closed.decidedAt).not.toBeNull();
+    expect((await db.select().from(agentActions)).map((r) => r.action)).toContain("report_dismissed");
+  });
+
+  it("a reporter whose claim on the cat was dismissed gets a cat-less repeat closed, not attached", async () => {
+    const cat = await makeCat();
+    const me = await makeUser();
+    const care = await makeCaretaker();
+    const first = await file({ catId: cat.id, reporterId: me.id });
+    await db.transaction((tx) => dismissReport(tx, first.id, care.id));
+    await db.update(reports).set({ reportedOn: "2020-01-01" }).where(eq(reports.id, first.id));
+    const s = await makeSighting({ state: "needs_review", caughtByUserId: me.id });
+    const again = await file({ catId: null, sightingId: s.id, reporterId: me.id });
+    expect(await db.transaction((tx) => attachReports(tx, s.id, cat.id))).toBe(0);
+    expect(await reportRow(again.id)).toMatchObject({ status: "dismissed", catId: null });
+    expect(await held()).toEqual(new Set());
+  });
+
+  it("closes a report whose claim the cat already has confirmed, or already has open, whatever the source", async () => {
+    const [flagged, busy] = [await makeCat({ flags: ["injured"] }), await makeCat()];
+    await file({ catId: busy.id });
+    const s1 = await makeSighting({ state: "needs_review" });
+    const s2 = await makeSighting({ state: "needs_review" });
+    const r1 = await file({ catId: null, sightingId: s1.id, source: "photo" });
+    const r2 = await file({ catId: null, sightingId: s2.id, source: "neighbour" });
+    await db.transaction((tx) => attachReports(tx, s1.id, flagged.id));
+    await db.transaction((tx) => attachReports(tx, s2.id, busy.id));
+    expect(await reportRow(r1.id)).toMatchObject({ status: "dismissed", catId: null });
+    expect(await reportRow(r2.id)).toMatchObject({ status: "dismissed", catId: null });
+  });
+});
+
+describe("a report is tied to its photo (I3)", () => {
+  it("refuses a cat that is not the sighting's cat, and a cat on a sighting with none", async () => {
+    const [a, b] = [await makeCat(), await makeCat()];
+    const matched = await makeSighting({ catId: a.id });
+    const open = await makeSighting({ state: "needs_review" });
+    await expect(file({ catId: b.id, sightingId: matched.id })).rejects.toMatchObject({ reason: "sighting_mismatch" });
+    await expect(file({ catId: b.id, sightingId: open.id })).rejects.toMatchObject({ reason: "sighting_mismatch" });
+    await expect(file({ catId: null, sightingId: matched.id })).rejects.toMatchObject({ reason: "sighting_mismatch" });
+    await file({ catId: a.id, sightingId: matched.id });
+    await file({ catId: null, sightingId: open.id });
+  });
+
+  it("refuses a neighbour's report on a photo someone else took", async () => {
+    const cat = await makeCat();
+    const [me, other] = [await makeUser(), await makeUser()];
+    const s = await makeSighting({ catId: cat.id, caughtByUserId: other.id });
+    await expect(file({ catId: cat.id, sightingId: s.id, reporterId: me.id })).rejects.toMatchObject({ reason: "not_your_photo" });
+    await file({ catId: cat.id, sightingId: s.id, reporterId: other.id });
+    // A photo claim has no signed-in reporter and is not held to this.
+    await file({ catId: cat.id, sightingId: s.id, source: "photo", claim: "sick" });
+  });
+});
+
+describe("photo claims after a decision (I4)", () => {
+  const photo = async (cat: { id: string }, claim: "injured" | "sick" = "injured") => {
+    const s = await makeSighting({ catId: cat.id });
+    await db.transaction((tx) => filePhotoReports(tx, s.id, cat.id, [claim]));
+  };
+
+  it("skips a claim dismissed on that cat in the last 30 days, and files it again after that", async () => {
+    const cat = await makeCat();
+    const care = await makeCaretaker();
+    await photo(cat);
+    const [r] = await db.select().from(reports);
+    await db.transaction((tx) => dismissReport(tx, r.id, care.id));
+    await photo(cat);
+    expect(await db.select().from(reports)).toHaveLength(1);
+    await db.update(reports).set({ decidedAt: new Date(Date.now() - 31 * 86_400_000) });
+    await photo(cat);
+    expect(await db.select().from(reports)).toHaveLength(2);
+  });
+
+  it("skips a claim the cat was vet-cleared of in the last 30 days", async () => {
+    const cat = await makeCat();
+    const [care, vet] = [await makeCaretaker(), await makeVet()];
+    await photo(cat);
+    const [r] = await db.select().from(reports);
+    await db.transaction((tx) => confirmReport(tx, r.id, care.id));
+    await db.update(cats).set({ flags: [] }).where(eq(cats.id, cat.id));
+    await db.transaction((tx) => clearCatForSurgery(tx, cat.id, vet.id));
+    await photo(cat);
+    expect(await db.select().from(reports)).toHaveLength(1);
+  });
+
+  it("leaves photo_agrees null on a photo report", async () => {
+    const cat = await makeCat();
+    const s = await makeSighting({ catId: cat.id, assessment: { flags: { injured: true } } });
+    await db.transaction((tx) => filePhotoReports(tx, s.id, cat.id, ["injured"]));
+    expect((await db.select().from(reports))[0].photoAgrees).toBeNull();
+  });
+});
+
+describe("staff reports on a conflict (M3)", () => {
+  it("makes the flag and the hold true again after set, clear, unset, reset on one day", async () => {
+    const cat = await makeCat();
+    const [care, vet] = [await makeCaretaker(), await makeVet()];
+    const input = { catId: cat.id, claim: "sick" as const, source: "caretaker" as const, reporterId: care.id };
+    await db.transaction((tx) => fileStaffReport(tx, input));
+    await db.transaction((tx) => clearCatForSurgery(tx, cat.id, vet.id));
+    await db.update(cats).set({ flags: [] }).where(eq(cats.id, cat.id));
+    await db.transaction((tx) => fileStaffReport(tx, input));
+    expect((await catRow(cat.id)).flags).toEqual(["sick"]);
+    expect(await held()).toEqual(new Set([cat.id]));
+    expect(await db.select().from(reports)).toHaveLength(1);
   });
 });

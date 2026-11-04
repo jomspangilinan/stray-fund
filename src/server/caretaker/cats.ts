@@ -11,7 +11,7 @@ import { NAME_APPROVED, NAME_DISMISSED, NAME_SET } from "../privateActions";
 import { parseCatName } from "@/lib/catNames";
 import { publishScrubbed, type Box } from "../photos";
 import { StoredObjectMissing } from "../storage";
-import { attachReports, fileStaffReport, HOLD_CLAIMS } from "../reports";
+import { attachReports, confirmOpenClaim, dismissCatlessReports, dismissConfirmedClaim, fileStaffReport, HOLD_CLAIMS } from "../reports";
 import { enqueueWakeup } from "../wakeups";
 import { autoPublishable, needsHumanTick, regionsOf } from "../photoGate";
 import { audit, flag, reqUuid, Refusal, type Handler } from "./shared";
@@ -90,6 +90,7 @@ export const sightingReject: Handler = async (caretakerId, body) => {
   return withColonyLock(async (tx) => {
     const s = await loadWaiting(tx, sightingId);
     await tx.update(sightings).set({ state: "rejected" }).where(and(eq(sightings.id, s.id), eq(sightings.state, "needs_review")));
+    await dismissCatlessReports(tx, s.id, caretakerId);
     await audit(tx, {
       action: "sighting_reviewed",
       caretakerId,
@@ -113,11 +114,14 @@ export const catSetDetails: Handler = async (caretakerId, body) => {
     const [cat] = await tx.select().from(cats).where(eq(cats.id, catId)).for("update");
     if (!cat) throw new Refusal(404, "There is no such cat.");
     await tx.update(cats).set({ sex, sexUnconfirmed: false, flags }).where(eq(cats.id, catId));
-    // A caretaker's word is a check. A newly set hurt, pregnant or sick flag is a confirmed report, so the cat is held
-    // until a vet clears it. A flag the cat already had is not filed again.
+    // A caretaker's word is a check. A flag taken off ends its confirmed hold. A flag newly set confirms the open reports
+    // for it, so the desk shows one card, and files a confirmed caretaker report only when there were none.
     for (const claim of HOLD_CLAIMS) {
+      if (cat.flags.includes(claim) && !flags.includes(claim)) await dismissConfirmedClaim(tx, catId, claim, caretakerId);
       if (flags.includes(claim) && !cat.flags.includes(claim)) {
-        await fileStaffReport(tx, { catId, claim, source: "caretaker", reporterId: caretakerId });
+        if ((await confirmOpenClaim(tx, catId, claim, caretakerId)) === 0) {
+          await fileStaffReport(tx, { catId, claim, source: "caretaker", reporterId: caretakerId });
+        }
       }
     }
     await audit(tx, {

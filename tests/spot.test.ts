@@ -284,7 +284,7 @@ describe("processSpot: new cats", () => {
     const rows = await db.select().from(reports);
     expect(rows.map((r) => r.claim).sort()).toEqual(["injured", "pregnant"]);
     for (const r of rows) {
-      expect(r).toMatchObject({ source: "photo", status: "open", catId: cat.id, reporterId: null, note: null, photoAgrees: true });
+      expect(r).toMatchObject({ source: "photo", status: "open", catId: cat.id, reporterId: null, note: null, photoAgrees: null });
       expect(r.sightingId).not.toBeNull();
     }
     expect(await wakeupKinds()).toContain("report_changed");

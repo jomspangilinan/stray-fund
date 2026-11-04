@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Tx } from "./db/client";
 import { agentActions, cats, reports, sightings, wakeups } from "./db/schema";
 import { REPORT_CLEARED, REPORT_CONFIRMED, REPORT_DISMISSED, REPORT_FILED } from "./privateActions";
@@ -24,7 +24,7 @@ export const REPORT_WAKEUP = "report_changed";
 /** A new report wakes the treasurer for a cat at most this often. A confirm or dismiss always does. */
 const WAKE_WINDOW_MINUTES = 15;
 
-export type ReportRefusalReason = "sighting_required" | "already_today" | "dismissed_before";
+export type ReportRefusalReason = "sighting_required" | "sighting_mismatch" | "not_your_photo" | "already_today" | "dismissed_before";
 
 /** A report that cannot be filed. The message is fixed text, so it is safe to show the person who filed. */
 export class ReportRefused extends Error {
@@ -36,6 +36,8 @@ export class ReportRefused extends Error {
 
 const MESSAGES: Record<ReportRefusalReason, string> = {
   sighting_required: "A report needs a photo taken at the spot.",
+  sighting_mismatch: "This report does not match the photo it was taken with.",
+  not_your_photo: "A report can only use a photo you took.",
   already_today: "You already reported this today. A caretaker will look.",
   dismissed_before: "A caretaker already checked this and did not find it.",
 };
@@ -59,15 +61,15 @@ async function audit(tx: Tx, action: string, reason: string, inputs: object, by:
   await tx.insert(agentActions).values({ action, inputs, reason, status: "done", approvedBy: by });
 }
 
-/** Queues a wakeup for the cat unless one is already pending from the last 15 minutes. */
+/** Queues a wakeup for the cat unless one was queued for it in the last 15 minutes. */
 async function wakeOnce(tx: Tx, catId: string): Promise<void> {
   const [pending] = await tx
     .select({ id: wakeups.id })
     .from(wakeups)
     .where(
       and(
+        // Any status: the limit is one wakeup per cat per 15 minutes, even if the worker already took the last.
         eq(wakeups.kind, REPORT_WAKEUP),
-        eq(wakeups.status, "pending"),
         sql`${wakeups.payload}->>'catId' = ${catId}`,
         sql`${wakeups.createdAt} > now() - make_interval(mins => ${WAKE_WINDOW_MINUTES})`,
       ),
@@ -85,10 +87,13 @@ export async function fileReport(tx: Tx, input: NeighbourOrPhoto): Promise<{ id:
   // Checked at runtime as well as in the types: callers pass request data through casts.
   if (typeof input.sightingId !== "string" || input.sightingId === "") throw new ReportRefused("sighting_required");
   const [sighting] = await tx
-    .select({ assessment: sightings.assessment })
+    .select({ assessment: sightings.assessment, catId: sightings.catId, caughtBy: sightings.caughtByUserId })
     .from(sightings)
     .where(eq(sightings.id, input.sightingId));
   if (!sighting) throw new ReportRefused("sighting_required");
+  // One live photo backs one cat: the cat on the report is the sighting's cat, or both are still empty.
+  if ((sighting.catId ?? null) !== (input.catId ?? null)) throw new ReportRefused("sighting_mismatch");
+  if (input.source === "neighbour" && input.reporterId && sighting.caughtBy !== input.reporterId) throw new ReportRefused("not_your_photo");
 
   if (input.reporterId && input.catId) {
     const mine = and(eq(reports.catId, input.catId), eq(reports.reporterId, input.reporterId), eq(reports.claim, input.claim));
@@ -97,7 +102,8 @@ export async function fileReport(tx: Tx, input: NeighbourOrPhoto): Promise<{ id:
   }
 
   const flags = (sighting.assessment as { flags?: Record<string, unknown> } | null)?.flags;
-  const photoAgrees = sighting.assessment == null ? null : flags?.[input.claim] === true;
+  // A photo report came from this very assessment, so it cannot back itself up.
+  const photoAgrees = input.source === "photo" || sighting.assessment == null ? null : flags?.[input.claim] === true;
 
   const [row] = await tx
     .insert(reports)
@@ -126,25 +132,61 @@ export async function fileReport(tx: Tx, input: NeighbourOrPhoto): Promise<{ id:
   return { id: row.id };
 }
 
+export type BlockedReason = "dismissed_before" | "already_today" | "already_flagged" | "already_open";
+
+/** A photo claim dismissed, or cleared by a vet, on this cat within this many days is not filed again. */
+const PHOTO_COOLDOWN_DAYS = 30;
+
+/**
+ * The one check a report must pass to hold a cat that already exists: it is not a repeat by the same person the same
+ * day, not a claim that person had dismissed on this cat, not a fact the cat already has confirmed, and not a
+ * claim already open on the cat. filePhotoReports and attachReports both use it. `selfId` is the row being checked.
+ */
+async function blockedReason(
+  tx: Tx,
+  r: { catId: string; claim: string; reporterId: string | null; reportedOn?: string },
+  selfId?: string,
+): Promise<BlockedReason | null> {
+  const others = selfId ? sql`${reports.id} <> ${selfId}` : sql`true`;
+  const same = and(eq(reports.catId, r.catId), eq(reports.claim, r.claim), others);
+  if (r.reporterId) {
+    const [d] = await tx.select({ id: reports.id }).from(reports).where(and(same, eq(reports.reporterId, r.reporterId), eq(reports.status, "dismissed"))).limit(1);
+    if (d) return "dismissed_before";
+    const day = r.reportedOn ? sql`${r.reportedOn}::date` : manilaToday;
+    const [t] = await tx.select({ id: reports.id }).from(reports).where(and(same, eq(reports.reporterId, r.reporterId), sql`${reports.reportedOn} = ${day}`)).limit(1);
+    if (t) return "already_today";
+  }
+  const [cat] = await tx.select({ flags: cats.flags }).from(cats).where(eq(cats.id, r.catId));
+  if (cat?.flags.includes(r.claim)) return "already_flagged";
+  const [o] = await tx.select({ id: reports.id }).from(reports).where(and(same, eq(reports.status, "open"))).limit(1);
+  return o ? "already_open" : null;
+}
+
 /**
  * The AI's photo guesses of hurt, pregnant or sick, filed as reports from "photo" with a neighbour's power. A claim
- * the cat already has confirmed, or already has open, is not filed again, so every new photo of a hurt cat does not
- * add a card to the desk. With no cat yet the report waits for attachReports.
+ * that fails the shared check, or that was dismissed or vet-cleared on this cat in the last 30 days, is not filed, so
+ * a new photo of a hurt cat does not add a card or re-hold a cat a person just checked. With no cat yet the report
+ * waits for attachReports.
  */
 export async function filePhotoReports(tx: Tx, sightingId: string, catId: string | null, claims: readonly Claim[]): Promise<void> {
   const wanted = claims.filter((c) => (HOLD_CLAIMS as readonly string[]).includes(c));
-  if (wanted.length === 0) return;
-  let skip = new Set<string>();
-  if (catId) {
-    const [cat] = await tx.select({ flags: cats.flags }).from(cats).where(eq(cats.id, catId));
-    const open = await tx
-      .select({ claim: reports.claim })
-      .from(reports)
-      .where(and(eq(reports.catId, catId), eq(reports.status, "open")));
-    skip = new Set([...(cat?.flags ?? []), ...open.map((r) => r.claim)]);
-  }
   for (const claim of wanted) {
-    if (skip.has(claim)) continue;
+    if (catId) {
+      if (await blockedReason(tx, { catId, claim, reporterId: null })) continue;
+      const [recent] = await tx
+        .select({ id: reports.id })
+        .from(reports)
+        .where(
+          and(
+            eq(reports.catId, catId),
+            eq(reports.claim, claim),
+            inArray(reports.status, ["dismissed", "cleared"]),
+            sql`${reports.decidedAt} > now() - make_interval(days => ${PHOTO_COOLDOWN_DAYS})`,
+          ),
+        )
+        .limit(1);
+      if (recent) continue;
+    }
     await fileReport(tx, { sightingId, catId, claim, note: null, source: "photo", reporterId: null });
   }
 }
@@ -180,10 +222,13 @@ export async function fileStaffReport(
     .onConflictDoNothing()
     .returning({ id: reports.id });
   if (!row) {
+    // The same person already reported this today. Make it true again, whatever happened to it since.
     const [first] = await tx
-      .select({ id: reports.id })
-      .from(reports)
-      .where(and(eq(reports.catId, input.catId), eq(reports.reporterId, input.reporterId), eq(reports.claim, input.claim), sql`${reports.reportedOn} = ${manilaToday}`));
+      .update(reports)
+      .set({ status: "confirmed", decidedBy: input.reporterId, decidedAt: sql`now()` })
+      .where(and(eq(reports.catId, input.catId), eq(reports.reporterId, input.reporterId), eq(reports.claim, input.claim), sql`${reports.reportedOn} = ${manilaToday}`))
+      .returning({ id: reports.id });
+    await addFlag(tx, input.catId, input.claim);
     return { id: first.id };
   }
   await addFlag(tx, input.catId, input.claim);
@@ -239,27 +284,71 @@ export async function clearCatForSurgery(tx: Tx, catId: string, vetId: string): 
 }
 
 /**
- * A caretaker has sorted a photo the AI could not match. Reports filed on it with no cat now belong to the cat, and
- * hold it. A report that would repeat one the person already made on that cat today stays unattached.
+ * A caretaker has sorted a photo the AI could not match. Each report filed on it with no cat is checked one at a time
+ * against the shared gate, then attached and held, or closed as dismissed (no one decided, so decided_by is empty)
+ * and audited. Settling a sighting never fails because of a report.
  */
 export async function attachReports(tx: Tx, sightingId: string, catId: string): Promise<number> {
-  const attached = await tx
+  const waiting = await tx
+    .select()
+    .from(reports)
+    .where(and(eq(reports.sightingId, sightingId), isNull(reports.catId), eq(reports.status, "open")))
+    .orderBy(asc(reports.createdAt), asc(reports.id))
+    .for("update");
+  let attached = 0;
+  for (const r of waiting) {
+    const blocked = await blockedReason(tx, { catId, claim: r.claim, reporterId: r.reporterId, reportedOn: r.reportedOn }, r.id);
+    if (blocked) {
+      await tx.update(reports).set({ status: "dismissed", decidedBy: null, decidedAt: sql`now()` }).where(eq(reports.id, r.id));
+      await audit(tx, REPORT_DISMISSED, "A report was closed because the cat already had it.", { reportId: r.id, catId, claim: r.claim, because: blocked }, null);
+      continue;
+    }
+    await tx.update(reports).set({ catId }).where(eq(reports.id, r.id));
+    attached++;
+  }
+  if (attached > 0) await wakeOnce(tx, catId);
+  return attached;
+}
+
+/** A caretaker rejected the photo, so reports waiting on it with no cat are closed. */
+export async function dismissCatlessReports(tx: Tx, sightingId: string, caretakerId: string): Promise<number> {
+  const closed = await tx
     .update(reports)
-    .set({ catId })
-    .where(
-      and(
-        eq(reports.sightingId, sightingId),
-        isNull(reports.catId),
-        sql`not exists (
-          select 1 from reports o
-          where o.cat_id = ${catId} and o.claim = ${reports.claim} and o.reported_on = ${reports.reportedOn}
-            and o.reporter_id is not distinct from ${reports.reporterId} and ${reports.reporterId} is not null
-        )`,
-      ),
-    )
+    .set({ status: "dismissed", decidedBy: caretakerId, decidedAt: sql`now()` })
+    .where(and(eq(reports.sightingId, sightingId), isNull(reports.catId), eq(reports.status, "open")))
+    .returning({ id: reports.id, claim: reports.claim });
+  for (const r of closed) {
+    await audit(tx, REPORT_DISMISSED, "A caretaker dismissed a report.", { reportId: r.id, catId: null, claim: r.claim }, caretakerId);
+  }
+  return closed.length;
+}
+
+/** A caretaker took a flag off the card: the confirmed reports for that claim are dismissed and the hold ends. */
+export async function dismissConfirmedClaim(tx: Tx, catId: string, claim: Claim, caretakerId: string): Promise<number> {
+  const closed = await tx
+    .update(reports)
+    .set({ status: "dismissed", decidedBy: caretakerId, decidedAt: sql`now()` })
+    .where(and(eq(reports.catId, catId), eq(reports.claim, claim), eq(reports.status, "confirmed")))
     .returning({ id: reports.id });
-  if (attached.length > 0) await wakeOnce(tx, catId);
-  return attached.length;
+  for (const r of closed) {
+    await audit(tx, REPORT_DISMISSED, "A caretaker dismissed a report.", { reportId: r.id, catId, claim }, caretakerId);
+  }
+  if (closed.length > 0) await enqueueWakeup(tx, REPORT_WAKEUP, { catId });
+  return closed.length;
+}
+
+/** A caretaker set a flag on the card: open reports for that claim are confirmed, so the desk shows one card. */
+export async function confirmOpenClaim(tx: Tx, catId: string, claim: Claim, caretakerId: string): Promise<number> {
+  const done = await tx
+    .update(reports)
+    .set({ status: "confirmed", decidedBy: caretakerId, decidedAt: sql`now()` })
+    .where(and(eq(reports.catId, catId), eq(reports.claim, claim), eq(reports.status, "open")))
+    .returning({ id: reports.id });
+  for (const r of done) {
+    await audit(tx, REPORT_CONFIRMED, "A caretaker confirmed a report.", { reportId: r.id, catId, claim }, caretakerId);
+  }
+  if (done.length > 0) await enqueueWakeup(tx, REPORT_WAKEUP, { catId });
+  return done.length;
 }
 
 /** Cats a person must check before they can be funded: an open or confirmed hurt, pregnant or sick report. */

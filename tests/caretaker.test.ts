@@ -680,9 +680,42 @@ describe("cat details", () => {
     // Saving the card again, unchanged, files nothing new.
     expect((await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["sick", "kitten"] })).status).toBe(200);
     expect(await db.select().from(reports)).toHaveLength(1);
-    // Taking the flag off does not clear the hold: only a vet does.
-    expect((await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["kitten"] })).status).toBe(200);
+
+  });
+
+  it("removing a flag dismisses its confirmed report and lifts the hold", async () => {
+    const cat = await makeCat("spotted");
+    await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["injured"] });
     expect(await db.transaction((tx) => heldCatIds(tx))).toEqual(new Set([cat.id]));
+    await act("cat_set_details", { catId: cat.id, sex: "female", flags: [] });
+    expect(await db.transaction((tx) => heldCatIds(tx))).toEqual(new Set());
+    expect(await db.select().from(reports)).toMatchObject([{ claim: "injured", status: "dismissed", decidedBy: caretaker.id }]);
+  });
+
+  it("setting a flag confirms the open reports for it instead of filing a second card", async () => {
+    const cat = await makeCat("spotted");
+    const s = (await db.insert(sightings).values({ originalKey: "k", catId: cat.id, state: "matched" }).returning())[0];
+    const { id } = await db.transaction((tx) => fileReport(tx, { sightingId: s.id, catId: cat.id, claim: "injured", note: null, source: "photo", reporterId: null }));
+    await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["injured"] });
+    const rows = await db.select().from(reports);
+    expect(rows).toMatchObject([{ id, status: "confirmed", decidedBy: caretaker.id }]);
+  });
+
+  it("rejecting a sighting dismisses the reports that have no cat", async () => {
+    const s = await reviewSighting();
+    const { id } = await db.transaction((tx) => fileReport(tx, { sightingId: s.id, catId: null, claim: "injured", note: null, source: "photo", reporterId: null }));
+    expect((await act("sighting_reject", { sightingId: s.id })).status).toBe(200);
+    expect((await db.select().from(reports).where(eq(reports.id, id)))[0]).toMatchObject({ status: "dismissed", catId: null, decidedBy: caretaker.id });
+  });
+
+  it("settling a sighting never fails because of a duplicate report", async () => {
+    const cat = await makeCat("spotted");
+    const [me] = await db.insert(users).values({ username: `neighbour_${++seq}`, role: "donor" }).returning();
+    const s = await reviewSighting({ caughtByUserId: me.id });
+    for (let i = 0; i < 2; i++) {
+      await db.transaction((tx) => fileReport(tx, { sightingId: s.id, catId: null, claim: "injured", note: null, source: "neighbour", reporterId: me.id }));
+    }
+    expect((await act("sighting_merge", { sightingId: s.id, catId: cat.id })).status).toBe(200);
   });
 
   it("sets sex and flags from validated values only", async () => {
