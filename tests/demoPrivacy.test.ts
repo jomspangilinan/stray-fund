@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { closePool, db } from "../src/server/db/client";
-import { bookings, cats, receipts, sightings, users } from "../src/server/db/schema";
+import { agentActions, bookings, cats, receipts, reviewRequests, sightings, users } from "../src/server/db/schema";
 import { truncateAll } from "./helpers/db";
 import { gpsJpeg } from "./helpers/images";
 
@@ -19,6 +19,8 @@ import { SESSION_COOKIE, signSession, switchPersona, type PersonaKey } from "../
 import { storeOriginal, publishScrubbed } from "../src/server/photos";
 import { getVetBooking, listVetDashboard } from "../src/server/vetFlow";
 import { maskEmail } from "../src/server/demoPrivacy";
+import { addPayout, makeWorld } from "./helpers/payoutFixtures";
+import { SAMPLE_REASON } from "../src/server/demoPrivacy";
 
 const LAT = 10.987654321;
 const LNG = 120.123456789;
@@ -134,6 +136,44 @@ describe("I1: DEMO_MODE on, as the demo caretaker", () => {
     const pub = await get(held.id);
     expect(pub.status).toBe(302);
     expect(pub.headers.get("location")).toContain(key);
+  });
+});
+
+describe("I4: the AI's free text on the demo desk", () => {
+  const PHONE = "Note on Hapon gives the number 0917 555 0100 and says 12 Rizal St.";
+
+  async function payoutWithReason(reason: string) {
+    const w = await makeWorld({ funded: 250000 });
+    const payout = await addPayout(w, { amount: 45000, status: "awaiting_approval" });
+    await db.update(agentActions).set({ reason }).where(eq(agentActions.id, payout.actionId!));
+  }
+
+  it("a real payout reason and a real review show 'Hidden in the demo', and a sample one shows", async () => {
+    await payoutWithReason(PHONE);
+    await payoutWithReason(`${SAMPLE_REASON}Mingming was next in line.`);
+    await db.insert(reviewRequests).values([
+      { subject: "Hapon note", reason: PHONE },
+      { subject: `${SAMPLE_REASON}Sample question`, reason: `${SAMPLE_REASON}A sample reason.` },
+    ]);
+    await asPersona("caretaker");
+    const q = await getCaretakerQueue();
+    const reasons = q.awaitingApproval.map((p) => p.agentReason);
+    expect(reasons).toContain("Hidden in the demo");
+    expect(reasons).toContain(`${SAMPLE_REASON}Mingming was next in line.`);
+    expect(q.reviews.find((r) => r.reason === "Hidden in the demo")).toMatchObject({ subject: "Hidden in the demo" });
+    expect(q.reviews.find((r) => r.subject.startsWith(SAMPLE_REASON))?.reason).toBe(`${SAMPLE_REASON}A sample reason.`);
+    const text = JSON.stringify(q);
+    expect(text).not.toContain("0917");
+    expect(text).not.toContain("Rizal");
+  });
+
+  it("outside the demo a caretaker sees the real text", async () => {
+    vi.stubEnv("DEMO_MODE", "false");
+    await payoutWithReason(PHONE);
+    await db.insert(reviewRequests).values({ subject: "Hapon note", reason: PHONE });
+    const q = await getCaretakerQueue();
+    expect(q.awaitingApproval[0].agentReason).toBe(PHONE);
+    expect(q.reviews[0]).toMatchObject({ subject: "Hapon note", reason: PHONE });
   });
 });
 

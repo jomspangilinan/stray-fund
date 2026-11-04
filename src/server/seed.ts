@@ -20,6 +20,7 @@ import {
 } from "./db/schema";
 import { DEMO_CLINIC_NAME, ensureDemoPersonas } from "./demoPersonas";
 import { assertE2eFakesSafe, paypalIsLive } from "./e2e/guard";
+import { SAMPLE_REASON } from "./demoPrivacy";
 import { fuzzLocation } from "./location";
 import { getStorage } from "./storage";
 
@@ -35,7 +36,6 @@ import { getStorage } from "./storage";
  */
 
 export const SAMPLE_PREFIX = "SAMPLE-";
-export const SAMPLE_REASON = "Sample data. ";
 
 export class SeedRefused extends Error {
   constructor(message: string) {

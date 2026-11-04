@@ -15,7 +15,8 @@ import { catTimeline } from "../src/server/timeline";
 import { getCaretakerQueue } from "../src/server/caretaker/queue";
 import { heldCatIds } from "../src/server/reports";
 import { isSampleSightingKey } from "../src/server/demoPrivacy";
-import { assertNoRealLedger, assertSeedAllowed, describeTarget, SAMPLE_PREFIX, SAMPLE_REASON, seed, SeedRefused } from "../src/server/seed";
+import { assertNoRealLedger, assertSeedAllowed, describeTarget, SAMPLE_PREFIX, seed, SeedRefused } from "../src/server/seed";
+import { SAMPLE_REASON } from "../src/server/demoPrivacy";
 import { truncateAll } from "./helpers/db";
 
 const demoOn = () => vi.stubEnv("DEMO_MODE", "true");

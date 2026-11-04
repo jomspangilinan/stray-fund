@@ -49,3 +49,14 @@ export function hiddenInDemoResponse(): Response {
     },
   });
 }
+
+/** Every sentence the seed writes as the Treasurer or a review starts with this, which no real AI reason is told to do. */
+export const SAMPLE_REASON = "Sample data. ";
+
+/** Shown instead of the AI's free text on a staff screen in the demo, since a real visitor's note can come through it. */
+export const HIDDEN_TEXT = "Hidden in the demo";
+
+/** The AI's reason or a review's text for a staff screen: kept for our own sample rows, hidden in the demo otherwise. */
+export function demoSafeText(text: string, sample: string = text): string {
+  return hidePrivateInDemo() && !sample.startsWith(SAMPLE_REASON) ? HIDDEN_TEXT : text;
+}

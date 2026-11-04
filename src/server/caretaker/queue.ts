@@ -4,7 +4,7 @@ import { db } from "../db/client";
 import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reports, reviewRequests, sightings, users, wakeups } from "../db/schema";
 import { COLONY } from "@/lib/config";
 import { holdNotices, type HoldNotice } from "../reports";
-import { hidePrivateInDemo, maskEmail, placeForStaff } from "../demoPrivacy";
+import { demoSafeText, hidePrivateInDemo, maskEmail, placeForStaff } from "../demoPrivacy";
 import { bioIsSafe, nameIsSafe, safeBio } from "../placeText";
 import { needsHumanTick, regionsOf } from "../photoGate";
 import { canRuleNotPaid, lateSuccessChoices, newTryRefusal } from "../moneyGate";
@@ -198,6 +198,8 @@ async function payoutItems(statuses: string[], olderThanMinutes?: number, lateSu
   const notices = await holdNotices(db, [...new Set(rows.map((r) => r.catId))]);
   return rows.map(({ lateSuccessReviewId, ...r }) => ({
     ...r,
+    // The AI's words can carry a visitor's note in the demo, so a real row's reason is hidden there like a note is.
+    agentReason: r.agentReason === null ? null : demoSafeText(r.agentReason),
     catReport: notices.get(r.catId) ?? null,
     date: manilaDate(r.createdAt),
     lateSuccess: r.status === "failed" && lateSuccessReviewId !== null,
@@ -399,7 +401,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     sightings: sightingItems,
     receipts: receiptItems,
     earTipConfirmations,
-    reviews: reviews.map((r) => ({ id: r.id, subject: r.subject, reason: r.reason, date: manilaDate(r.createdAt) })),
+    reviews: reviews.map((r) => ({ id: r.id, subject: demoSafeText(r.subject, r.reason), reason: demoSafeText(r.reason), date: manilaDate(r.createdAt) })),
     failedWakeups: failed.map((w) => ({ id: w.id, kind: w.kind, attempts: w.attempts, date: manilaDate(w.createdAt) })),
     heldPhotos: held.map(({ s, catName }) => ({
       sightingId: s.id,
