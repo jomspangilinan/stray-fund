@@ -367,3 +367,25 @@ export async function heldCatIds(tx: Pick<Tx, "selectDistinct">): Promise<Set<st
     .where(and(inArray(reports.claim, [...HOLD_CLAIMS]), inArray(reports.status, ["open", "confirmed"])));
   return new Set(rows.flatMap((r) => (r.catId ? [r.catId] : [])));
 }
+
+export type HoldNotice = { claim: string; status: "open" | "confirmed" };
+
+const NOTICE_ORDER = ["injured", "sick", "pregnant"];
+
+/**
+ * For each cat, the one hurt, pregnant or sick report to tell staff about: a confirmed one before an open one, then
+ * hurt, sick, pregnant. Claim and status only, never the note or who made it.
+ */
+export async function holdNotices(tx: Pick<Tx, "select">, catIds: string[]): Promise<Map<string, HoldNotice>> {
+  const out = new Map<string, HoldNotice>();
+  if (catIds.length === 0) return out;
+  const rows = await tx
+    .select({ catId: reports.catId, claim: reports.claim, status: reports.status })
+    .from(reports)
+    .where(and(inArray(reports.catId, catIds), inArray(reports.claim, [...HOLD_CLAIMS]), inArray(reports.status, ["open", "confirmed"])));
+  const rank = (r: { claim: string; status: string }) => (r.status === "confirmed" ? 0 : 10) + NOTICE_ORDER.indexOf(r.claim);
+  for (const r of [...rows].sort((a, b) => rank(a) - rank(b))) {
+    if (r.catId && !out.has(r.catId)) out.set(r.catId, { claim: r.claim, status: r.status as "open" | "confirmed" });
+  }
+  return out;
+}

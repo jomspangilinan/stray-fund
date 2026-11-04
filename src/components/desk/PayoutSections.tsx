@@ -1,5 +1,6 @@
 import { ActionForm } from "../ActionForm";
 import { formatPeso, formatPesoShort } from "@/lib/money";
+import { approvalNotice } from "@/lib/reportNotice";
 import type { PayoutItem } from "@/server/caretaker/queue";
 import { DeskItem } from "./DeskItem";
 import { Section } from "./DeskParts";
@@ -30,6 +31,7 @@ export function Approvals({ items }: { items: PayoutItem[] }) {
       {items.map((p) => (
         <DeskItem key={p.id} label={label(p)}>
           <PayoutFacts p={p} />
+          {approvalNotice(p.catReport) && <p className="note note-bad mt-2 small font-bold">{approvalNotice(p.catReport)}</p>}
           <ActionForm
             action="payout_approve"
             submitLabel="Approve and send"

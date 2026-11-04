@@ -176,6 +176,13 @@
       "when": 1793757267780,
       "tag": "0024_cat_priority",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793758202231,
+      "tag": "0025_cat_priority_moves",
+      "breakpoints": true
     }
   ]
 }

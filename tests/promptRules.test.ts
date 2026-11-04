@@ -37,9 +37,14 @@ describe("prompt rules that the money and privacy checks lean on", () => {
   it("the groups are a starting point, and going against them needs a confirmed report and a stated trade-off", () => {
     expect(SYSTEM_PROMPT).not.toContain("already applies this, so fund its top cat");
     expect(SYSTEM_PROMPT).toContain("starting point");
-    expect(SYSTEM_PROMPT).toContain("confirmed report");
+    expect(SYSTEM_PROMPT).toContain("a report a person has checked");
     expect(SYSTEM_PROMPT).toContain("trade-off");
     expect(SYSTEM_PROMPT).toContain("set_cat_place");
+  });
+
+  it("a pass-over needs a strong, specific reason, and a vet-cleared report can be cited", () => {
+    expect(SYSTEM_PROMPT).toContain("only for a strong, specific reason");
+    expect(SYSTEM_PROMPT).toContain("a vet cleared for surgery");
   });
 
   it("the money rules stay word for word", () => {

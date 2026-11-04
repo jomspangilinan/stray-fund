@@ -1,13 +1,15 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { ToolError } from "@anthropic-ai/sdk/lib/tools/ToolError";
 import { closePool, db } from "../src/server/db/client";
 import { agentActions, allocations, catPriority, cats, donations, payouts, reports, users, wakeups } from "../src/server/db/schema";
-import { fundingOrder, placeCat } from "../src/server/agent/priority";
+import { applyMoves, fundingOrder, placeCat, type Move } from "../src/server/agent/priority";
+import type { RankableCat, RankedCat } from "../src/server/agent/rank";
 import { createAgentTools } from "../src/server/agent/tools";
 import { runAgent } from "../src/server/agent/run";
 import { processNextWakeup } from "../src/server/agent/worker";
 import { REPORT_WAKEUP, confirmReport, dismissReport, clearCatForSurgery } from "../src/server/reports";
+import { listAgentActions } from "../src/server/public";
 import { truncateAll } from "./helpers/db";
 import { FakeGateway, makeCaretaker, makeVet } from "./helpers/payoutFixtures";
 import { scriptedClient } from "./helpers/scriptedClient";
@@ -70,8 +72,50 @@ async function trio() {
   return { mimi, kit, tom };
 }
 
+const rc = (id: string, name: string, over: Partial<RankableCat> = {}): RankedCat => {
+  const cat = { id, name, sex: "unknown", flags: [], queuedAt: null, createdAt: new Date(0), ...over } as RankableCat;
+  return { cat, tier: 5, waitDays: 0, why: "" };
+};
+const mv = (catId: string, beforeCatId: string | null, over: Partial<Move> = {}): Move => ({ catId, beforeCatId, reportId: null, updatedAt: new Date(0), ...over });
+const ids = (r: RankedCat[]) => r.map((x) => x.cat.id);
+
+describe("applyMoves", () => {
+  const ranked = [rc("A", "A"), rc("B", "B"), rc("C", "C"), rc("D", "D")];
+
+  it("skips a move that inverts a pair with no checked cat, and applies it once a cat of the pair is checked", () => {
+    expect(ids(applyMoves(ranked, [mv("D", "A")], new Set()))).toEqual(["A", "B", "C", "D"]);
+    expect(ids(applyMoves(ranked, [mv("C", "D")], new Set()))).toEqual(["A", "B", "C", "D"]);
+    expect(ids(applyMoves(ranked, [mv("D", "B")], new Set(["D"])))).toEqual(["A", "D", "B", "C"]);
+  });
+
+  it("every inverted pair needs a checked cat: D above B and C needs D, or both B and C", () => {
+    expect(ids(applyMoves(ranked, [mv("D", "B")], new Set(["B"])))).toEqual(["A", "B", "C", "D"]);
+    expect(ids(applyMoves(ranked, [mv("D", "B")], new Set(["A"])))).toEqual(["A", "B", "C", "D"]);
+    expect(ids(applyMoves(ranked, [mv("D", "B")], new Set(["B", "C"])))).toEqual(["A", "D", "B", "C"]);
+  });
+
+  it("skips a move whose cat or anchor is absent, and applies it when they are back", () => {
+    const m = mv("D", "B");
+    const without = ranked.filter((r) => r.cat.id !== "B");
+    expect(ids(applyMoves(without, [m], new Set(["D"])))).toEqual(["A", "C", "D"]);
+    expect(ids(applyMoves(ranked, [m], new Set(["D"])))).toEqual(["A", "D", "B", "C"]);
+  });
+
+  it("applies moves oldest first, so a chain builds on the one before", () => {
+    const moves = [mv("C", "A", { updatedAt: new Date(1) }), mv("D", "C", { updatedAt: new Date(2) })];
+    expect(ids(applyMoves(ranked, moves, new Set(["C", "D"])))).toEqual(["D", "C", "A", "B"]);
+    expect(ids(applyMoves(ranked, [...moves].reverse(), new Set(["C", "D"])))).toEqual(["D", "C", "A", "B"]);
+  });
+
+  it("a cat that newly ranks higher keeps its place above moved cats", () => {
+    // D was moved above B. Z now ranks first and was never moved.
+    const withZ = [rc("Z", "Z"), ...ranked];
+    expect(ids(applyMoves(withZ, [mv("D", "B")], new Set(["D"])))).toEqual(["Z", "A", "D", "B", "C"]);
+  });
+});
+
 describe("fundingOrder", () => {
-  it("is the rank.ts order when nothing is placed", async () => {
+  it("is the rank.ts order when nothing is moved", async () => {
     await trio();
     expect(await order()).toEqual(["Mimi", "Kit", "Tom"]);
   });
@@ -84,40 +128,33 @@ describe("fundingOrder", () => {
     expect(await order()).toEqual(["Mimi", "Kit"]);
   });
 
-  it("puts placed cats first by position, then the unplaced in rank.ts order", async () => {
-    const { mimi, kit, tom } = await trio();
-    await db.insert(catPriority).values([
-      { catId: tom.id, position: 1, reason: "r" },
-      { catId: kit.id, position: 2, reason: "r" },
-    ]);
-    expect(await order()).toEqual(["Tom", "Kit", "Mimi"]);
-    expect(mimi.id).toBeTruthy();
-  });
-
-  it("ignores a placement of a cat that is held or no longer queued", async () => {
-    const { kit, tom } = await trio();
-    await db.insert(catPriority).values([
-      { catId: tom.id, position: 1, reason: "r" },
-      { catId: kit.id, position: 2, reason: "r" },
-    ]);
-    await makeReport({ catId: tom.id, claim: "sick" });
-    await db.update(cats).set({ status: "funded" }).where(eq(cats.id, kit.id));
-    expect(await order()).toEqual(["Mimi"]);
+  it("applies a stored move whose report is confirmed, and ignores one whose report is open or dismissed", async () => {
+    const { mimi, tom } = await trio();
+    const r = await makeReport({ catId: tom.id, claim: "injured", status: "confirmed" });
+    await db.insert(catPriority).values({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id, reason: "r" });
+    // The cat is held while confirmed, so it is not in the order at all.
+    expect(await order()).toEqual(["Mimi", "Kit"]);
+    await db.update(reports).set({ status: "cleared" }).where(eq(reports.id, r.id));
+    expect(await order()).toEqual(["Tom", "Mimi", "Kit"]);
+    await db.update(reports).set({ status: "dismissed" }).where(eq(reports.id, r.id));
+    expect(await order()).toEqual(["Mimi", "Kit", "Tom"]);
   });
 });
 
 describe("placeCat", () => {
-  it("a move that follows rank.ts needs no report", async () => {
+  it("a move that follows rank.ts needs no report and stores nothing", async () => {
     const { kit, tom } = await trio();
     const out = await place({ catId: kit.id, beforeCatId: tom.id });
     expect(out.ok).toBe(true);
     expect(await order()).toEqual(["Mimi", "Kit", "Tom"]);
+    expect(await db.select().from(catPriority)).toHaveLength(0);
   });
 
   it("is refused without a report when it puts a cat above one rank.ts ranks higher", async () => {
     const { mimi, tom } = await trio();
     const out = await place({ catId: tom.id, beforeCatId: mimi.id });
-    expect(out).toMatchObject({ ok: false, code: "REPORT_REQUIRED" });
+    expect(out).toMatchObject({ ok: false, code: "MOVE_NOT_ALLOWED" });
+    expect((out as { message: string }).message).toMatch(/Mimi/);
     expect(await order()).toEqual(["Mimi", "Kit", "Tom"]);
     expect(await db.select().from(catPriority)).toHaveLength(0);
     expect(await db.select().from(agentActions)).toHaveLength(0);
@@ -128,27 +165,29 @@ describe("placeCat", () => {
     const open = await makeReport({ catId: tom.id, claim: "kitten", status: "open" });
     const dismissed = await makeReport({ catId: tom.id, claim: "kitten", status: "dismissed", reportedOn: "2026-11-02" });
     for (const r of [open, dismissed]) {
-      expect(await place({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id })).toMatchObject({ ok: false, code: "REPORT_NOT_CONFIRMED" });
+      expect(await place({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id })).toMatchObject({ ok: false, code: "REPORT_NOT_CHECKED" });
     }
     expect(await order()).toEqual(["Mimi", "Kit", "Tom"]);
   });
 
-  it("is refused with a report that does not exist, or one on an unrelated cat", async () => {
+  it("is refused with a report that does not exist, or one that is not about the cats in the move", async () => {
     const { mimi, tom } = await trio();
-    const other = await makeCat({ name: "Other" });
+    const other = await makeCat({ name: "Other", flags: ["kitten"] });
     const unrelated = await makeReport({ catId: other.id, claim: "kitten", status: "confirmed" });
-    expect(await place({ catId: tom.id, beforeCatId: mimi.id, reportId: unrelated.id })).toMatchObject({ ok: false, code: "REPORT_NOT_ABOUT_THESE_CATS" });
+    expect(await place({ catId: tom.id, beforeCatId: mimi.id, reportId: unrelated.id })).toMatchObject({ ok: false, code: "MOVE_NOT_ALLOWED" });
     expect(await place({ catId: tom.id, beforeCatId: mimi.id, reportId: crypto.randomUUID() })).toMatchObject({ ok: false, code: "REPORT_NOT_FOUND" });
-    expect((await order()).slice(0, 2)).toEqual(["Mimi", "Kit"]);
     expect(await db.select().from(catPriority)).toHaveLength(0);
   });
 
-  it("is allowed with a confirmed report on the moved cat", async () => {
-    const { mimi, tom } = await trio();
+  it("is allowed with a confirmed report on the moved cat, and stores only that cat", async () => {
+    const { kit, tom } = await trio();
     const r = await makeReport({ catId: tom.id, claim: "kitten", status: "confirmed" });
-    const out = await place({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id, reason: "Tom's kitten report was confirmed." });
+    const out = await place({ catId: tom.id, beforeCatId: kit.id, reportId: r.id, reason: "Tom's report was confirmed." });
     expect(out.ok).toBe(true);
-    expect((await order()).slice(0, 2)).toEqual(["Tom", "Mimi"]);
+    expect(await order()).toEqual(["Mimi", "Tom", "Kit"]);
+    const stored = await db.select().from(catPriority);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ catId: tom.id, beforeCatId: kit.id, reportId: r.id, reason: "Tom's report was confirmed." });
   });
 
   it("is allowed with a confirmed report on the cat it passes over", async () => {
@@ -161,8 +200,7 @@ describe("placeCat", () => {
   it("a report covers only the pairs it is about: passing two cats needs it to touch both pairs", async () => {
     const { mimi, kit, tom } = await trio();
     const r = await makeReport({ catId: kit.id, claim: "kitten", status: "confirmed" });
-    // Tom above Mimi and Kit: the report is on Kit, but the pair Tom/Mimi is not about Kit.
-    expect(await place({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id })).toMatchObject({ ok: false, code: "REPORT_NOT_ABOUT_THESE_CATS" });
+    expect(await place({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id })).toMatchObject({ ok: false, code: "MOVE_NOT_ALLOWED" });
   });
 
   it("a note that asks to be first changes nothing: the note is never read by placeCat", async () => {
@@ -184,46 +222,109 @@ describe("placeCat", () => {
   });
 
   it("before nothing puts the cat last", async () => {
-    const { mimi, tom } = await trio();
+    const { mimi, kit } = await trio();
     const r = await makeReport({ catId: mimi.id, claim: "kitten", status: "confirmed" });
     expect((await place({ catId: mimi.id, beforeCatId: null, reportId: r.id })).ok).toBe(true);
     expect(await order()).toEqual(["Kit", "Tom", "Mimi"]);
-    expect(tom.id).toBeTruthy();
+    expect(kit.id).toBeTruthy();
   });
 
   it("writes one agent action with inputs.catId and the reason as written, and no money or status change", async () => {
-    const { mimi, tom } = await trio();
+    const { kit, tom } = await trio();
     const r = await makeReport({ catId: tom.id, claim: "kitten", status: "confirmed" });
     const reason = "Tom was confirmed as a kitten.";
-    await place({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id, reason });
+    await place({ catId: tom.id, beforeCatId: kit.id, reportId: r.id, reason });
     const acts = await db.select().from(agentActions);
     expect(acts).toHaveLength(1);
     expect(acts[0]).toMatchObject({ action: "set_cat_place", reason, status: "done", amount: null });
-    expect(acts[0].inputs).toMatchObject({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id });
+    expect(acts[0].inputs).toMatchObject({ catId: tom.id, beforeCatId: kit.id, reportId: r.id });
     expect((await db.select().from(cats).where(eq(cats.id, tom.id)))[0].status).toBe("queued");
     expect(await db.select().from(allocations)).toHaveLength(0);
     expect(await db.select().from(payouts)).toHaveLength(0);
   });
 
-  it("keeps earlier placements and stores only as many cats as it must", async () => {
-    const { mimi, kit, tom } = await trio();
+  it("moving the same cat again replaces its row, and a move that matches rank.ts deletes it", async () => {
+    const { kit, tom } = await trio();
     const r = await makeReport({ catId: tom.id, claim: "kitten", status: "confirmed" });
-    await place({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id });
-    expect(await order()).toEqual(["Tom", "Mimi", "Kit"]);
-    // Kit above Tom would also put Kit above Mimi, whom rank.ts ranks higher, so it needs a report.
-    const out = await place({ catId: kit.id, beforeCatId: tom.id });
-    expect(out).toMatchObject({ ok: false, code: "REPORT_REQUIRED" });
-    expect(await order()).toEqual(["Tom", "Mimi", "Kit"]);
-  });
-
-  it("moving back to the rank.ts order clears the placements", async () => {
-    const { mimi, tom } = await trio();
-    const r = await makeReport({ catId: tom.id, claim: "kitten", status: "confirmed" });
-    await place({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id });
-    // Tom last needs no report: it follows rank.ts.
+    await place({ catId: tom.id, beforeCatId: kit.id, reportId: r.id });
+    expect(await db.select().from(catPriority)).toHaveLength(1);
+    // Tom last is where rank.ts has him.
     expect((await place({ catId: tom.id, beforeCatId: null })).ok).toBe(true);
     expect(await order()).toEqual(["Mimi", "Kit", "Tom"]);
     expect(await db.select().from(catPriority)).toHaveLength(0);
+  });
+
+  it("the reviewer's case: moving one cat stores only that cat, and a later tier-1 arrival stays above the others", async () => {
+    const b = await makeCat({ name: "B", queuedAt: daysAgo(9) });
+    const c = await makeCat({ name: "C", queuedAt: daysAgo(8) });
+    const d = await makeCat({ name: "D", queuedAt: daysAgo(7) });
+    const r = await makeReport({ catId: d.id, claim: "kitten", status: "confirmed" });
+    expect((await place({ catId: d.id, beforeCatId: c.id, reportId: r.id })).ok).toBe(true);
+    expect(await order()).toEqual(["B", "D", "C"]);
+    const stored = await db.select().from(catPriority);
+    expect(stored.map((s) => s.catId)).toEqual([d.id]);
+    await makeCat({ name: "Z", sex: "female", queuedAt: daysAgo(1) });
+    expect(await order()).toEqual(["Z", "B", "D", "C"]);
+    expect(b.id).toBeTruthy();
+  });
+
+  it("a chain of moves builds up, each judged on its own", async () => {
+    const a = await makeCat({ name: "A", queuedAt: daysAgo(9) });
+    const b = await makeCat({ name: "B", queuedAt: daysAgo(8) });
+    const c = await makeCat({ name: "C", queuedAt: daysAgo(7) });
+    const d = await makeCat({ name: "D", queuedAt: daysAgo(6) });
+    const rc_ = await makeReport({ catId: c.id, claim: "kitten", status: "confirmed" });
+    const rd = await makeReport({ catId: d.id, claim: "kitten", status: "confirmed", reportedOn: "2026-11-02" });
+    expect((await place({ catId: c.id, beforeCatId: a.id, reportId: rc_.id })).ok).toBe(true);
+    expect(await order()).toEqual(["C", "A", "B", "D"]);
+    expect((await place({ catId: d.id, beforeCatId: c.id, reportId: rd.id })).ok).toBe(true);
+    expect(await order()).toEqual(["D", "C", "A", "B"]);
+    expect(await db.select().from(catPriority)).toHaveLength(2);
+    expect(b.id).toBeTruthy();
+  });
+
+  it("a move whose anchor is funded lapses, stays stored, and applies again if the anchor comes back", async () => {
+    const { kit, tom } = await trio();
+    const r = await makeReport({ catId: tom.id, claim: "kitten", status: "confirmed" });
+    await place({ catId: tom.id, beforeCatId: kit.id, reportId: r.id });
+    expect(await order()).toEqual(["Mimi", "Tom", "Kit"]);
+    await db.update(cats).set({ status: "funded" }).where(eq(cats.id, kit.id));
+    expect(await order()).toEqual(["Mimi", "Tom"]);
+    expect(await db.select().from(catPriority)).toHaveLength(1);
+    await db.update(cats).set({ status: "queued" }).where(eq(cats.id, kit.id));
+    expect(await order()).toEqual(["Mimi", "Tom", "Kit"]);
+  });
+
+  it("a dismissed report undoes its move with no AI run, and a vet-cleared one keeps it", async () => {
+    const { kit, tom } = await trio();
+    const r = await makeReport({ catId: kit.id, claim: "kitten", status: "confirmed" });
+    await place({ catId: tom.id, beforeCatId: kit.id, reportId: r.id });
+    expect(await order()).toEqual(["Mimi", "Tom", "Kit"]);
+    await db.update(reports).set({ status: "cleared" }).where(eq(reports.id, r.id));
+    expect(await order()).toEqual(["Mimi", "Tom", "Kit"]);
+    await db.update(reports).set({ status: "dismissed" }).where(eq(reports.id, r.id));
+    expect(await order()).toEqual(["Mimi", "Kit", "Tom"]);
+    expect(await db.select().from(wakeups)).toHaveLength(0);
+  });
+
+  it("the real story: a neighbour reports an injury, a caretaker confirms, the cat is held, then a vet clears it and it moves above a longer-waiting unspayed female", async () => {
+    const female = await makeCat({ name: "Mimi", sex: "female", queuedAt: daysAgo(20) });
+    const hurt = await makeCat({ name: "Hurt", queuedAt: daysAgo(2) });
+    const reporter = (await db.insert(users).values({ username: "neighbour_story", role: "donor" }).returning())[0];
+    const caretaker = await makeCaretaker();
+    const vet = await makeVet();
+    const r = await makeReport({ catId: hurt.id, claim: "injured", reporterId: reporter.id });
+    // Open: held.
+    expect(await order()).toEqual(["Mimi"]);
+    await db.transaction((tx) => confirmReport(tx, r.id, caretaker.id));
+    // Confirmed: still held, so the cat is not in the order and cannot be placed.
+    expect(await place({ catId: hurt.id, beforeCatId: female.id, reportId: r.id })).toMatchObject({ ok: false, code: "CAT_NOT_PLACEABLE" });
+    await db.transaction((tx) => clearCatForSurgery(tx, hurt.id, vet.id));
+    expect((await db.select().from(reports).where(eq(reports.id, r.id)))[0].status).toBe("cleared");
+    // Cleared: it is waiting again, and the cleared report backs the move over the longer-waiting female.
+    expect(await place({ catId: hurt.id, beforeCatId: female.id })).toMatchObject({ ok: false, code: "MOVE_NOT_ALLOWED" });
+    expect((await place({ catId: hurt.id, beforeCatId: female.id, reportId: r.id, reason: "A vet cleared the hurt cat for surgery." })).ok).toBe(true);
+    expect(await order()).toEqual(["Hurt", "Mimi"]);
   });
 });
 
@@ -321,7 +422,7 @@ describe("tools", () => {
     expect(actions).toEqual(["set_cat_place"]);
     const refused = await call("set_cat_place", { cat_id: mimi.id, before_cat_id: null, reason: "Waiting.", report_id: null });
     expect(refused.isError).toBe(true);
-    expect(refused.body.code).toBe("REPORT_REQUIRED");
+    expect(refused.body.code).toBe("MOVE_NOT_ALLOWED");
   });
 
   describe("list_reports", () => {
@@ -353,6 +454,25 @@ describe("tools", () => {
       expect(text).not.toContain("120.98765");
       expect(text).not.toMatch(/sighting|storage|originalKey|reporter/i);
     });
+
+    it("lists the newest first, and includes reports a vet cleared in the last 30 days but not older ones", async () => {
+      const { call } = setup();
+      const cat = await makeCat({ name: "Pip" });
+      const old = await makeReport({ catId: cat.id, claim: "injured", status: "open", reportedOn: "2026-10-01" });
+      const fresh = await makeReport({ catId: cat.id, claim: "sick", status: "confirmed", reportedOn: "2026-10-02" });
+      const cleared = await makeReport({ catId: cat.id, claim: "pregnant", status: "cleared", reportedOn: "2026-10-03" });
+      const stale = await makeReport({ catId: cat.id, claim: "kitten", status: "cleared", reportedOn: "2026-10-04" });
+      await db.update(reports).set({ createdAt: new Date("2026-10-01T00:00:00Z") }).where(eq(reports.id, old.id));
+      await db.update(reports).set({ createdAt: new Date("2026-10-02T00:00:00Z") }).where(eq(reports.id, fresh.id));
+      await db.update(reports).set({ createdAt: new Date("2026-10-03T00:00:00Z"), decidedAt: sql`now() - interval '5 days'` }).where(eq(reports.id, cleared.id));
+      await db.update(reports).set({ createdAt: new Date("2026-10-04T00:00:00Z"), decidedAt: sql`now() - interval '40 days'` }).where(eq(reports.id, stale.id));
+      const { body } = await call("list_reports", {});
+      expect((body.reports as { report_id: string; status: string }[]).map((r) => [r.report_id, r.status])).toEqual([
+        [cleared.id, "cleared"],
+        [fresh.id, "confirmed"],
+        [old.id, "open"],
+      ]);
+    });
   });
 
   describe("ask_for_check", () => {
@@ -367,11 +487,24 @@ describe("tools", () => {
       expect(row.checkQuestion).toBe("Does Pip put weight on the leg?");
       expect(row.status).toBe("open");
       const acts = (await db.select().from(agentActions)).filter((a) => a.action === "ask_for_check");
-      expect(acts).toHaveLength(2);
+      // The public row is written the first time only. A second ask replaces the question quietly.
+      expect(acts).toHaveLength(1);
       expect(acts[0].inputs).toMatchObject({ catId: cat.id, reportId: r.id });
       expect(acts[0].reason).toBe("A neighbour says Pip is hurt.");
       expect(actions).toEqual(["ask_for_check", "ask_for_check"]);
       expect(await db.select().from(cats).where(eq(cats.id, cat.id))).toHaveLength(1);
+    });
+
+    it("refuses a kitten claim, and a cat that is not spotted or queued", async () => {
+      const { call } = setup();
+      const cat = await makeCat();
+      const funded = await makeCat({ status: "funded" });
+      const kitten = await makeReport({ catId: cat.id, claim: "kitten" });
+      const late = await makeReport({ catId: funded.id, claim: "injured" });
+      expect((await call("ask_for_check", { report_id: kitten.id, question: "Is it small?", reason: "r" })).body.code).toBe("REPORT_NEEDS_NO_CHECK");
+      expect((await call("ask_for_check", { report_id: late.id, question: "Is it hurt?", reason: "r" })).body.code).toBe("CAT_NOT_WAITING");
+      expect(await db.select().from(agentActions)).toHaveLength(0);
+      expect((await db.select().from(reports).where(eq(reports.id, kitten.id)))[0].checkQuestion).toBeNull();
     });
 
     it("refuses a report that is not open, is not found, or has no cat", async () => {
@@ -458,5 +591,34 @@ describe("report_changed wakes the treasurer", () => {
     expect(res.stop).toBe("end_turn");
     expect(await order()).toEqual(["Mimi", "Kit", "Tom"]);
     expect(await db.select().from(allocations)).toHaveLength(0);
+  });
+});
+
+describe("the public feed filters the treasurer's reasons", () => {
+  it("a hostile reason on set_cat_place or ask_for_check shows a fixed line, and a clean one shows as written", async () => {
+    const cat = await makeCat({ name: "Pip" });
+    await db.insert(agentActions).values([
+      { action: "set_cat_place", reason: "Pip is hurt near 12 Mabini Street, call 0917 555 1234.", status: "done", inputs: { catId: cat.id } },
+      { action: "ask_for_check", reason: "Visit https://evil.example about Pip.", status: "done", inputs: { catId: cat.id } },
+      { action: "set_cat_place", reason: "Pip's hurt report was confirmed, so Pip goes ahead.", status: "done", inputs: { catId: cat.id } },
+    ]);
+    const feed = await listAgentActions();
+    const text = JSON.stringify(feed);
+    expect(text).not.toContain("Mabini");
+    expect(text).not.toContain("0917");
+    expect(text).not.toContain("evil.example");
+    const reasons = feed.map((a) => a.reason).sort();
+    expect(reasons).toContain("The Treasurer changed the order after a check.");
+    expect(reasons).toContain("The Treasurer asked a caretaker to look at a cat.");
+    expect(reasons).toContain("Pip's hurt report was confirmed, so Pip goes ahead.");
+  });
+
+  it("the feed route sends the same filtered text", async () => {
+    const cat = await makeCat({ name: "Pip" });
+    await db.insert(agentActions).values({ action: "set_cat_place", reason: "Moved because of the note at 5 Rizal Ave.", status: "done", inputs: { catId: cat.id } });
+    const { GET } = await import("../src/app/api/agent/feed/route");
+    const body = JSON.stringify(await (await GET()).json());
+    expect(body).not.toContain("Rizal");
+    expect(body).toContain("The Treasurer changed the order after a check.");
   });
 });

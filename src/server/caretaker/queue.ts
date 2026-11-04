@@ -3,6 +3,7 @@ import { AssessmentSchema, ReceiptSchema, type Assessment, type ReceiptReading }
 import { db } from "../db/client";
 import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reports, reviewRequests, sightings, users, wakeups } from "../db/schema";
 import { COLONY } from "@/lib/config";
+import { holdNotices, type HoldNotice } from "../reports";
 import { hidePrivateInDemo, maskEmail, placeForStaff } from "../demoPrivacy";
 import { bioIsSafe, nameIsSafe, safeBio } from "../placeText";
 import { needsHumanTick, regionsOf } from "../photoGate";
@@ -42,6 +43,8 @@ export type PayoutItem = {
   canRulePaid: boolean;
   /** A rejected or failed payout PayPal never saw, blocking its booking: a caretaker may allow one new try. */
   canAllowRetry: boolean;
+  /** A hurt, pregnant or sick report on this cat that nobody has cleared. Claim and status only, never the note. */
+  catReport: HoldNotice | null;
 };
 
 /** The AI's free text reaches the open demo desk only after the public-card filters: a visitor's photo may show a sign or a shop. */
@@ -192,8 +195,10 @@ async function payoutItems(statuses: string[], olderThanMinutes?: number, lateSu
       ),
     )
     .orderBy(asc(payouts.createdAt), asc(payouts.id));
+  const notices = await holdNotices(db, [...new Set(rows.map((r) => r.catId))]);
   return rows.map(({ lateSuccessReviewId, ...r }) => ({
     ...r,
+    catReport: notices.get(r.catId) ?? null,
     date: manilaDate(r.createdAt),
     lateSuccess: r.status === "failed" && lateSuccessReviewId !== null,
     canRuleNotPaid:

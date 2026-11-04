@@ -8,7 +8,7 @@ import { RateLimited } from "./spot";
 import { COMPLETED_BOOKING, transitionCat } from "./catTransitions";
 import { db, withColonyLock, type Tx } from "./db/client";
 import { allowedPayees, bookings, cats, guardrails, payouts, receipts, reports, treatments, users } from "./db/schema";
-import { HOLD_CLAIMS } from "./reports";
+import { HOLD_CLAIMS, holdNotices, type HoldNotice } from "./reports";
 import { CONFIRMED_BOOKING } from "./guardrails";
 import { CAPTURED, returnSurplus, toInt, unspentForCat } from "./ledger";
 import { storeOriginal } from "./photos";
@@ -761,6 +761,8 @@ export type VetBookingRow = {
   exactHidden: boolean;
   /** Where the booking stands for the vet. "open" means the vet has evidence to send. */
   evidence: EvidenceState["state"];
+  /** A hurt, pregnant or sick report nobody has cleared. Claim and status only, never the note. */
+  catReport: HoldNotice | null;
 };
 /** A cat a caretaker confirmed is hurt, pregnant or sick, waiting for a vet to see it and clear it. */
 export type VetCheckCat = { id: string; name: string; area: string; exact: ExactPlace; exactHidden: boolean; claims: string[] };
@@ -802,7 +804,7 @@ type VetBookingColumns = {
   locationApproximate: boolean;
 };
 
-const toVetBooking = (b: VetBookingColumns, evidence: EvidenceState["state"]): VetBookingRow => ({
+const toVetBooking = (b: VetBookingColumns, evidence: EvidenceState["state"], catReport: HoldNotice | null): VetBookingRow => ({
   id: b.id,
   catId: b.catId,
   catName: b.catName,
@@ -813,6 +815,7 @@ const toVetBooking = (b: VetBookingColumns, evidence: EvidenceState["state"]): V
   ...exactOf(b),
   area: b.areaName,
   evidence,
+  catReport,
 });
 
 /** For a signed-in vet only. Callers check the role. Holds exact locations, so it is never public or cached. */
@@ -851,6 +854,7 @@ export async function listVetDashboard(vetId: string): Promise<VetDashboard> {
     .innerJoin(cats, eq(cats.id, reports.catId))
     .where(and(eq(reports.status, "confirmed"), inArray(reports.claim, [...HOLD_CLAIMS])))
     .orderBy(asc(reports.createdAt), asc(reports.id));
+  const notices = await holdNotices(db, [...new Set(mine.map((b) => b.catId))]);
   const checkCats: VetCheckCat[] = [];
   for (const c of confirmed) {
     const seen = checkCats.find((x) => x.id === c.id);
@@ -863,7 +867,7 @@ export async function listVetDashboard(vetId: string): Promise<VetDashboard> {
     bookings: await Promise.all(
       mine.map(async (b) => {
         const state = await loadBookingState(db, b.id);
-        return toVetBooking(b, state ? evidenceStateOf(state).state : "closed");
+        return toVetBooking(b, state ? evidenceStateOf(state).state : "closed", notices.get(b.catId) ?? null);
       }),
     ),
   };
@@ -931,7 +935,7 @@ export async function getVetBooking(vetId: string, bookingId: string): Promise<V
     .limit(1);
 
   return {
-    booking: toVetBooking(row, evidenceStateOf(state).state),
+    booking: toVetBooking(row, evidenceStateOf(state).state, (await holdNotices(db, [row.catId])).get(row.catId) ?? null),
     payouts: paid.map((p) => ({
       kind: p.kind,
       amount: p.amount,

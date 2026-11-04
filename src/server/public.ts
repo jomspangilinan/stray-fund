@@ -9,6 +9,7 @@ import { db } from "./db/client";
 import { cats, earTipFlags, guardrails, nameSuggestions, sightings, treatments, users } from "./db/schema";
 import { ownFlags } from "./earTipFlags";
 import { CAPTURED, getPoolStatus, toInt } from "./ledger";
+import { bioIsSafe } from "./placeText";
 import { PRIVATE_ACTIONS } from "./privateActions";
 import type { Session } from "./session";
 import { getStorage } from "./storage";
@@ -278,6 +279,8 @@ export function publicLedgerRow(row: LedgerInput): PublicLedgerRow {
 
 const ACTION_LABEL: Record<string, string> = {
   fund_cat: "Funded a cat",
+  set_cat_place: "Changed the order",
+  ask_for_check: "Asked a caretaker to look at a cat",
   payout_deposit: "Vet first payment",
   payout_balance: "Vet final payment",
   caretaker_review: "Asked a caretaker",
@@ -352,11 +355,21 @@ function personApprovedPayout(row: Pick<AgentActionInput, "action" | "status" | 
 }
 
 /** Never inputs, approver identities or gateway error text, which all live on the same row. */
+/**
+ * Reasons the treasurer writes about reports can repeat a note, a street or a number. They show only if they pass the
+ * same filter as a cat's bio; otherwise a fixed line shows.
+ */
+const GUARDED_REASONS: Record<string, string> = {
+  set_cat_place: "The Treasurer changed the order after a check.",
+  ask_for_check: "The Treasurer asked a caretaker to look at a cat.",
+};
+
 export function publicAgentAction(row: AgentActionInput): PublicAgentAction {
+  const fallback = GUARDED_REASONS[row.action];
   return {
     id: row.id,
     action: ACTION_LABEL[row.action] ?? "Treasurer action",
-    reason: row.reason,
+    reason: fallback !== undefined && !bioIsSafe(row.reason, row.cat ?? "") ? fallback : row.reason,
     amount: row.amount ?? null,
     status: ACTION_STATUS_LABEL[row.status] ?? "Recorded",
     refused: ["denied", "failed", "rejected"].includes(row.status),

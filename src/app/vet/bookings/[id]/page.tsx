@@ -7,6 +7,7 @@ import { ExactLocation } from "@/components/ExactLocation";
 import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
 import { formatPeso } from "@/lib/money";
+import { vetNotice } from "@/lib/reportNotice";
 import { isUuid } from "@/server/public";
 import { getSession } from "@/server/session";
 import { getVetBooking, type VetBookingView, type VetPayout } from "@/server/vetFlow";
@@ -110,6 +111,7 @@ async function BookingView({ params }: { params: Promise<{ id: string }> }) {
       <PageHead title={booking.catName}>
         Visit on {booking.scheduledFor ?? "a date to be set"}. Package {formatPeso(booking.packagePrice)}.
       </PageHead>
+      {vetNotice(booking.catReport) && <p className="note note-bad mt-3 small font-bold">{vetNotice(booking.catReport)}</p>}
       <div className="mt-3">
         <ExactLocation exact={booking.exact} area={booking.area} exactHidden={booking.exactHidden} />
       </div>

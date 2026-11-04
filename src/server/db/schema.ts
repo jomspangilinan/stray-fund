@@ -187,15 +187,17 @@ export const reports = pgTable(
 );
 
 /**
- * Where the treasurer has put a cat in "Next to fund". Only placed cats have a row; the rest follow in rank.ts order.
- * Rows are rewritten together by placeCat, so positions are 1..n with no gaps. A row for a cat that is no longer
- * queued is ignored and dropped on the next placement. The reason is stored as the treasurer wrote it.
+ * One row per move the treasurer made on top of the rank.ts order: put this cat directly before another (null means
+ * last). Only cats the treasurer moved are stored. The order is rebuilt every time from rank.ts, the live reports
+ * and these rows (see applyMoves), so a move lapses by itself when its report is dismissed or its cats leave the
+ * list, and comes back when they return. The reason is stored as the treasurer wrote it.
  */
 export const catPriority = pgTable("cat_priority", {
   catId: uuid("cat_id")
     .primaryKey()
     .references(() => cats.id),
-  position: integer("position").notNull(),
+  beforeCatId: uuid("before_cat_id").references(() => cats.id),
+  reportId: uuid("report_id").references(() => reports.id),
   reason: text("reason").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

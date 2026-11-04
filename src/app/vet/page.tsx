@@ -7,6 +7,7 @@ import { ExactLocation } from "@/components/ExactLocation";
 import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
 import { formatPeso } from "@/lib/money";
+import { vetNotice } from "@/lib/reportNotice";
 import { manilaDate } from "@/server/public";
 import { getSession } from "@/server/session";
 import { listVetDashboard, type VetBookingRow } from "@/server/vetFlow";
@@ -34,6 +35,7 @@ function BookingCard({ b }: { b: VetBookingRow }) {
         {BOOKING_STATUS[b.status] ?? b.status}, visit on {b.scheduledFor ?? "a date to be set"}. Package {formatPeso(b.packagePrice)}.
       </p>
       <p className="mt-1 font-bold">{NEXT_STEP[b.evidence]}</p>
+      {vetNotice(b.catReport) && <p className="note note-bad mt-2 small font-bold">{vetNotice(b.catReport)}</p>}
       <div className="mt-2">
         <ExactLocation exact={b.exact} area={b.area} exactHidden={b.exactHidden} />
       </div>
