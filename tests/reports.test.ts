@@ -13,7 +13,7 @@ import {
   fileStaffReport,
   heldCatIds,
 } from "../src/server/reports";
-import { PRIVATE_ACTIONS } from "../src/server/privateActions";
+import { PRIVATE_ACTIONS, REPORT_CONFIRMED } from "../src/server/privateActions";
 import { listAgentActions } from "../src/server/public";
 import { truncateAll } from "./helpers/db";
 import { makeCaretaker, makeVet } from "./helpers/payoutFixtures";
@@ -403,6 +403,40 @@ describe("one gate for attaching (I1, I2, I5)", () => {
   });
 });
 
+describe("the 30 day photo cooldown is part of the shared gate (I5)", () => {
+  it("a catless photo report is closed, not attached, when a person dismissed or a vet cleared that claim on the cat lately", async () => {
+    const [dismissedCat, clearedCat, oldCat] = [await makeCat(), await makeCat(), await makeCat()];
+    const [care, vet] = [await makeCaretaker(), await makeVet()];
+    const decide = async (cat: { id: string }, how: "dismiss" | "clear") => {
+      const a = await file({ catId: cat.id, source: "photo" });
+      if (how === "dismiss") await db.transaction((tx) => dismissReport(tx, a.id, care.id));
+      else {
+        await db.transaction((tx) => confirmReport(tx, a.id, care.id));
+        await db.update(cats).set({ flags: [] }).where(eq(cats.id, cat.id));
+        await db.transaction((tx) => clearCatForSurgery(tx, cat.id, vet.id));
+      }
+      return a;
+    };
+    await decide(dismissedCat, "dismiss");
+    await decide(clearedCat, "clear");
+    const old = await decide(oldCat, "dismiss");
+    await db.update(reports).set({ decidedAt: new Date(Date.now() - 31 * 86_400_000) }).where(eq(reports.id, old.id));
+
+    const attach = async (cat: { id: string }) => {
+      const s = await makeSighting({ state: "needs_review" });
+      const r = await file({ catId: null, sightingId: s.id, source: "photo" });
+      await db.transaction((tx) => attachReports(tx, s.id, cat.id));
+      return reportRow(r.id);
+    };
+    expect(await attach(dismissedCat)).toMatchObject({ status: "dismissed", catId: null, decidedBy: null });
+    expect(await attach(clearedCat)).toMatchObject({ status: "dismissed", catId: null, decidedBy: null });
+    expect(await attach(oldCat)).toMatchObject({ status: "open", catId: oldCat.id });
+    expect(await held()).toEqual(new Set([oldCat.id]));
+    const closed = (await db.select().from(agentActions)).filter((a) => (a.inputs as { because?: string }).because === "recently_decided");
+    expect(closed).toHaveLength(2);
+  });
+});
+
 describe("a report is tied to its photo (I3)", () => {
   it("refuses a cat that is not the sighting's cat, and a cat on a sighting with none", async () => {
     const [a, b] = [await makeCat(), await makeCat()];
@@ -477,5 +511,28 @@ describe("staff reports on a conflict (M3)", () => {
     expect((await catRow(cat.id)).flags).toEqual(["sick"]);
     expect(await held()).toEqual(new Set([cat.id]));
     expect(await db.select().from(reports)).toHaveLength(1);
+  });
+});
+
+describe("reviving a same-day staff report is audited (M6)", () => {
+  it("writes a confirmed row when a dismissed or cleared report is made true again, and none for a repeat of a confirmed one", async () => {
+    const cat = await makeCat();
+    const [care, vet] = [await makeCaretaker(), await makeVet()];
+    const input = { catId: cat.id, claim: "injured" as const, source: "caretaker" as const, reporterId: care.id };
+    const confirmedRows = async () => (await db.select().from(agentActions)).filter((a) => a.action === REPORT_CONFIRMED);
+    const { id } = await db.transaction((tx) => fileStaffReport(tx, input));
+    await db.transaction((tx) => fileStaffReport(tx, input));
+    expect(await confirmedRows()).toHaveLength(0);
+
+    await db.update(reports).set({ status: "dismissed" }).where(eq(reports.id, id));
+    await db.update(cats).set({ flags: [] }).where(eq(cats.id, cat.id));
+    await db.transaction((tx) => fileStaffReport(tx, input));
+    expect(await confirmedRows()).toMatchObject([{ approvedBy: care.id, inputs: { reportId: id, catId: cat.id, claim: "injured" } }]);
+    expect((await reportRow(id)).status).toBe("confirmed");
+
+    await db.transaction((tx) => clearCatForSurgery(tx, cat.id, vet.id));
+    await db.transaction((tx) => fileStaffReport(tx, input));
+    expect(await confirmedRows()).toHaveLength(2);
+    for (const r of await confirmedRows()) expect(PRIVATE_ACTIONS).toContain(r.action);
   });
 });

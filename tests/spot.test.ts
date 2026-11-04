@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { desc, eq } from "drizzle-orm";
 import sharp from "sharp";
 import { closePool, db } from "../src/server/db/client";
+import { heldCatIds } from "../src/server/reports";
 import { cats, earTipFlags, reports, reviewRequests, sightings, users, wakeups } from "../src/server/db/schema";
 import { truncateAll } from "./helpers/db";
 import { createTestPool } from "./helpers/db";
@@ -1021,11 +1022,35 @@ describe("POST /api/spot/report", () => {
     expect((await reportRows())[0].catId).toBe(cat.id);
   });
 
-  it("files a report for a photo still waiting on a caretaker with no cat, to attach when sorted", async () => {
+  it("files a report for a photo still waiting on a caretaker with no cat, to attach when sorted, and does not promise a check yet", async () => {
     const u = await signIn();
     const s = await photoOf(u.id);
-    expect((await send({ sightingId: s.id, claim: "pregnant" })).status).toBe(200);
+    const res = await send({ sightingId: s.id, claim: "pregnant" });
+    expect(res.status).toBe(200);
+    expect(await json(res)).toEqual({ ok: true, message: "Thanks. A caretaker sorts the photo first. If that cat was already checked for this, it is closed." });
     expect(await reportRows()).toMatchObject([{ catId: null, sightingId: s.id, claim: "pregnant", status: "open" }]);
+  });
+
+  it("a report on a photo the AI has not looked at yet attaches to the cat when the AI settles the photo, and holds it", async () => {
+    const u = await signIn();
+    const { cat } = await seedCat({});
+    const s = await pendingSighting(5, u.id);
+    expect((await send({ sightingId: s.id, claim: "injured", note: "limping" })).status).toBe(200);
+    expect(await reportRows()).toMatchObject([{ catId: null, status: "open", source: "neighbour" }]);
+
+    await applyAssessment(s.id, assessWith({ flags: { kitten: false, pregnant: false, injured: true, sick: false } }) as never, { catId: cat.id, confidence: 1, candidateIds: [] });
+    const rows = await reportRows();
+    // The neighbour's own report is the one that holds the cat, and the photo's guess of the same thing adds no second card.
+    expect(rows).toMatchObject([{ catId: cat.id, claim: "injured", source: "neighbour", status: "open", reporterId: u.id }]);
+    expect(await db.transaction((tx) => heldCatIds(tx))).toEqual(new Set([cat.id]));
+  });
+
+  it("and to a new cat the same way", async () => {
+    const u = await signIn();
+    const s = await pendingSighting(5, u.id);
+    await send({ sightingId: s.id, claim: "sick" });
+    const out = await applyAssessment(s.id, assessWith() as never, { catId: null, confidence: 0, candidateIds: [] });
+    expect(await reportRows()).toMatchObject([{ catId: out.catId, claim: "sick", status: "open" }]);
   });
 
   it("answers with no coordinates, storage keys or note text", async () => {
@@ -1105,7 +1130,7 @@ describe("POST /api/spot/report", () => {
   it("files one report when the same photo is reported twice with no cat yet, whatever the retry", async () => {
     const u = await signIn();
     const s = await photoOf(u.id);
-    expect(await json(await send({ sightingId: s.id, claim: "injured", note: "limping" }))).toEqual({ ok: true });
+    expect((await json(await send({ sightingId: s.id, claim: "injured", note: "limping" }))).ok).toBe(true);
     const again = await send({ sightingId: s.id, claim: "injured", note: "limping" });
     expect(again.status).toBe(200);
     expect(await json(again)).toEqual({ ok: true, message: "You already told us about this today." });

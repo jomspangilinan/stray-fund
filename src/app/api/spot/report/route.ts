@@ -24,6 +24,9 @@ const SOFT: Record<string, string> = {
   dismissed_before: "A caretaker already checked this.",
 };
 
+/** A photo with no cat yet: the report waits, and is closed if that cat was already checked for this. */
+const WAITING_FOR_CAT = "Thanks. A caretaker sorts the photo first. If that cat was already checked for this, it is closed.";
+
 /**
  * One finder's claim about the cat in a photo they just took: { sightingId, claim, note? }. The cat comes from
  * the sighting, never from the body, and a photo still waiting on a caretaker has none yet, so the report
@@ -86,7 +89,7 @@ export async function POST(req: Request) {
         }
         throw e;
       }
-      return NextResponse.json({ ok: true }, { headers: NO_STORE });
+      return NextResponse.json(s.catId === null ? { ok: true, message: WAITING_FOR_CAT } : { ok: true }, { headers: NO_STORE });
     });
   } catch (e) {
     if (e instanceof AuthError) return fail(e.message, e.status);

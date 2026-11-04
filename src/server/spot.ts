@@ -11,7 +11,7 @@ import { catNamesInUse, uniqueName } from "./catNames";
 import { autoPublishable } from "./photoGate";
 import { nameIsSafe, safeBio } from "./placeText";
 import { fuzzLocation } from "./location";
-import { filePhotoReports } from "./reports";
+import { attachReports, filePhotoReports } from "./reports";
 import { publishScrubbed, storeOriginal, type Box } from "./photos";
 import { getStorage } from "./storage";
 
@@ -281,6 +281,9 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
         .update(sightings)
         .set({ catId: cat.id, state: "matched", matchConfidence: m.confidence, assessment: a })
         .where(eq(sightings.id, s.id));
+      // A neighbour may have reported this photo while it waited for the AI. Their report attaches first, so it stands
+      // and the photo's own guess of the same claim files nothing.
+      await attachReports(tx, s.id, cat.id);
       await filePhotoReports(tx, s.id, cat.id, claimsOf(a));
       return { done: true as const, result: result("matched", s.id, cat.id), sighting: s, catId: cat.id };
     }
@@ -305,6 +308,7 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
       .update(sightings)
       .set({ catId: cat.id, state: "new_cat", matchConfidence: m.catId ? m.confidence : null, assessment: a })
       .where(eq(sightings.id, s.id));
+    await attachReports(tx, s.id, cat.id);
     await filePhotoReports(tx, s.id, cat.id, claimsOf(a));
     return { done: true as const, result: result("new_cat", s.id, cat.id), sighting: s, catId: cat.id };
   });

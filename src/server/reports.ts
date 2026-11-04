@@ -140,7 +140,7 @@ export async function fileReport(tx: Tx, input: NeighbourOrPhoto): Promise<{ id:
   return { id: row.id };
 }
 
-export type BlockedReason = "dismissed_before" | "already_today" | "already_flagged" | "already_open";
+export type BlockedReason = "dismissed_before" | "already_today" | "already_flagged" | "already_open" | "recently_decided";
 
 /** A photo claim dismissed, or cleared by a vet, on this cat within this many days is not filed again. */
 const PHOTO_COOLDOWN_DAYS = 30;
@@ -148,7 +148,8 @@ const PHOTO_COOLDOWN_DAYS = 30;
 /**
  * The one check a report must pass to hold a cat that already exists: it is not a repeat by the same person the same
  * day, not a claim that person had dismissed on this cat, not a fact the cat already has confirmed, and not a
- * claim already open on the cat. filePhotoReports and attachReports both use it. `selfId` is the row being checked.
+ * claim already open on the cat. For a photo claim (no reporter) it is also not a claim a person dismissed or a vet
+ * cleared on this cat in the last 30 days. filePhotoReports and attachReports both use it. `selfId` is the row being checked.
  */
 async function blockedReason(
   tx: Tx,
@@ -167,7 +168,16 @@ async function blockedReason(
   const [cat] = await tx.select({ flags: cats.flags }).from(cats).where(eq(cats.id, r.catId));
   if (cat?.flags.includes(r.claim)) return "already_flagged";
   const [o] = await tx.select({ id: reports.id }).from(reports).where(and(same, eq(reports.status, "open"))).limit(1);
-  return o ? "already_open" : null;
+  if (o) return "already_open";
+  if (r.reporterId === null) {
+    const [recent] = await tx
+      .select({ id: reports.id })
+      .from(reports)
+      .where(and(same, inArray(reports.status, ["dismissed", "cleared"]), sql`${reports.decidedAt} > now() - make_interval(days => ${PHOTO_COOLDOWN_DAYS})`))
+      .limit(1);
+    if (recent) return "recently_decided";
+  }
+  return null;
 }
 
 /**
@@ -179,22 +189,7 @@ async function blockedReason(
 export async function filePhotoReports(tx: Tx, sightingId: string, catId: string | null, claims: readonly Claim[]): Promise<void> {
   const wanted = claims.filter((c) => (HOLD_CLAIMS as readonly string[]).includes(c));
   for (const claim of wanted) {
-    if (catId) {
-      if (await blockedReason(tx, { catId, claim, reporterId: null })) continue;
-      const [recent] = await tx
-        .select({ id: reports.id })
-        .from(reports)
-        .where(
-          and(
-            eq(reports.catId, catId),
-            eq(reports.claim, claim),
-            inArray(reports.status, ["dismissed", "cleared"]),
-            sql`${reports.decidedAt} > now() - make_interval(days => ${PHOTO_COOLDOWN_DAYS})`,
-          ),
-        )
-        .limit(1);
-      if (recent) continue;
-    }
+    if (catId && (await blockedReason(tx, { catId, claim, reporterId: null }))) continue;
     await fileReport(tx, { sightingId, catId, claim, note: null, source: "photo", reporterId: null });
   }
 }
@@ -230,12 +225,17 @@ export async function fileStaffReport(
     .onConflictDoNothing()
     .returning({ id: reports.id });
   if (!row) {
-    // The same person already reported this today. Make it true again, whatever happened to it since.
+    // The same person already reported this today. Make it true again, whatever happened to it since, and say so in the audit.
     const [first] = await tx
-      .update(reports)
-      .set({ status: "confirmed", decidedBy: input.reporterId, decidedAt: sql`now()` })
+      .select({ id: reports.id, status: reports.status })
+      .from(reports)
       .where(and(eq(reports.catId, input.catId), eq(reports.reporterId, input.reporterId), eq(reports.claim, input.claim), sql`${reports.reportedOn} = ${manilaToday}`))
-      .returning({ id: reports.id });
+      .for("update");
+    if (first.status !== "confirmed") {
+      await tx.update(reports).set({ status: "confirmed", decidedBy: input.reporterId, decidedAt: sql`now()` }).where(eq(reports.id, first.id));
+      await audit(tx, REPORT_CONFIRMED, "A caretaker confirmed a report.", { reportId: first.id, catId: input.catId, claim: input.claim }, input.reporterId);
+      await enqueueWakeup(tx, REPORT_WAKEUP, { catId: input.catId });
+    }
     await addFlag(tx, input.catId, input.claim);
     return { id: first.id };
   }
