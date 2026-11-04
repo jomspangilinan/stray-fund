@@ -6,7 +6,9 @@ import type { NameControls } from "@/server/catNames";
 import { CatPhoto } from "./CatPhoto";
 import { EarTipAsk } from "./EarTipAsk";
 import type { EarTipAnswer } from "./EarTipChoice";
-import { JourneyTimeline, niceDate } from "./JourneyTimeline";
+import { niceDate } from "@/lib/niceDate";
+import type { TimelineEntry } from "@/server/timeline";
+import { CatTimeline } from "./CatTimeline";
 import { CatNameEditor } from "./CatNameEditor";
 import { SaveImage } from "./SaveImage";
 import { SexAsk } from "./SexAsk";
@@ -18,6 +20,7 @@ export function CatDetail({
   names,
   askSex = false,
   caretaker = false,
+  timeline = [],
 }: {
   card: CatCardData;
   thanks?: Thanks[];
@@ -29,6 +32,8 @@ export function CatDetail({
   askSex?: boolean;
   /** True for a caretaker: the pencil sets the name directly instead of suggesting one. */
   caretaker?: boolean;
+  /** The cat's story: who reported what, what the Treasurer decided and each PayPal payment. */
+  timeline?: TimelineEntry[];
 }) {
   const { cat, sightings, health } = card;
   // Only a cat waiting for the shared fund can be helped. A spotted cat is not asked for yet; later cats are paid for.
@@ -96,14 +101,16 @@ export function CatDetail({
         </p>
       </section>
 
-      <section aria-labelledby="journey">
-        <h2 id="journey" className="h2 mb-3">
-          Journey
-        </h2>
-        <div className="card">
-          <JourneyTimeline steps={cat.journey} />
-        </div>
-      </section>
+      {timeline.length > 0 && (
+        <section aria-labelledby="journey">
+          <h2 id="journey" className="h2 mb-3">
+            Journey
+          </h2>
+          <div className="card">
+            <CatTimeline entries={timeline} />
+          </div>
+        </section>
+      )}
 
       <section aria-labelledby="health">
         <h2 id="health" className="h2 mb-3">

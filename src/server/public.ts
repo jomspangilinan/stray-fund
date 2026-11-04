@@ -13,7 +13,7 @@ import { formatPesoShort } from "@/lib/money";
 import { heldCatIds, HOLD_CLAIMS } from "./reports";
 import { CAPTURED, getPoolStatus, toInt } from "./ledger";
 import { bioIsSafe, nameIsSafe } from "./placeText";
-import { PRIVATE_ACTIONS } from "./privateActions";
+import { NAME_APPROVED, NAME_SET, PRIVATE_ACTIONS } from "./privateActions";
 import type { Session } from "./session";
 import { getStorage } from "./storage";
 
@@ -426,6 +426,18 @@ export function publicAgentAction(row: AgentActionInput, knownNames: readonly st
 
 const MAX_AGENT_ACTIONS = 100;
 
+/**
+ * Every cat name that was ever public: today's names, and the ones a caretaker renamed from, since an earlier reason
+ * still carries the old name. For the reason filter only.
+ */
+export async function knownCatNames(tx: Pick<typeof db, "select" | "execute"> = db): Promise<string[]> {
+  const [current, former] = await Promise.all([
+    tx.select({ name: cats.name }).from(cats),
+    tx.execute(sql`select distinct a.inputs->>'from' as name from agent_actions a where a.action in (${NAME_APPROVED}, ${NAME_SET}) and a.inputs->>'from' is not null`),
+  ]);
+  return [...current.map((c) => c.name), ...(former.rows as { name: string }[]).map((r) => r.name)];
+}
+
 /** Every report note, for the filter only. Never returned. */
 export async function allNotes(tx: Pick<typeof db, "select"> = db): Promise<string[]> {
   return (await tx.select({ note: reports.note }).from(reports).where(isNotNull(reports.note))).map((n) => n.note as string);
@@ -434,7 +446,7 @@ export async function allNotes(tx: Pick<typeof db, "select"> = db): Promise<stri
 /** Newest first. The cat comes from the action's payout, or for funding from its recorded id. */
 export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promise<PublicAgentAction[]> {
   // Cat names are public. A reason that weighs one cat against another names both.
-  const knownNames = (await db.select({ name: cats.name }).from(cats)).map((c) => c.name);
+  const knownNames = await knownCatNames();
   const { rows } = await db.execute(sql`
     select a.id, a.action, a.reason, a.amount, a.status, a.paypal_ref, a.created_at, c.name as cat, c.id as cat_id,
            (a.approved_by is not null) as approved_by_person
@@ -916,7 +928,7 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
       order by a.action, a.inputs->>'catId', a.created_at desc, a.id desc
     `),
     loadSightings(ids),
-    db.select({ name: cats.name }).from(cats).then((r) => r.map((c) => c.name)),
+    knownCatNames(),
     db.transaction((tx) => getPoolStatus(tx)),
     db.select({ packagePrice: guardrails.packagePrice }).from(guardrails).where(eq(guardrails.id, 1)),
     allNotes(),
