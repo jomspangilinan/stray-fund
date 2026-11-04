@@ -228,6 +228,20 @@ describe("G3 fix: receipt and ear-tip photos in the demo", () => {
     });
   }
 
+  it("a seeded sample sighting photo is served to the demo caretaker, and a visitor's original still is not", async () => {
+    const { sampleSightingKey } = await import("../src/server/seed");
+    const { getStorage } = await import("../src/server/storage");
+    const key = sampleSightingKey(7);
+    await getStorage().putPrivate(key, await gpsJpeg(), "image/jpeg");
+    const [sample] = await db.insert(sightings).values({ originalKey: key, state: "matched" }).returning();
+    const { held } = await world();
+    await asPersona("caretaker");
+    const res = await getImg("sighting", sample.id);
+    expect(res.headers.get("content-type")).toBe("image/jpeg");
+    expect(res.status).toBe(200);
+    expect((await getImg("sighting", held.id)).headers.get("content-type")).toBe("image/svg+xml");
+  });
+
   it("the demo neighbour gets a 404, and a missing receipt stays 404", async () => {
     const s = await asPersona("neighbour");
     const r = await receiptFor(s.userId, UPLOADED);

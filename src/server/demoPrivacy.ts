@@ -32,6 +32,12 @@ export function placeForStaff<T extends { lat: number; lng: number; approximate:
 /** Seeded sample receipts carry an all-zero hash prefix that no real file can have. Only these may be served in the demo. */
 export const isSampleReceipt = (sha256: string): boolean => /^0{63}[0-9a-f]$/.test(sha256);
 
+/**
+ * Seeded sample sightings are stored under a key with an all-zero random part (see sampleSightingKey), which no real
+ * upload can have: real keys are random UUIDs. Only these originals are served in the demo, since they are drawings.
+ */
+export const isSampleSightingKey = (key: string): boolean => /^originals\/0{8}-0000-4000-8000-0{10}[0-9a-f]{2}\.jpg$/.test(key);
+
 /** The plain "Hidden in the demo" picture as a response. */
 export function hiddenInDemoResponse(): Response {
   return new Response(HIDDEN_IN_DEMO_SVG, {

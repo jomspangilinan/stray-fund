@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import sharp from "sharp";
 import { catAvatar } from "@/lib/avatar";
 import { COLONY } from "@/lib/config";
 import { db } from "./db/client";
@@ -12,12 +13,15 @@ import {
   guardrails,
   payouts,
   receipts,
+  reports,
+  sightings,
   treatments,
   users,
 } from "./db/schema";
 import { DEMO_CLINIC_NAME, ensureDemoPersonas } from "./demoPersonas";
 import { assertE2eFakesSafe, paypalIsLive } from "./e2e/guard";
 import { fuzzLocation } from "./location";
+import { getStorage } from "./storage";
 
 /*
  * Sample data for a demo. It resets the database it is pointed at, so it refuses to run unless SEED_CONFIRM=yes,
@@ -25,8 +29,9 @@ import { fuzzLocation } from "./location";
  *
  * Everything here is invented. Coordinates are near the colony's placeholder centre. Money rows are sample data and
  * say so: every PayPal id starts with SAMPLE-, and every sentence the treasurer "wrote" starts with "Sample data."
- * No id here was ever issued by PayPal. No cat has a photo, because there is no licensed photo to use, so every
- * card shows its look-alike. The totals add up: the Proof page balances on the seeded rows alone.
+ * No id here was ever issued by PayPal. No cat has a public photo, because there is no licensed photo to use, so every
+ * card shows its look-alike. The three reports below each come with a drawn stand-in for the photo a neighbour took, shown
+ * on the caretaker's desk only. The totals add up: the Proof page balances on the seeded rows alone.
  */
 
 export const SAMPLE_PREFIX = "SAMPLE-";
@@ -116,8 +121,26 @@ const SEED_CATS: SeedCat[] = [
   { key: "luna", name: "Luna", sex: "female", status: "in_care", pattern: "tuxedo", colors: ["black", "white"], markings: "Tuxedo with a white blaze.", bio: "Calm, and always the last to leave the food.", ageDays: 34, at: [7, -1], earTipped: false },
   { key: "puso", name: "Puso", sex: "male", status: "neutered", pattern: "solid", colors: ["grey"], markings: "Solid grey with a flat-cut left ear.", bio: "Neighbours say his ear is already tipped.", ageDays: 15, at: [-6, 5], earTipped: true, neuteredUnconfirmed: true },
   { key: "tisay", name: "Tisay", sex: "female", status: "adoptable", pattern: "colorpoint", colors: ["cream", "brown"], markings: "Cream coat with brown points.", bio: "Already neutered when found. A caretaker confirmed her tipped ear.", ageDays: 48, at: [3, 7], earTipped: true },
+  { key: "hapon", name: "Hapon", sex: "male", status: "queued", pattern: "tabby", colors: ["brown"], markings: "Brown tabby with a short tail.", bio: "Keeps to the wall and watches the road.", ageDays: 9, at: [4, -5], earTipped: false, queued: true },
+  { key: "bituin", name: "Bituin", sex: "male", status: "queued", pattern: "bicolor", colors: ["black", "white"], markings: "Black with a white star on the chest.", bio: "Calm with people, wary of other cats.", flags: ["injured"], ageDays: 15, at: [-5, -4], earTipped: false, queued: true },
+  { key: "dilaw", name: "Dilaw", sex: "male", status: "queued", pattern: "solid", colors: ["ginger"], markings: "Plain ginger with a pale chin.", bio: "Follows the feeder around the corner.", ageDays: 6, at: [6, 6], earTipped: false, queued: true },
   { key: "biscoy", name: "Biscoy", sex: "male", status: "adopted", pattern: "solid", colors: ["ginger"], markings: "Plain ginger coat.", bio: "Neutered through the fund, then taken in by a family.", ageDays: 70, at: [-8, -2], earTipped: true },
 ];
+
+/**
+ * The stand-in for a neighbour's photo: a flat drawing of a cat's head, no text, no real animal. Stored under a key the
+ * desk is allowed to serve in the demo (see isSampleSightingKey).
+ */
+export const sampleSightingKey = (n: number): string => `originals/00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}.jpg`;
+
+async function sampleDrawing(): Promise<Buffer> {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">` +
+    `<rect width="640" height="480" fill="#e9efe9"/><polygon points="220,190 250,90 300,160" fill="#8a8f86"/><polygon points="420,190 390,90 340,160" fill="#8a8f86"/>` +
+    `<ellipse cx="320" cy="270" rx="125" ry="105" fill="#9da197"/><ellipse cx="275" cy="255" rx="14" ry="20" fill="#35423b"/><ellipse cx="365" cy="255" rx="14" ry="20" fill="#35423b"/>` +
+    `<polygon points="308,292 332,292 320,306" fill="#d79a9a"/></svg>`;
+  return sharp(Buffer.from(svg)).jpeg({ quality: 80 }).toBuffer();
+}
 
 const SEED_DONORS = ["demo_ate_lorna", "demo_kuya_ben", "demo_lola_nena", "demo_tito_jun"] as const;
 
@@ -181,6 +204,46 @@ export async function seed(env: Env = process.env): Promise<{ cats: number; dono
       { catId: cat.puso.id, userId: donor.demo_ate_lorna.id, value: "yes" },
       { catId: cat.puso.id, userId: donor.demo_lola_nena.id, value: "yes" },
     ]);
+
+    // ---------------- the report story. Invented notes, no names or places. The treasurer has decided nothing yet:
+    // confirming the open report is what wakes it, and its answer comes from a real run.
+    const drawing = await sampleDrawing();
+    const reportAbout = async (n: number, catKey: string, reporter: typeof neighbour, claim: string, note: string, ago: number, rest: Partial<typeof reports.$inferInsert>) => {
+      const [sighting] = await tx
+        .insert(sightings)
+        .values({
+          catId: cat[catKey].id,
+          originalKey: sampleSightingKey(n),
+          publicReady: false,
+          takenAt: day(ago),
+          caughtByUserId: reporter.id,
+          matchConfidence: 0.9,
+          exactLat: cat[catKey].exactLat,
+          exactLng: cat[catKey].exactLng,
+          state: "matched",
+          createdAt: day(ago),
+        })
+        .returning();
+      await getStorage().putPrivate(sighting.originalKey, drawing, "image/jpeg");
+      await tx.insert(reports).values({
+        catId: cat[catKey].id,
+        sightingId: sighting.id,
+        claim,
+        note,
+        source: "neighbour",
+        reporterId: reporter.id,
+        sample: true,
+        reportedOn: day(ago).toISOString().slice(0, 10),
+        createdAt: day(ago),
+        ...rest,
+      });
+    };
+    // Open: a neighbour says Hapon is hurt, so he is held and tops the desk.
+    await reportAbout(1, "hapon", neighbour, "injured", "Limping on the back left leg since this morning and will not put weight on it.", 0.1, {});
+    // Confirmed by a caretaker, so Bituin waits on a vet to clear him.
+    await reportAbout(2, "bituin", donor.demo_kuya_ben, "injured", "A cut on the front paw. He walks on three legs.", 3, { status: "confirmed", decidedBy: caretaker.id, decidedAt: day(2) });
+    // Dismissed: Dilaw was checked and is fine, so he is back among the waiting cats.
+    await reportAbout(3, "dilaw", donor.demo_ate_lorna, "sick", "Sneezing a lot and one eye looks watery.", 4, { status: "dismissed", decidedBy: caretaker.id, decidedAt: day(3) });
 
     // ---------------- sample donations. Net = gross - fee.
     const gifts = [

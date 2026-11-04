@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { hiddenInDemoResponse, hidePrivateInDemo, isSampleReceipt } from "@/server/demoPrivacy";
+import { hiddenInDemoResponse, hidePrivateInDemo, isSampleReceipt, isSampleSightingKey } from "@/server/demoPrivacy";
 import { db } from "@/server/db/client";
 import { bookings, receipts, sightings } from "@/server/db/schema";
 import { isUuid } from "@/server/public";
@@ -37,7 +37,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ kind: string; 
       .from(sightings)
       .where(eq(sightings.id, id));
     // The open demo never serves a visitor's original to the next visitor: the public copy, or a plain placeholder.
-    if (row && hidePrivateInDemo()) {
+    if (row && hidePrivateInDemo() && !isSampleSightingKey(row.key)) {
       if (row.publicReady && row.publicKey) {
         return new Response(null, { status: 302, headers: { Location: getStorage().publicUrl(row.publicKey), "Cache-Control": "private, no-store" } });
       }
