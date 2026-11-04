@@ -21,7 +21,7 @@ import { runAction } from "../src/server/caretaker";
 import { getCaretakerQueue } from "../src/server/caretaker/queue";
 import { getPoolStatus } from "../src/server/ledger";
 import { createAgentTools, payoutRetryBlocked } from "../src/server/agent/tools";
-import { runAgent, SYSTEM_PROMPT, MAX_ITERATIONS } from "../src/server/agent/run";
+import { runAgent, SYSTEM_PROMPT, MAX_ITERATIONS, agentCounters } from "../src/server/agent/run";
 import { syncCatForPayout } from "../src/server/catTransitions";
 import { loadToolkitTools, toolkitToClaudeTools } from "../src/server/paypal/toolkit";
 import { truncateAll } from "./helpers/db";
@@ -1267,5 +1267,27 @@ describe("toolkit", () => {
     const errors = vi.spyOn(console, "error");
     expect(await loadToolkitTools()).toEqual([]);
     expect(errors).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("a final text that claims a tool failed (counted, never acted on)", () => {
+  const run = (turns: Parameters<typeof scriptedClient>[0]) =>
+    runAgent({ kind: "donation_captured", payload: {} }, { client: scriptedClient(turns).client, gateway: new FakeGateway(), now: () => NOW, loadToolkit: async () => [], consumeBudget: async () => true });
+
+  it("counts a claim when no tool failed, and logs it, without changing the result", async () => {
+    agentCounters.inventedToolFailures = 0;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const res = await run([{ calls: [{ name: "get_pool_status", input: {} }] }, { text: "My attempt to read the fund balance failed, so I did nothing." }]);
+    expect(res.stop).toBe("end_turn");
+    expect(agentCounters.inventedToolFailures).toBe(1);
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("does not count it when a tool really returned an error, or the text claims nothing", async () => {
+    agentCounters.inventedToolFailures = 0;
+    await run([{ calls: [{ name: "fund_next_cat", input: { cat_id: "00000000-0000-4000-8000-000000000000", reason: "x" } }] }, { text: "The funding call failed, so I stopped." }]);
+    await run([{ calls: [{ name: "get_pool_status", input: {} }] }, { text: "The fund holds money. Nothing to do." }]);
+    expect(agentCounters.inventedToolFailures).toBe(0);
   });
 });

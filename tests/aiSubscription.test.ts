@@ -194,6 +194,15 @@ describe("abort and hostile data", () => {
     expect(seen).toHaveLength(1);
   });
 
+  it("the protocol tells the model its listed tools are real, and that a tool failed only if a tool_result says so", async () => {
+    installCli([final("ok")]);
+    await subscriptionTransport({ consumeBudget: async () => true })(params());
+    const system = calls[0].args[calls[0].args.indexOf("--system-prompt") + 1];
+    expect(system).not.toContain("You have no tools of your own");
+    expect(system).toContain("The tools listed under TOOLS are real and you can use them");
+    expect(system).toContain('A tool has failed only if its <tool_result error="true"> says so');
+  });
+
   it("an already aborted signal never starts the CLI", async () => {
     installCli([final("never")]);
     const ac = new AbortController();

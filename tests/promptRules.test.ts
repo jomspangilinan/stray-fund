@@ -62,6 +62,10 @@ describe("prompt rules that the money and privacy checks lean on", () => {
     expect(SYSTEM_PROMPT).toContain("Use cat names, never quote a note, and name no street, shop, person or number except pesos and days.");
   });
 
+  it("funding past a cat a person has checked means naming that cat and saying why it waits", () => {
+    expect(SYSTEM_PROMPT).toContain("When you fund past a cat a person has checked, name that cat and say why it waits.");
+  });
+
   it("the money rules stay word for word", () => {
     for (const line of [
       "You never choose an amount or a payee. The tools work these out, and a code-enforced gate can refuse any payment.",

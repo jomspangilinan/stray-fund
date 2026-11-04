@@ -242,7 +242,7 @@ export function createAgentTools(deps: AgentToolDeps = {}) {
   const now = deps.now ?? (() => new Date());
   const syncCat = deps.syncCat ?? syncCatForPayout;
   const actions: string[] = [];
-  const state = { internalErrors: 0 };
+  const state = { internalErrors: 0, toolErrors: 0 };
 
   async function settleCat(result: GateResult): Promise<void> {
     if (!result.payoutId || (result.status !== "sent" && result.status !== "succeeded")) return;
@@ -275,7 +275,10 @@ export function createAgentTools(deps: AgentToolDeps = {}) {
           console.error(`[agent] tool ${name} failed: ${describeError(e)}`);
           out = fail("INTERNAL", "This step failed on our side. Nothing more is known, so stop and let it retry.");
         }
-        if (!out.ok) throw new ToolError(JSON.stringify(out));
+        if (!out.ok) {
+          state.toolErrors++;
+          throw new ToolError(JSON.stringify(out));
+        }
         if (opts.recordsAction) actions.push(name);
         return JSON.stringify(out);
       },
