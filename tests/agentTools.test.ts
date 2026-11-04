@@ -9,6 +9,7 @@ import {
   donations,
   guardrails,
   payouts,
+  reports,
   reviewRequests,
   users,
   wakeups,
@@ -106,6 +107,68 @@ afterEach(() => {
 });
 afterAll(closePool);
 
+describe("fund_next_cat: a person-checked cat must be named (WEIGHING_NOT_SHOWN)", () => {
+  async function checkedWorld(status: "confirmed" | "cleared" = "cleared") {
+    await addPool(200000);
+    const mimi = await makeCat({ name: "Mimi", sex: "female", queuedAt: daysAgo(14) });
+    const tom = await makeCat({ name: "Tom", sex: "male", queuedAt: daysAgo(6), flags: ["injured"] });
+    await db.insert(reports).values({ catId: tom.id, claim: "injured", source: "vet", status, reportedOn: "2026-11-01" });
+    return { mimi, tom };
+  }
+  const allocationRows = () => db.select().from(allocations);
+
+  it("refuses the top cat when the reason does not name a cat with a checked report, and changes nothing", async () => {
+    const { call } = setup();
+    const { mimi, tom } = await checkedWorld();
+    const { isError, body } = await call("fund_next_cat", { cat_id: mimi.id, reason: REASON });
+    expect(isError).toBe(true);
+    expect(body).toMatchObject({ code: "WEIGHING_NOT_SHOWN", mustName: ["Tom"] });
+    expect(typeof body.message).toBe("string");
+    expect(await allocationRows()).toHaveLength(0);
+    expect(await db.select().from(agentActions)).toHaveLength(0);
+    expect(await catStatus(mimi.id)).toBe("queued");
+    expect(tom.id).toBeTruthy();
+  });
+
+  it("allows it once the reason names that cat, for a confirmed report too", async () => {
+    for (const status of ["cleared", "confirmed"] as const) {
+      await truncateAll();
+      const { call } = setup();
+      const { mimi } = await checkedWorld(status);
+      const { isError } = await call("fund_next_cat", { cat_id: mimi.id, reason: "Mimi goes first because she has waited longer than Tom, whose report was checked." });
+      expect(isError).toBe(false);
+      expect(await allocationRows()).toHaveLength(1);
+    }
+  });
+
+  it("allows it when no cat has a checked report, or an open one", async () => {
+    const { call } = setup();
+    await addPool(200000);
+    const mimi = await makeCat({ name: "Mimi", sex: "female", queuedAt: daysAgo(5) });
+    const tom = await makeCat({ name: "Tom", queuedAt: daysAgo(2) });
+    await db.insert(reports).values({ catId: tom.id, claim: "kitten", source: "neighbour", status: "open", reportedOn: "2026-11-01" });
+    expect((await call("fund_next_cat", { cat_id: mimi.id, reason: REASON })).isError).toBe(false);
+  });
+
+  it("does not apply when the cat being funded has a checked report of its own", async () => {
+    const { call } = setup();
+    await addPool(200000);
+    const tom = await makeCat({ name: "Tom", sex: "female", queuedAt: daysAgo(14) });
+    const mimi = await makeCat({ name: "Mimi", sex: "female", queuedAt: daysAgo(6) });
+    for (const c of [tom, mimi]) await db.insert(reports).values({ catId: c.id, claim: "injured", source: "vet", status: "cleared", reportedOn: "2026-11-01" });
+    expect((await call("fund_next_cat", { cat_id: tom.id, reason: "Tom has waited longest." })).isError).toBe(false);
+  });
+
+  it("can always be satisfied by naming the cat, so it never blocks funding for good", async () => {
+    const { call } = setup();
+    const { mimi } = await checkedWorld();
+    const first = await call("fund_next_cat", { cat_id: mimi.id, reason: REASON });
+    expect(first.body.code).toBe("WEIGHING_NOT_SHOWN");
+    const again = await call("fund_next_cat", { cat_id: mimi.id, reason: `${REASON} Tom waits.` });
+    expect(again.isError).toBe(false);
+  });
+});
+
 describe("fund_next_cat", () => {
   it("funds the top cat in one transaction, recording tier, wait, top pick and override", async () => {
     const { call, actions } = setup();
@@ -114,7 +177,6 @@ describe("fund_next_cat", () => {
 
     const { isError, body } = await call("fund_next_cat", { cat_id: mimi.id, reason: REASON });
 
-    expect(isError).toBe(false);
     expect(body.amount).toBe(150000);
     expect(await catStatus(mimi.id)).toBe("funded");
     const alloc = await db.select().from(allocations).where(eq(allocations.catId, mimi.id));

@@ -460,7 +460,8 @@ describe("tools", () => {
     expect((await call("set_cat_place", { cat_id: tom.id, before_cat_id: mimi.id, reason: "Tom's kitten report is confirmed.", report_id: r.id })).isError).toBe(false);
     // Tom is now first.
     const refused = await call("fund_next_cat", { cat_id: mimi.id, reason: "Mimi is next." });
-    expect(refused.body).toMatchObject({ code: "OVERRIDE_NOT_EXPLAINED", mustName: ["Tom"] });
+    // Tom's report is a checked one, so the weighing rule asks for his name first; naming him also covers the pass-over.
+    expect(refused.body).toMatchObject({ code: "WEIGHING_NOT_SHOWN", mustName: ["Tom"] });
     expect(await db.select().from(allocations)).toHaveLength(0);
     expect((await call("fund_next_cat", { cat_id: tom.id, reason: "Tom is first now." })).isError).toBe(false);
   });

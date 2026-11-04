@@ -16,7 +16,7 @@ import { manilaDate } from "../public";
 import { isPlainText } from "../plainText";
 import { fileReview } from "./review";
 import { HOLD_CLAIMS, heldCatIds } from "../reports";
-import { fundingOrder, placeCat } from "./priority";
+import { checkedCats, fundingOrder, placeCat } from "./priority";
 import { effectiveSex } from "./rank";
 
 export const FUND_ACTION = "fund_cat";
@@ -112,6 +112,21 @@ async function fundCat(catId: string, why: string, now: Date): Promise<Outcome> 
       // Before anything is allocated: a cat a person must check first gets no allocation row at all.
       if ((await heldCatIds(tx)).has(catId)) {
         return fail("CAT_ON_HOLD", "A report says this cat may need a person first. A caretaker must check it, and a vet clear it for surgery if it was confirmed. Fund another cat.");
+      }
+
+      // Before anything is allocated. A cat a person has checked is a fact the ranking may not have weighed, so funding
+      // past it means showing the trade-off in the reason: name that cat. Keeping the ranking is fine. The model can
+      // always satisfy this by naming the cat, so it never blocks funding for good, and a refusal writes nothing.
+      const [inOrder, checked] = await Promise.all([fundingOrder(tx, now), checkedCats(tx)]);
+      if (!checked.has(catId)) {
+        const mustName = inOrder.filter((r) => r.cat.id !== catId && checked.has(r.cat.id) && !namesCat(why, r.cat.name)).map((r) => r.cat.name);
+        if (mustName.length > 0) {
+          return fail(
+            "WEIGHING_NOT_SHOWN",
+            "A person has checked a report on a waiting cat. Whether or not you move it, the reason must name that cat and say why it waits or why this cat goes first.",
+            { mustName },
+          );
+        }
       }
 
       const { packagePrice } = await loadLimits(tx);

@@ -64,7 +64,7 @@ async function rankedAvailable(tx: Tx | typeof db, now: Date): Promise<RankedCat
 const CHECKED = ["confirmed", "cleared"];
 
 /** Cats with a report a person checked: confirmed by a caretaker, or cleared by a vet. Any claim. */
-async function checkedCats(tx: Tx | typeof db): Promise<Set<string>> {
+export async function checkedCats(tx: Tx | typeof db): Promise<Set<string>> {
   const rows = await tx
     .selectDistinct({ catId: reports.catId })
     .from(reports)
