@@ -31,7 +31,7 @@ async function Missions() {
         </div>
       ) : (
         <>
-          <h2 className="h2 mt-8">Who needs help most</h2>
+          <h2 className="h2 mt-8">Where you can help</h2>
           <div className="mt-3">
             <MissionList missions={missions} />
           </div>

@@ -2,10 +2,11 @@ import type { Role } from "@/server/session";
 
 export type PageLink = { href: string; label: string };
 
-/** The money pages. The Fund tab opens the first and stays lit on all three. */
+/** The money pages. The Fund tab opens the first and stays lit on all four. */
 export const FUND_PAGES: readonly PageLink[] = [
   { href: "/ledger", label: "Ledger" },
   { href: "/agent", label: "Treasurer" },
+  { href: "/priority", label: "Priority" },
   { href: "/impact", label: "Proof" },
 ];
 

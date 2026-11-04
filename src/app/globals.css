@@ -316,6 +316,10 @@ a.row:active,
   background: var(--pop);
   color: var(--ink);
 }
+.tag-says {
+  background: var(--t1);
+  color: var(--ink);
+}
 .tag-bad {
   background: var(--danger-tint);
   color: var(--danger);
@@ -1096,6 +1100,11 @@ input[type="checkbox"] {
   transition:
     background-color 120ms var(--ease-out),
     color 120ms var(--ease-out);
+}
+/* Four labels share the width, so they get a little less padding and type. */
+.seg:has(a:nth-child(4)) a {
+  padding: 0 0.125rem;
+  font-size: 0.9375rem;
 }
 .seg a[aria-current="page"] {
   background: var(--surface);

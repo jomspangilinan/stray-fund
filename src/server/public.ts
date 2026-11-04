@@ -6,8 +6,11 @@ import { careMarks, pickYard, yardStage, type YardCat, type YardGroup } from "@/
 import { pickMissions, type Mission, type MissionCat } from "@/lib/missions";
 import { hidePrivateInDemo } from "./demoPrivacy";
 import { db } from "./db/client";
-import { cats, earTipFlags, guardrails, nameSuggestions, sightings, treatments, users } from "./db/schema";
+import { cats, earTipFlags, guardrails, nameSuggestions, reports, sightings, treatments, users } from "./db/schema";
+import { fundingOrder, SET_PLACE_ACTION } from "./agent/priority";
 import { ownFlags } from "./earTipFlags";
+import { formatPesoShort } from "@/lib/money";
+import { heldCatIds, HOLD_CLAIMS } from "./reports";
 import { CAPTURED, getPoolStatus, toInt } from "./ledger";
 import { bioIsSafe, nameIsSafe } from "./placeText";
 import { PRIVATE_ACTIONS } from "./privateActions";
@@ -823,4 +826,117 @@ export async function getYard(viewerId: string | null): Promise<PublicYard> {
     stage: yardStage(goal.neutered, goal.goal),
     goal,
   };
+}
+
+
+// ---------- The priority list ----------
+
+export type PriorityRow = {
+  catId: string;
+  name: string;
+  photoUrl: string | null;
+  reason: string;
+  labels: string[];
+  /** 1-based place in Next to fund. Null for a cat that needs a person first. */
+  position: number | null;
+  /** On the first cat of Next to fund only: whether the fund covers it now. */
+  fundNote: string | null;
+};
+export type PriorityList = { needsPerson: PriorityRow[]; nextToFund: PriorityRow[] };
+
+const CLAIM_WORD: Record<string, string> = { injured: "hurt", pregnant: "pregnant", sick: "sick", kitten: "kitten" };
+const claimTag = (claim: string) => (CLAIM_WORD[claim] ?? claim).replace(/^./, (c) => c.toUpperCase());
+const SAYS: Record<string, string> = { neighbour: "Neighbour says", photo: "Photo suggests" };
+const ASK_ACTION = "ask_for_check";
+const NEEDS_CHECK = "A person needs to check this first.";
+
+/**
+ * What the Treasurer is doing for each waiting cat. A held cat (a hurt, pregnant or sick report that is open or
+ * confirmed) needs a person first; queued cats are in the funding order. Each field is built by hand: no note,
+ * reporter, place or photo key reaches it, and an AI reason must pass the same filter as the feed.
+ */
+export async function getPriorityList(now: Date = new Date()): Promise<PriorityList> {
+  const [order, held] = await Promise.all([db.transaction((tx) => fundingOrder(tx, now)), db.transaction((tx) => heldCatIds(tx))]);
+  const heldRows = held.size
+    ? await db
+        .select({ id: cats.id, name: cats.name })
+        .from(cats)
+        .where(and(inArray(cats.id, [...held]), inArray(cats.status, ["spotted", "queued"])))
+    : [];
+  const ids = [...new Set([...heldRows.map((c) => c.id), ...order.map((o) => o.cat.id)])];
+  if (ids.length === 0) return { needsPerson: [], nextToFund: [] };
+
+  const [reportRows, actionRows, sights, knownNames, pool, limits] = await Promise.all([
+    db
+      .select({ catId: reports.catId, claim: reports.claim, source: reports.source, status: reports.status, createdAt: reports.createdAt })
+      .from(reports)
+      .where(and(inArray(reports.catId, ids), inArray(reports.status, ["open", "confirmed", "cleared"])))
+      .orderBy(asc(reports.createdAt), asc(reports.id)),
+    db.execute(sql`
+      select distinct on (a.action, a.inputs->>'catId') a.action, a.inputs->>'catId' as cat_id, a.reason
+      from agent_actions a
+      where a.action in (${SET_PLACE_ACTION}, ${ASK_ACTION})
+        and a.inputs->>'catId' in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})
+      order by a.action, a.inputs->>'catId', a.created_at desc, a.id desc
+    `),
+    loadSightings(ids),
+    db.select({ name: cats.name }).from(cats).then((r) => r.map((c) => c.name)),
+    db.transaction((tx) => getPoolStatus(tx)),
+    db.select({ packagePrice: guardrails.packagePrice }).from(guardrails).where(eq(guardrails.id, 1)),
+  ]);
+
+  const reasonOf = new Map<string, string>();
+  for (const a of actionRows.rows as { action: string; cat_id: string; reason: string }[]) reasonOf.set(`${a.action}:${a.cat_id}`, a.reason);
+  const safe = (reason: string, name: string, fallback: string) => (reasonIsSafe(reason, name, knownNames) ? reason : fallback);
+  const photoOf = (id: string) => {
+    const photo = sights.filter((s) => s.catId === id).reverse().find((s) => s.publicReady && s.publicKey);
+    return photoUrl(photo?.publicKey ?? null);
+  };
+
+  const holdLabels = (id: string): { labels: string[]; confirmed: boolean; since: number } => {
+    const mine = reportRows.filter((r) => r.catId === id && (HOLD_CLAIMS as readonly string[]).includes(r.claim));
+    const confirmed = mine.filter((r) => r.status === "confirmed");
+    const open = mine.filter((r) => r.status === "open");
+    const labels = [...new Set(confirmed.map((r) => claimTag(r.claim)))];
+    if (confirmed.length) labels.push("Caretaker confirmed");
+    for (const r of open) {
+      const l = `${SAYS[r.source] ?? SAYS.neighbour} ${CLAIM_WORD[r.claim]}`;
+      if (!labels.includes(l)) labels.push(l);
+    }
+    return { labels, confirmed: confirmed.length > 0, since: Math.min(...mine.map((r) => r.createdAt.getTime())) };
+  };
+
+  const needsPerson = heldRows
+    .map((c) => ({ c, h: holdLabels(c.id) }))
+    .sort((a, b) => Number(b.h.confirmed) - Number(a.h.confirmed) || a.h.since - b.h.since || a.c.id.localeCompare(b.c.id))
+    .map(({ c, h }): PriorityRow => {
+      const asked = reasonOf.get(`${ASK_ACTION}:${c.id}`);
+      return {
+        catId: c.id,
+        name: c.name,
+        photoUrl: photoOf(c.id),
+        reason: asked === undefined ? NEEDS_CHECK : safe(asked, c.name, "The Treasurer asked a caretaker to look at a cat."),
+        labels: h.labels,
+        position: null,
+        fundNote: null,
+      };
+    });
+
+  const price = limits[0]?.packagePrice ?? 0;
+  const available = Math.max(0, pool.available);
+  const firstNote = available >= price ? "The fund covers this cat now." : `Needs ${formatPesoShort(price - available)} more in the fund.`;
+  const nextToFund = order.map((o, i): PriorityRow => {
+    const placed = o.moved ? reasonOf.get(`${SET_PLACE_ACTION}:${o.cat.id}`) : undefined;
+    const vetReady = reportRows.some((r) => r.catId === o.cat.id && r.status === "cleared");
+    return {
+      catId: o.cat.id,
+      name: o.cat.name,
+      photoUrl: photoOf(o.cat.id),
+      reason: placed === undefined ? o.why : safe(placed, o.cat.name, "The Treasurer changed the order after a check."),
+      labels: vetReady ? ["Vet ready"] : [],
+      position: i + 1,
+      fundNote: i === 0 ? firstNote : null,
+    };
+  });
+  return { needsPerson, nextToFund };
 }

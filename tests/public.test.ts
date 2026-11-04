@@ -1,8 +1,10 @@
+import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { closePool, db } from "../src/server/db/client";
-import { allocations, cats, donations, sightings, treatments, users } from "../src/server/db/schema";
+import { agentActions, allocations, cats, donations, guardrails, reports, sightings, treatments, users } from "../src/server/db/schema";
+import { placeCat } from "../src/server/agent/priority";
 import { truncateAll } from "./helpers/db";
 import {
   catForViewer,
@@ -10,6 +12,7 @@ import {
   getCatForViewer,
   getHelpedEntries,
   getHelped,
+  getPriorityList,
   getUnallocated,
   journey,
   listCats,
@@ -20,6 +23,8 @@ import {
 import { CatRow } from "../src/components/CatRow";
 import { CatDetail } from "../src/components/CatDetail";
 import { GET as catGet } from "../src/app/api/cats/[id]/route";
+import { GET as priorityGet } from "../src/app/api/priority/route";
+import { PriorityList } from "../src/components/PriorityList";
 
 const jar = vi.hoisted(() => new Map<string, string>());
 vi.mock("next/headers", () => ({
@@ -383,5 +388,159 @@ describe("rendered public HTML", () => {
     expect(html).not.toContain("—");
     const list = await listCats("all");
     expectClean(JSON.stringify(list));
+  });
+});
+
+describe("the priority list", () => {
+  const NOW = new Date("2026-11-03T00:00:00Z");
+  const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000);
+  let n = 0;
+  async function cat(name: string, over: Partial<typeof cats.$inferInsert> = {}) {
+    const [c] = await db
+      .insert(cats)
+      .values({ name, sex: "male", areaName: "Brgy 1", status: "queued", queuedAt: daysAgo(10 - ++n), ...over })
+      .returning();
+    return c;
+  }
+  async function report(catId: string, over: Partial<typeof reports.$inferInsert> = {}) {
+    const [r] = await db
+      .insert(reports)
+      .values({ catId, claim: "injured", source: "neighbour", status: "open", reportedOn: "2026-11-03", ...over })
+      .returning();
+    return r;
+  }
+  const pool = (net: number) => db.insert(donations).values({ gross: net, net, paypalOrderId: `p-${++n}`, status: "captured" });
+  const names = (rows: { name: string }[]) => rows.map((r) => r.name);
+
+  it("puts held cats in Needs a person first and queued cats in Next to fund, and leaves funded cats out", async () => {
+    const hurt = await cat("Bituin");
+    const spotted = await cat("Nami", { status: "spotted", queuedAt: null });
+    const funded = await cat("Ghost", { status: "funded" });
+    await cat("Mocha");
+    await cat("Pogi");
+    await report(hurt.id);
+    await report(spotted.id, { claim: "sick" });
+    await report(funded.id);
+    const list = await getPriorityList(NOW);
+    expect(names(list.needsPerson).sort()).toEqual(["Bituin", "Nami"]);
+    expect(names(list.nextToFund)).toEqual(["Mocha", "Pogi"]);
+    expect(list.nextToFund.map((r) => r.position)).toEqual([1, 2]);
+    expect(list.needsPerson.every((r) => r.position === null)).toBe(true);
+  });
+
+  it("uses the fixed labels and the claim words", async () => {
+    const a = await cat("A1");
+    const b = await cat("B1");
+    const c = await cat("C1");
+    const d = await cat("D1");
+    const e = await cat("E1");
+    await report(a.id);
+    await report(b.id, { source: "photo", claim: "injured" });
+    await report(c.id, { status: "confirmed", source: "caretaker", claim: "sick" });
+    await report(d.id, { claim: "pregnant" });
+    await report(e.id, { status: "cleared", source: "vet", claim: "injured" });
+    const list = await getPriorityList(NOW);
+    const by = (nm: string) => [...list.needsPerson, ...list.nextToFund].find((r) => r.name === nm)!;
+    expect(by("A1").labels).toEqual(["Neighbour says hurt"]);
+    expect(by("B1").labels).toEqual(["Photo suggests hurt"]);
+    expect(by("C1").labels).toEqual(["Sick", "Caretaker confirmed"]);
+    expect(by("D1").labels).toEqual(["Neighbour says pregnant"]);
+    expect(by("E1").labels).toEqual(["Vet ready"]);
+    expect(list.nextToFund.map((r) => r.name)).toEqual(["E1"]);
+  });
+
+  it("never carries a note, a reporter, a place or a key, in the data, the page or the API", async () => {
+    const [reporter] = await db.insert(users).values({ username: "finder_one", role: "donor" }).returning();
+    const c = await cat("Bituin", { exactLat: EXACT_LAT, exactLng: EXACT_LNG });
+    await report(c.id, { note: "Call me on 0917 123 4567, behind the Shell on Rizal St", reporterId: reporter.id });
+    await db.insert(sightings).values({ catId: c.id, originalKey: ORIGINAL_KEY, publicKey: null, publicReady: false, state: "matched" });
+    const list = await getPriorityList(NOW);
+    const res = await priorityGet();
+    const html = renderToStaticMarkup(createElement(PriorityList, { initial: list }));
+    for (const text of [JSON.stringify(list), await res.text(), html]) {
+      expectClean(text);
+      for (const s of ["0917", "Shell", "Rizal", "finder_one", reporter.id]) expect(text).not.toContain(s);
+    }
+    expect(Object.keys(list.needsPerson[0]).sort()).toEqual(["catId", "fundNote", "labels", "name", "photoUrl", "position", "reason"]);
+  });
+
+  it("API returns the same rows as the page", async () => {
+    await cat("Mocha");
+    const list = await getPriorityList(NOW);
+    const body = await (await priorityGet()).json();
+    expect(Object.keys(body).sort()).toEqual(["needsPerson", "nextToFund"]);
+    expect(body.nextToFund.map((r: { name: string }) => r.name)).toEqual(list.nextToFund.map((r) => r.name));
+  });
+
+  it("gives each row the right reason, and a fallback when the reason is unsafe", async () => {
+    const old = await cat("Mocha", { queuedAt: daysAgo(20) });
+    const kitten = await cat("Pogi", { queuedAt: daysAgo(2) });
+    const held = await cat("Bituin");
+    const bare = await cat("Nami");
+    const heldReport = await report(held.id);
+    await report(bare.id, { claim: "sick" });
+    const checked = await report(kitten.id, { claim: "kitten", status: "confirmed", source: "caretaker" });
+    await db.transaction((tx) =>
+      placeCat(tx, { catId: kitten.id, beforeCatId: old.id, reason: "Pogi is a confirmed kitten, so he goes ahead of Mocha.", reportId: checked.id }, NOW),
+    );
+    await db.insert(agentActions).values({
+      action: "ask_for_check",
+      reason: "Bituin may be limping, so a caretaker should look.",
+      status: "done",
+      inputs: { catId: held.id, reportId: heldReport.id, claim: "injured" },
+    });
+    const list = await getPriorityList(NOW);
+    const by = (nm: string) => [...list.needsPerson, ...list.nextToFund].find((r) => r.name === nm)!;
+    expect(names(list.nextToFund)).toEqual(["Pogi", "Mocha"]);
+    expect(by("Pogi").reason).toBe("Pogi is a confirmed kitten, so he goes ahead of Mocha.");
+    expect(by("Mocha").reason).toMatch(/waits by time in the queue/);
+    expect(by("Bituin").reason).toBe("Bituin may be limping, so a caretaker should look.");
+    expect(by("Nami").reason).toBe("A person needs to check this first.");
+
+    await db.update(agentActions).set({ reason: "Bituin is limping near 0917 123 4567" }).where(eq(agentActions.action, "ask_for_check"));
+    await db.update(agentActions).set({ reason: "Pogi goes first, he sleeps at 12 Rizal Street" }).where(eq(agentActions.action, "set_cat_place"));
+    const safe = await getPriorityList(NOW);
+    const by2 = (nm: string) => [...safe.needsPerson, ...safe.nextToFund].find((r) => r.name === nm)!;
+    expect(by2("Bituin").reason).toBe("The Treasurer asked a caretaker to look at a cat.");
+    expect(by2("Pogi").reason).toBe("The Treasurer changed the order after a check.");
+  });
+
+  it("says what the fund can cover on the first cat only", async () => {
+    await cat("Mocha");
+    await cat("Pogi");
+    const price = 150_000;
+    await db.update(guardrails).set({ packagePrice: price });
+    await pool(price - 30_000);
+    const short = await getPriorityList(NOW);
+    expect(short.nextToFund[0].fundNote).toBe("Needs ₱300 more in the fund.");
+    expect(short.nextToFund[1].fundNote).toBeNull();
+    await pool(30_000);
+    expect((await getPriorityList(NOW)).nextToFund[0].fundNote).toBe("The fund covers this cat now.");
+  });
+
+  it("shows a public photo only, never an original", async () => {
+    const a = await cat("Mocha");
+    const b = await cat("Pogi");
+    await db.insert(sightings).values([
+      { catId: a.id, originalKey: ORIGINAL_KEY, publicKey: PUBLIC_KEY, publicReady: true, state: "matched" },
+      { catId: b.id, originalKey: ORIGINAL_KEY, publicKey: PUBLIC_KEY, publicReady: false, state: "matched" },
+    ]);
+    const list = await getPriorityList(NOW);
+    const by = (nm: string) => list.nextToFund.find((r) => r.name === nm)!;
+    expect(by("Mocha").photoUrl).toContain(PUBLIC_KEY);
+    expect(by("Pogi").photoUrl).toBeNull();
+  });
+
+  it("renders both groups, and an empty list in words", async () => {
+    const h = await cat("Bituin");
+    await report(h.id);
+    await cat("Mocha");
+    const html = renderToStaticMarkup(createElement(PriorityList, { initial: await getPriorityList(NOW) }));
+    expect(html).toContain("Needs a person first");
+    expect(html).toContain("Next to fund");
+    expect(html).toContain(`href="/cats/${h.id}"`);
+    expect(html).not.toContain("—");
+    const empty = renderToStaticMarkup(createElement(PriorityList, { initial: { needsPerson: [], nextToFund: [] } }));
+    expect(empty).toContain("No cats are waiting right now.");
   });
 });

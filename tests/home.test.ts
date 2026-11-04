@@ -57,14 +57,14 @@ describe("tabs and consoles", () => {
     expect(TABS[2].key).toBe("spot");
   });
 
-  it("keeps Fund lit on all three money pages and Helped on both of its pages", () => {
+  it("keeps Fund lit on all four money pages and Helped on both of its pages", () => {
     const [, , , helped, fund] = TABS;
-    for (const path of ["/ledger", "/agent", "/impact"]) expect(isActiveTab(fund, path)).toBe(true);
+    for (const path of ["/ledger", "/agent", "/priority", "/impact"]) expect(isActiveTab(fund, path)).toBe(true);
     for (const path of ["/helped", "/missions"]) expect(isActiveTab(helped, path)).toBe(true);
     expect(isActiveTab(fund, "/helped")).toBe(false);
     expect(isActiveTab(helped, "/ledger")).toBe(false);
     expect(isActiveTab(fund, "/")).toBe(false);
-    expect(FUND_PAGES.map((p) => p.label)).toEqual(["Ledger", "Treasurer", "Proof"]);
+    expect(FUND_PAGES.map((p) => p.label)).toEqual(["Ledger", "Treasurer", "Priority", "Proof"]);
     expect(HELPED_PAGES.map((p) => p.label)).toEqual(["Cats I've helped", "Missions"]);
   });
 
