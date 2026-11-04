@@ -192,4 +192,14 @@ describe("the fake AI", () => {
     expect(result).toMatchObject({ stop: "end_turn", actions: [] });
     expect((await db.select().from(cats))[0].status).toBe("queued");
   });
+
+  it("as the treasurer, reads the reports on a report wakeup and changes nothing", async () => {
+    vi.stubEnv("E2E_FAKES", "true");
+    await queuedCat("Mocha", new Date());
+    await gift(150_000);
+    const result = await runAgent({ kind: "report_changed", payload: {} }, { client: treasurerClient(), loadToolkit: async () => [] });
+    expect(result).toMatchObject({ stop: "end_turn", actions: [] });
+    expect((await db.select().from(cats))[0].status).toBe("queued");
+    expect(await db.select().from(allocations)).toHaveLength(0);
+  });
 });

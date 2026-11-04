@@ -180,6 +180,8 @@ function treasurer(p: Params): AiResponse {
   const lastStep = steps.at(-1);
   if (lastStep?.name === "fund_next_cat") log({ call: "treasurer.fund_next_cat", ok: lastStep.ok, code: lastStep.data.code ?? null });
   if (steps.at(-1)?.ok === false) return say("A step was refused, so I am stopping. A caretaker can look at it.");
+  // A report changed: the fake reads them and changes nothing, so the test controls the order itself.
+  if (kind === "report_changed") return steps.length === 0 ? call(1, "list_reports", {}) : say("I read the reports and the order stays as it is.");
   return kind === "donation_captured" || kind === "cat_queued" ? funding(steps) : bookings(steps);
 }
 

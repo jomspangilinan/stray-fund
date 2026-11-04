@@ -169,6 +169,13 @@
       "when": 1793755667374,
       "tag": "0023_report_once_per_photo",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793757267780,
+      "tag": "0024_cat_priority",
+      "breakpoints": true
     }
   ]
 }

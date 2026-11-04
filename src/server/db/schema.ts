@@ -187,6 +187,20 @@ export const reports = pgTable(
 );
 
 /**
+ * Where the treasurer has put a cat in "Next to fund". Only placed cats have a row; the rest follow in rank.ts order.
+ * Rows are rewritten together by placeCat, so positions are 1..n with no gaps. A row for a cat that is no longer
+ * queued is ignored and dropped on the next placement. The reason is stored as the treasurer wrote it.
+ */
+export const catPriority = pgTable("cat_priority", {
+  catId: uuid("cat_id")
+    .primaryKey()
+    .references(() => cats.id),
+  position: integer("position").notNull(),
+  reason: text("reason").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * A neighbour's idea of a cat's real name. One pending row per person and cat; a new one replaces it. The name
  * is not public until a caretaker approves it, and who asked is never public. Private, like ear_tip_flags.
  */
