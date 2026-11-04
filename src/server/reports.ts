@@ -331,20 +331,6 @@ export async function dismissCatlessReports(tx: Tx, sightingId: string, caretake
   return closed.length;
 }
 
-/** A caretaker took a flag off the card: the confirmed reports for that claim are dismissed and the hold ends. */
-export async function dismissConfirmedClaim(tx: Tx, catId: string, claim: Claim, caretakerId: string): Promise<number> {
-  const closed = await tx
-    .update(reports)
-    .set({ status: "dismissed", decidedBy: caretakerId, decidedAt: sql`now()` })
-    .where(and(eq(reports.catId, catId), eq(reports.claim, claim), eq(reports.status, "confirmed")))
-    .returning({ id: reports.id });
-  for (const r of closed) {
-    await audit(tx, REPORT_DISMISSED, "A caretaker dismissed a report.", { reportId: r.id, catId, claim }, caretakerId);
-  }
-  if (closed.length > 0) await enqueueWakeup(tx, REPORT_WAKEUP, { catId });
-  return closed.length;
-}
-
 /** A caretaker set a flag on the card: open reports for that claim are confirmed, so the desk shows one card. */
 export async function confirmOpenClaim(tx: Tx, catId: string, claim: Claim, caretakerId: string): Promise<number> {
   const done = await tx

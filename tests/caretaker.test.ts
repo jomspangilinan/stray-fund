@@ -19,7 +19,7 @@ import {
   wakeups,
 } from "../src/server/db/schema";
 import { fileReview } from "../src/server/agent/review";
-import { fileReport, heldCatIds } from "../src/server/reports";
+import { clearCatForSurgery, fileReport, heldCatIds } from "../src/server/reports";
 import { requestPayout } from "../src/server/moneyGate";
 import { storeOriginal } from "../src/server/photos";
 import { getCatCard, listAgentActions, manilaDate } from "../src/server/public";
@@ -683,13 +683,22 @@ describe("cat details", () => {
 
   });
 
-  it("removing a flag dismisses its confirmed report and lifts the hold", async () => {
+  it("removing a flag with a confirmed hold report is refused: a vet clears it, not the desk", async () => {
     const cat = await makeCat("spotted");
-    await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["injured"] });
+    await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["injured", "kitten"] });
+    const refused = await act("cat_set_details", { catId: cat.id, sex: "male", flags: ["kitten"] });
+    expect(refused).toMatchObject({ status: 409, message: "A vet clears this. Ask the vet to check." });
+    // Nothing changed: the flag, the sex, the report and the hold all stand.
+    expect(await catRow(cat.id)).toMatchObject({ sex: "female", flags: ["injured", "kitten"] });
+    expect(await db.select().from(reports)).toMatchObject([{ claim: "injured", status: "confirmed" }]);
     expect(await db.transaction((tx) => heldCatIds(tx))).toEqual(new Set([cat.id]));
-    await act("cat_set_details", { catId: cat.id, sex: "female", flags: [] });
-    expect(await db.transaction((tx) => heldCatIds(tx))).toEqual(new Set());
-    expect(await db.select().from(reports)).toMatchObject([{ claim: "injured", status: "dismissed", decidedBy: caretaker.id }]);
+    // A kitten flag is not a hold and can come off.
+    expect((await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["injured"] })).status).toBe(200);
+    // Once a vet has cleared the cat, the flag can come off.
+    const [vet] = await db.insert(users).values({ username: `vet_${++seq}`, role: "vet" }).returning();
+    await db.transaction((tx) => clearCatForSurgery(tx, cat.id, vet.id));
+    expect((await act("cat_set_details", { catId: cat.id, sex: "female", flags: [] })).status).toBe(200);
+    expect(await db.select().from(reports)).toMatchObject([{ claim: "injured", status: "cleared", decidedBy: vet.id }]);
   });
 
   it("setting a flag confirms the open reports for it instead of filing a second card", async () => {
@@ -720,8 +729,8 @@ describe("cat details", () => {
 
   it("sets sex and flags from validated values only", async () => {
     const cat = await makeCat("spotted");
-    expect((await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["sick", "kitten"] })).status).toBe(200);
-    expect(await catRow(cat.id)).toMatchObject({ sex: "female", flags: ["sick", "kitten"] });
+    expect((await act("cat_set_details", { catId: cat.id, sex: "female", flags: ["kitten"] })).status).toBe(200);
+    expect(await catRow(cat.id)).toMatchObject({ sex: "female", flags: ["kitten"] });
     expect((await act("cat_set_details", { catId: cat.id, sex: "robot", flags: [] })).status).toBe(400);
     expect((await act("cat_set_details", { catId: cat.id, sex: "male", flags: ["bogus"] })).status).toBe(400);
     expect((await act("cat_set_details", { catId: cat.id, sex: "male", flags: [] })).status).toBe(200);

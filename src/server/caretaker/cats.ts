@@ -5,13 +5,13 @@ import { disagreementSubject, lateYesSubject } from "../earTipFlags";
 import { IllegalTransition, MoneyAlreadyMoved, markAlreadyNeutered, transitionCat } from "../catTransitions";
 import { AssessmentSchema } from "../ai/schemas";
 import { withColonyLock, type Tx } from "../db/client";
-import { allocations, cats, earTipFlags, nameSuggestions, payouts, sightings, treatments, wakeups } from "../db/schema";
+import { allocations, cats, earTipFlags, nameSuggestions, payouts, reports, sightings, treatments, wakeups } from "../db/schema";
 import { uniqueName } from "../catNames";
 import { NAME_APPROVED, NAME_DISMISSED, NAME_SET } from "../privateActions";
 import { parseCatName } from "@/lib/catNames";
 import { publishScrubbed, type Box } from "../photos";
 import { StoredObjectMissing } from "../storage";
-import { attachReports, confirmOpenClaim, dismissCatlessReports, dismissConfirmedClaim, fileStaffReport, HOLD_CLAIMS } from "../reports";
+import { attachReports, confirmOpenClaim, dismissCatlessReports, fileStaffReport, HOLD_CLAIMS } from "../reports";
 import { enqueueWakeup } from "../wakeups";
 import { autoPublishable, needsHumanTick, regionsOf } from "../photoGate";
 import { audit, flag, reqUuid, Refusal, type Handler } from "./shared";
@@ -113,11 +113,20 @@ export const catSetDetails: Handler = async (caretakerId, body) => {
   return withColonyLock(async (tx) => {
     const [cat] = await tx.select().from(cats).where(eq(cats.id, catId)).for("update");
     if (!cat) throw new Refusal(404, "There is no such cat.");
-    await tx.update(cats).set({ sex, sexUnconfirmed: false, flags }).where(eq(cats.id, catId));
-    // A caretaker's word is a check. A flag taken off ends its confirmed hold. A flag newly set confirms the open reports
-    // for it, so the desk shows one card, and files a confirmed caretaker report only when there were none.
+    // A confirmed hold ends with a vet's word, never with an unticked box, so nothing below runs if one is in the way.
     for (const claim of HOLD_CLAIMS) {
-      if (cat.flags.includes(claim) && !flags.includes(claim)) await dismissConfirmedClaim(tx, catId, claim, caretakerId);
+      if (!cat.flags.includes(claim) || flags.includes(claim)) continue;
+      const [confirmed] = await tx
+        .select({ id: reports.id })
+        .from(reports)
+        .where(and(eq(reports.catId, catId), eq(reports.claim, claim), eq(reports.status, "confirmed")))
+        .limit(1);
+      if (confirmed) throw new Refusal(409, "A vet clears this. Ask the vet to check.");
+    }
+    await tx.update(cats).set({ sex, sexUnconfirmed: false, flags }).where(eq(cats.id, catId));
+    // A flag newly set confirms the open reports for it, so the desk shows one card, and files a confirmed caretaker
+    // report only when there were none.
+    for (const claim of HOLD_CLAIMS) {
       if (flags.includes(claim) && !cat.flags.includes(claim)) {
         if ((await confirmOpenClaim(tx, catId, claim, caretakerId)) === 0) {
           await fileStaffReport(tx, { catId, claim, source: "caretaker", reporterId: caretakerId });
