@@ -35,6 +35,8 @@ const SENTINELS = [
   // A neighbour's note can hold a phone number, a street and a name. None of it, and no field that carries it, may
   // reach a page, a payload or the AI's public reasons.
   "0917 555 0142", "555 0142", "Marites Dela Cruz", "Dela Cruz", "Mabini Street", "Mabini", "noteleak-sentinel", "check_question", "checkQuestion",
+  // The same words in lowercase, as the Treasurer or a review might write them.
+  "marites dela cruz", "12 mabini street", "mabini street", "zero nine one seven",
   "photo_agrees", "photoAgrees", "reporter_id", "reporterId", "sighting_id", "sightingId", "decided_by", "decidedBy",
 ];
 
@@ -44,6 +46,11 @@ const STAFF_FIELDS = ["sighting_id", "sightingId", "check_question", "checkQuest
 const NOTE = "Call Marites Dela Cruz on 0917 555 0142, the cat is limping near 12 Mabini Street. noteleak-sentinel";
 /** The Treasurer's own words can repeat a note. These must show as the fixed line, never as written. */
 const ECHO_REASON = "Marites Dela Cruz says the cat is limping near 12 Mabini Street, so a caretaker should look at the cat first.";
+
+/** The same words in lowercase and spelled out: the public filter can miss these, the demo desk must hide them whole. */
+const LOWER_REASON = "marites dela cruz says the cat is limping near 12 mabini street, call zero nine one seven five five five zero one four two, so ask a caretaker to look.";
+/** A review or a payout reason that carries a phone number, as the AI might write it about a hostile note. */
+const PHONE_REASON = "Note on the cat gives the number 0917 555 0142 and asks to fund it first.";
 
 async function main() {
   const tag = randomUUID().slice(0, 8);
@@ -145,6 +152,41 @@ async function main() {
     [JSON.stringify({ catId: cat.id }), ECHO_REASON],
   );
 
+  // A funded cat with a hurt report filed after funding, a deposit waiting for approval whose reason carries a phone
+  // number, and an open review that does too, plus lowercase forms. The demo desk hides the AI's words whole.
+  const { rows: [fundedCat] } = await pool.query(
+    `insert into cats (name, sex, status, area_name, exact_lat, exact_lng, fuzzed_lat, fuzzed_lng, location_approximate, queued_at)
+     values ($1,'female','funded',${place}, now() - interval '8 days') returning id`,
+    [`LeakFunded ${tag}`],
+  );
+  await pool.query(
+    "insert into reports (cat_id, claim, note, source, reporter_id, reported_on) values ($1,'injured',$2,'neighbour',$3,current_date)",
+    [fundedCat.id, NOTE.toLowerCase(), flagger.id],
+  );
+  const { rows: [fundedBooking] } = await pool.query(
+    "insert into bookings (cat_id, vet_id, package_price, status, scheduled_for) values ($1,$2,150000,'confirmed',now() + interval '2 days') returning id",
+    [fundedCat.id, vet.id],
+  );
+  const { rows: [phoneAction] } = await pool.query(
+    `insert into agent_actions (action, inputs, reason, amount, status, approved_by)
+     values ('payout_deposit', $1, $2, 45000, 'awaiting_approval', $3) returning id`,
+    [JSON.stringify({ catId: fundedCat.id }), PHONE_REASON, donor.id],
+  );
+  await pool.query(
+    `insert into payouts (cat_id, booking_id, payee_user_id, amount, kind, action_id, status)
+     values ($1,$2,$3,45000,'deposit',$4,'awaiting_approval')`,
+    [fundedCat.id, fundedBooking.id, vet.id, phoneAction.id],
+  );
+  await pool.query(
+    `insert into agent_actions (action, inputs, reason, status, approved_by) values
+       ('set_cat_place', $1, $2, 'done', $3), ('ask_for_check', $1, $4, 'done', $3)`,
+    [JSON.stringify({ catId: fundedCat.id }), LOWER_REASON, donor.id, PHONE_REASON],
+  );
+  await pool.query(
+    "insert into review_requests (subject, reason, status) values ($1,$2,'open'), ($3,$4,'open')",
+    [`leakopenreview-${tag}`, PHONE_REASON, LOWER_REASON, LOWER_REASON],
+  );
+
   const { rows: [don] } = await pool.query(
     "insert into donations (user_id, gross, paypal_fee, net, paypal_order_id, status) values ($1,10000,0,10000,$2,'captured') returning id",
     [donor.id, `leak-${tag}`],
@@ -215,7 +257,7 @@ async function main() {
     [`leakreview-${tag}`, donor.id],
   );
 
-  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/helped", `/api/cats/${cat.id}`, `/cats/${askCat.id}`, `/api/cats/${askCat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/ledger", "/ledger?q=LEAKBATCH", "/impact", "/missions", "/api/ledger", "/api/impact", "/priority", "/api/priority", `/cats/${openCat.id}`, `/api/cats/${openCat.id}`, `/cats/${movedCat.id}`, `/api/cats/${movedCat.id}`, "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
+  const paths = ["/", "/cats", "/cats?status=neutered", `/cats/${cat.id}`, "/helped", `/api/cats/${cat.id}`, `/cats/${askCat.id}`, `/api/cats/${askCat.id}`, "/api/cats/not-a-uuid", "/agent", "/api/agent/feed", "/ledger", "/ledger?q=LEAKBATCH", "/impact", "/missions", "/api/ledger", "/api/impact", "/priority", "/api/priority", `/cats/${openCat.id}`, `/api/cats/${openCat.id}`, `/cats/${movedCat.id}`, `/api/cats/${movedCat.id}`, `/cats/${fundedCat.id}`, `/api/cats/${fundedCat.id}`, "/vet", `/vet/bookings/${booking.id}`, "/caretaker", `/api/caretaker/images/receipt/${receipt.id}`, `/api/caretaker/images/eartip/${receipt.id}`];
   const viewers: [string, Record<string, string>][] = [
     ["anon", {}],
     ["neighbour", { cookie: `sf_session=${token}` }],
@@ -287,7 +329,21 @@ async function main() {
     for (const [who, c] of [["caretaker", careToken], ["vet", vetToken]] as const) {
       const desk = await (await fetch(`${BASE}/caretaker`, { headers: { cookie: `sf_session=${c}` } })).text();
       checked++;
-      if (who === "caretaker" && !desk.includes(`LeakOpen ${tag}`)) { bad++; console.log("FAIL: the caretaker desk did not show the open report, so the scan proved nothing"); }
+      if (who === "caretaker") {
+        for (const need of [`LeakOpen ${tag}`, `LeakFunded ${tag}`, "Hidden in the demo"]) {
+          if (!desk.includes(need)) { bad++; console.log(`FAIL: the caretaker desk did not carry "${need}", so the scan proved nothing`); }
+        }
+        // The AI's words on a payout and a review are hidden whole, not filtered: a lowercase name or a spelled-out number gets past a filter.
+        for (const gone of [PHONE_REASON, LOWER_REASON, `leakopenreview-${tag}`, "0917 555 0142", "zero nine one seven"]) {
+          if (desk.includes(gone)) { bad++; console.log(`LEAK caretaker desk carries "${gone.slice(0, 40)}"`); }
+        }
+      }
+    }
+    // A report on a funded cat shows on its public timeline as a fact, never as its note.
+    const fundedPage = await (await fetch(`${BASE}/cats/${fundedCat.id}`)).text();
+    if (!fundedPage.includes(`LeakFunded ${tag}`) || !fundedPage.includes("Neighbour reported hurt")) { bad++; console.log("FAIL: the funded cat page did not carry its name and the report on its timeline"); }
+    for (const fixed of ["The Treasurer changed the order after a check.", "The Treasurer asked a caretaker to look at a cat."]) {
+      if (!fundedPage.includes(fixed)) { bad++; console.log(`FAIL: the funded cat timeline did not show the fixed line "${fixed}" for an echoing reason`); }
     }
     const feed = await (await fetch(`${BASE}/agent`)).text();
     if (!feed.includes("Leak check reason")) { bad++; console.log("FAIL: agent feed did not render the seeded action"); }
@@ -302,10 +358,14 @@ async function main() {
     if (!helped.includes(`LeakCat ${tag}`)) { bad++; console.log("FAIL: helped page did not render the seeded cat"); }
   } finally {
     await pool.query("delete from cat_priority where cat_id = any($1)", [[movedCat.id]]);
-    await pool.query("delete from reports where cat_id = any($1)", [[openCat.id, movedCat.id, cat.id]]);
+    await pool.query("delete from payouts where booking_id=$1", [fundedBooking.id]);
+    await pool.query("delete from bookings where id=$1", [fundedBooking.id]);
+    await pool.query("delete from review_requests where reason = any($1)", [[PHONE_REASON, LOWER_REASON]]);
+    await pool.query("delete from reports where cat_id = any($1)", [[openCat.id, movedCat.id, cat.id, fundedCat.id]]);
     await pool.query("delete from agent_actions where inputs->>'catId' = any($1) or reason = $2", [[openCat.id, movedCat.id], ECHO_REASON]);
     await pool.query("delete from sightings where cat_id = $1", [openCat.id]);
-    await pool.query("delete from cats where id = any($1)", [[openCat.id, movedCat.id, firstCat.id]]);
+    await pool.query("delete from agent_actions where inputs->>'catId' = $1", [fundedCat.id]);
+    await pool.query("delete from cats where id = any($1)", [[openCat.id, movedCat.id, firstCat.id, fundedCat.id]]);
     await pool.query("delete from review_requests where resolved_by=$1", [donor.id]);
     await pool.query("delete from payouts where booking_id=$1", [booking.id]);
     await pool.query("delete from agent_actions where approved_by=$1", [donor.id]);
