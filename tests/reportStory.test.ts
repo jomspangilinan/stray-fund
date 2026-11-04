@@ -79,7 +79,7 @@ describe("a hurt report from the first photo to the funded cat", () => {
     expect(await timelineOf(tom.id)).toContain("Neighbour reported hurt");
 
     // 2. The Treasurer reads it, asks a caretaker, and cannot fund or move the held cat.
-    let [read, asked, funded, moved] = await treasurer([
+    const [read, asked, ...first] = await treasurer([
       { name: "list_reports", input: {} },
       { name: "ask_for_check", input: { report_id: report.id, question: "Is Tom walking on all four legs?", reason: "Tom was reported hurt by a neighbour, so a caretaker should look." } },
       { name: "fund_next_cat", input: { cat_id: tom.id, reason: "Tom goes first." } },
@@ -87,8 +87,8 @@ describe("a hurt report from the first photo to the funded cat", () => {
     ]);
     expect(read.body.reports).toMatchObject([{ report_id: report.id, status: "open", standing: expect.any(String) }]);
     expect(asked.isError).toBe(false);
-    expect(funded).toMatchObject({ isError: true, body: { code: "CAT_ON_HOLD" } });
-    expect(moved.isError).toBe(true);
+    expect(first[0]).toMatchObject({ isError: true, body: { code: "CAT_ON_HOLD" } });
+    expect(first[1].isError).toBe(true);
     expect(await db.select().from(allocations)).toHaveLength(0);
     l = await listed();
     expect(l.row("Tom")?.reason).toBe("Tom was reported hurt by a neighbour, so a caretaker should look.");
@@ -100,7 +100,7 @@ describe("a hurt report from the first photo to the funded cat", () => {
     expect(l.needs).toEqual(["Tom"]);
     expect(l.row("Tom")).toMatchObject({ labels: ["Hurt", "Caretaker confirmed"], reason: "A caretaker confirmed this. A vet needs to check next." });
     expect(await timelineOf(tom.id)).toContain("Caretaker confirmed he's hurt");
-    [funded, moved] = await treasurer([
+    const [funded, moved] = await treasurer([
       { name: "fund_next_cat", input: { cat_id: tom.id, reason: "Tom goes first." } },
       { name: "set_cat_place", input: { cat_id: tom.id, before_cat_id: mimi.id, reason: "Tom goes ahead of Mimi.", report_id: report.id } },
     ]);

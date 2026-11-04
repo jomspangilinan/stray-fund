@@ -236,7 +236,9 @@ describe("the seeded story", () => {
   it("adds up to the centavo on the seeded rows alone, and the ledger agrees with the pool", async () => {
     const pool = await db.transaction((tx) => getPoolStatus(tx));
     expect(conservation(pool).balanced).toBe(true);
-    expect(pool).toMatchObject({ grossIn: 850_000, paypalFees: 32_150, vetPaid: 165_000, payoutFees: 3_300, reservedPayouts: 0, heldForCats: 405_000, available: 244_550 });
+    expect(pool).toMatchObject({ grossIn: 750_000, paypalFees: 29_250, vetPaid: 165_000, payoutFees: 3_300, reservedPayouts: 0, heldForCats: 405_000, available: 147_450 });
+    // Below one care package (150_000) on purpose: the first donation made on camera is what lets the Treasurer fund a cat.
+    expect(pool.available).toBeLessThan(150_000);
     const impact = await getImpact();
     expect(impact).toMatchObject({ catsNeutered: 2, catsNeuteredByFund: 1, catsVaccinated: 1, catsDewormed: 1, catsAdopted: 1, alreadyNeutered: 1 });
     const { rows } = await db.execute(sql`select count(*)::int as n from allocations where cat_id is not null`);

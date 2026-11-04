@@ -251,7 +251,8 @@ export async function seed(env: Env = process.env): Promise<{ cats: number; dono
       { id: 2, user: donor.demo_ate_lorna, gross: 300_000, ago: 33 },
       { id: 3, user: donor.demo_lola_nena, gross: 50_000, ago: 28 },
       { id: 4, user: donor.demo_tito_jun, gross: 200_000, ago: 21 },
-      { id: 5, user: neighbour, gross: 150_000, ago: 14 },
+      // Small on purpose: the pool ends just under one care package, so nothing is funded until a gift is made on camera.
+      { id: 5, user: neighbour, gross: 50_000, ago: 14 },
     ];
     const gift: Record<number, typeof donations.$inferSelect> = {};
     for (const g of gifts) {
