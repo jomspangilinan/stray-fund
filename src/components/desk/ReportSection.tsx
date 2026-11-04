@@ -9,6 +9,14 @@ const CLAIM_TITLE: Record<string, string> = { injured: "Hurt", pregnant: "Pregna
 /** Who is speaking. Only these two can be open; a caretaker's or vet's word is confirmed at once. */
 const SAYS = (source: string) => (source === "photo" ? "The AI thinks this photo shows" : "Neighbour says");
 
+/** Dismissing cannot be undone from the desk, so it asks once. A kitten claim never held the cat, and a photo report has no person. */
+function dismissQuestion(r: ReportItem): string {
+  const hold = r.claim === "kitten" ? "" : "The cat comes off hold";
+  const person = r.source === "photo" ? "" : "this person can't report it again";
+  const rest = hold && person ? `${hold}, and ${person}.` : hold ? `${hold}.` : person ? `${person[0].toUpperCase()}${person.slice(1)}.` : "";
+  return `Dismiss this report?${rest ? ` ${rest}` : ""}`;
+}
+
 function Card({ r }: { r: ReportItem }) {
   const title = CLAIM_TITLE[r.claim] ?? r.claim;
   return (
@@ -30,7 +38,7 @@ function Card({ r }: { r: ReportItem }) {
           <ActionForm action="report_confirm" submitLabel="Confirm">
             <Hidden name="reportId" value={r.id} />
           </ActionForm>
-          <ActionForm action="report_dismiss" submitLabel="Dismiss" quiet>
+          <ActionForm action="report_dismiss" submitLabel="Dismiss" quiet confirm={{ question: dismissQuestion(r), send: "Dismiss" }}>
             <Hidden name="reportId" value={r.id} />
           </ActionForm>
         </>

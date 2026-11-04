@@ -102,8 +102,6 @@ export type ReportItem = {
   photoAgrees: boolean | null;
   /** The treasurer's question for the caretaker. Model text: show as text only. */
   checkQuestion: string | null;
-  sample: boolean;
-  date: string;
   exact: ExactSpot;
   area: string;
   exactHidden: boolean;
@@ -291,9 +289,8 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
       // A visitor's real note can hold a name or a phone number. Seeded samples are ours, so they show.
       note: x.r.note !== null && demo && !x.r.sample ? HIDDEN_NOTE : x.r.note,
       photoAgrees: x.r.source === "photo" ? null : x.r.photoAgrees,
-      checkQuestion: x.r.checkQuestion !== null && demo && !x.r.sample && !bioIsSafe(x.r.checkQuestion) ? null : x.r.checkQuestion,
-      sample: x.r.sample,
-      date: manilaDate(x.r.createdAt),
+      // A question can echo a lowercase name or a place the filters miss, so a real row's is hidden whole, like the note.
+      checkQuestion: x.r.checkQuestion !== null && demo && !x.r.sample ? HIDDEN_NOTE : x.r.checkQuestion,
       ...placeForStaff(exactOf(lat, lng, x.sLat === null ? x.catApprox ?? false : false)),
       area: x.catArea ?? COLONY.area_name,
     };

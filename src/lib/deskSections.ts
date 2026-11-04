@@ -1,7 +1,8 @@
 import type { CaretakerQueue } from "@/server/caretaker/queue";
 
 /**
- * The sections of "To check", in the order they can hold up money or care. Reports about a cat come first, above payouts. The desk, its jump row and the
+ * The sections of "To check", in the order they can hold up money or care. Reports about a cat come first,
+ * above payouts. The desk, its jump row and the
  * waiting line on the yard all read this one list, so the numbers cannot disagree.
  */
 export const DESK_SECTIONS = [

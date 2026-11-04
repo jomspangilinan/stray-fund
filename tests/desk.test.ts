@@ -69,11 +69,11 @@ describe("the vet's waiting count", () => {
     await make("in_care", true); // evidence open
     await make("in_care", false); // waiting for the deposit
     await make("booked", true); // waiting for the cat
-    expect(await vetWaiting(vet.id)).toBe(1);
+    expect(await vetWaiting(vet.id)).toEqual({ toSend: 1, toCheck: 0 });
     const d = await listVetDashboard(vet.id);
     expect(d.bookings.filter((b) => b.evidence === "open")).toHaveLength(1);
     const other = await makeUser("vet");
-    expect(await vetWaiting(other.id)).toBe(0);
+    expect(await vetWaiting(other.id)).toEqual({ toSend: 0, toCheck: 0 });
   });
 });
 

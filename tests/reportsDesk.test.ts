@@ -4,24 +4,33 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { closePool, db } from "../src/server/db/client";
-import { cats, reports, sightings, users } from "../src/server/db/schema";
+import { cats, reports, sightings, users, wakeups } from "../src/server/db/schema";
 import { truncateAll } from "./helpers/db";
 
 const jar = vi.hoisted(() => new Map<string, string>());
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: (n: string) => (jar.has(n) ? { name: n, value: jar.get(n) } : undefined) }),
 }));
+vi.mock("../src/components/ActionForm", async () => {
+  const { createElement } = await import("react");
+  return {
+    ActionForm: (p: { action: string; submitLabel: string; confirm?: { question: string; send: string }; children?: unknown }) =>
+      createElement("form", { "data-action": p.action, "data-confirm": p.confirm?.question ?? "" }, p.children as never, createElement("button", null, p.submitLabel)),
+  };
+});
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {}, push() {} }) }));
 
 import { POST as clearPost } from "../src/app/api/vet/cats/[id]/clear/route";
 import { GET as imageGet } from "../src/app/api/caretaker/images/[kind]/[id]/route";
+import { CLEAR_QUESTION } from "../src/components/ClearCatButton";
+import { DeskWaiting } from "../src/components/DeskWaiting";
 import { Reports } from "../src/components/desk/ReportSection";
 import { DESK_SECTIONS, deskTotal, waitingSections } from "../src/lib/deskSections";
 import { runAction } from "../src/server/caretaker";
 import { getCaretakerQueue } from "../src/server/caretaker/queue";
 import { heldCatIds } from "../src/server/reports";
 import { SESSION_COOKIE, signSession, type Role } from "../src/server/session";
-import { listVetDashboard } from "../src/server/vetFlow";
+import { listVetDashboard, vetWaiting } from "../src/server/vetFlow";
 
 let seq = 0;
 async function makeUser(role: Role) {
@@ -189,14 +198,14 @@ describe("the demo desk", () => {
     vi.stubEnv("DEMO_MODE", "true");
     const cat = await makeCat();
     const s = await makeSighting({ catId: cat.id });
-    await makeReport({ catId: cat.id, sightingId: s.id, note: "call me on 0917 123 4567", checkQuestion: "Is it near 12 Rizal Ave?" });
+    await makeReport({ catId: cat.id, sightingId: s.id, note: "call me on 0917 123 4567", checkQuestion: "Is it near 12 Rizal Ave, or is mochi limping?" });
     await makeReport({ catId: cat.id, sightingId: s.id, claim: "sick", note: "sample note", sample: true });
     const q = await getCaretakerQueue();
     const real = q.reports.find((r) => r.claim === "injured")!;
     const sample = q.reports.find((r) => r.claim === "sick")!;
     expect(real.note).toBe("Hidden in the demo");
-    expect(real.checkQuestion).toBeNull();
-    expect(JSON.stringify(q.reports.filter((r) => !r.sample))).not.toMatch(/0917|Rizal/);
+    expect(real.checkQuestion).toBe("Hidden in the demo");
+    expect(JSON.stringify([real])).not.toMatch(/0917|Rizal|mochi/i);
     expect(sample.note).toBe("sample note");
   });
 
@@ -281,5 +290,92 @@ describe("the vet's clear", () => {
     const vet = await makeUser("vet");
     await signIn(vet, "vet");
     expect((await post("not-a-uuid")).status).toBe(404);
+  });
+});
+
+describe("confirming before a tap cannot be taken back", () => {
+  const forms = (html: string) => [...html.matchAll(/<form data-action="([^"]+)" data-confirm="([^"]*)"/g)].map((m) => [m[1], m[2].replaceAll("&#x27;", "'")]);
+  const card = async (claim: "injured" | "kitten", source: "neighbour" | "photo") => {
+    const cat = await makeCat();
+    await makeReport({ catId: cat.id, sightingId: (await makeSighting({ catId: cat.id })).id, claim, source });
+    return renderToStaticMarkup(createElement(Reports, { items: (await getCaretakerQueue()).reports }));
+  };
+
+  it("asks before dismissing, and says the cat comes off hold and the person cannot report again", async () => {
+    expect(forms(await card("injured", "neighbour"))).toEqual([
+      ["report_confirm", ""],
+      ["report_dismiss", "Dismiss this report? The cat comes off hold, and this person can't report it again."],
+    ]);
+  });
+
+  it("leaves the hold out for a kitten", async () => {
+    expect(forms(await card("kitten", "neighbour"))[1][1]).toBe("Dismiss this report? This person can't report it again.");
+  });
+
+  it("names no person for a report from the photo", async () => {
+    expect(forms(await card("injured", "photo"))[1][1]).toBe("Dismiss this report? The cat comes off hold.");
+  });
+
+  it("asks before the vet clears a cat", () => {
+    expect(CLEAR_QUESTION).toBe("Clear this cat for surgery? You've seen this cat.");
+  });
+});
+
+describe("each decision wakes the treasurer", () => {
+  const woken = async (catId: string) => (await db.select().from(wakeups)).filter((w) => w.kind === "report_changed" && (w.payload as { catId?: string }).catId === catId).length;
+
+  it("confirm and dismiss through the handler, and a clear through the route", async () => {
+    const care = await makeUser("caretaker");
+    const vet = await makeUser("vet");
+    const cat = await makeCat();
+    const s = await makeSighting({ catId: cat.id });
+    const a = await makeReport({ catId: cat.id, sightingId: s.id });
+    const b = await makeReport({ catId: cat.id, sightingId: s.id, claim: "sick" });
+    expect(await woken(cat.id)).toBe(0);
+    await runAction("report_confirm", care.id, { reportId: a.id });
+    const afterConfirm = await woken(cat.id);
+    expect(afterConfirm).toBeGreaterThan(0);
+    await runAction("report_dismiss", care.id, { reportId: b.id });
+    const afterDismiss = await woken(cat.id);
+    expect(afterDismiss).toBeGreaterThan(afterConfirm);
+    await signIn(vet, "vet");
+    const res = await clearPost(new Request("http://x", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }), { params: Promise.resolve({ id: cat.id }) });
+    expect(res.status).toBe(200);
+    expect(await woken(cat.id)).toBeGreaterThan(afterDismiss);
+  });
+});
+
+describe("the vet's line on the yard", () => {
+  const line = async (vet: { id: string; username: string }) => {
+    await signIn(vet, "vet");
+    return JSON.stringify(await DeskWaiting());
+  };
+
+  it("counts cats to check as well as bookings to send", async () => {
+    const vet = await makeUser("vet");
+    expect(await vetWaiting(vet.id)).toEqual({ toSend: 0, toCheck: 0 });
+    expect(await line(vet)).toBe("null");
+    const cat = await makeCat();
+    await makeReport({ catId: cat.id, status: "confirmed" });
+    expect(await vetWaiting(vet.id)).toEqual({ toSend: 0, toCheck: 1 });
+    const only = await line(vet);
+    expect(only).toContain("1 cat to check");
+    expect(only).not.toContain("to send");
+    const other = await makeCat();
+    await makeReport({ catId: other.id, status: "confirmed", claim: "sick" });
+    expect(await line(vet)).toContain("2 cats to check");
+  });
+
+  it("says both when both are waiting", async () => {
+    const vet = await makeUser("vet");
+    const cat = await makeCat({ status: "in_care" });
+    await makeReport({ catId: cat.id, status: "confirmed" });
+    const [b] = await db.insert((await import("../src/server/db/schema")).bookings).values({ catId: cat.id, vetId: vet.id, packagePrice: 150000, status: "confirmed" }).returning();
+    const [act] = await db.insert((await import("../src/server/db/schema")).agentActions).values({ action: "x", inputs: {}, reason: "r", status: "done" }).returning();
+    await db.insert((await import("../src/server/db/schema")).payouts).values({ catId: cat.id, bookingId: b.id, payeeUserId: vet.id, amount: 45000, kind: "deposit", actionId: act.id, status: "succeeded" });
+    expect(await vetWaiting(vet.id)).toEqual({ toSend: 1, toCheck: 1 });
+    const both = await line(vet);
+    expect(both).toContain("1 cat to check");
+    expect(both).toContain("1 to send");
   });
 });

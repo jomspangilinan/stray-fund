@@ -7,12 +7,19 @@ import { vetWaiting } from "@/server/vetFlow";
 export async function DeskWaiting() {
   const session = await getSession();
   if (!session || (session.role !== "caretaker" && session.role !== "vet")) return null;
-  const caretaker = session.role === "caretaker";
-  const n = caretaker ? await caretakerWaiting() : await vetWaiting(session.userId);
-  if (n === 0) return null;
+  if (session.role === "caretaker") {
+    const n = await caretakerWaiting();
+    return n === 0 ? null : <DeskLink href="/caretaker" text={`${n} to check`} />;
+  }
+  const { toSend, toCheck } = await vetWaiting(session.userId);
+  const parts = [toCheck > 0 ? `${toCheck} ${toCheck === 1 ? "cat" : "cats"} to check` : null, toSend > 0 ? `${toSend} to send` : null].filter((p) => p !== null);
+  return parts.length === 0 ? null : <DeskLink href="/vet" text={parts.join(", ")} />;
+}
+
+function DeskLink({ href, text }: { href: string; text: string }) {
   return (
-    <Link href={caretaker ? "/caretaker" : "/vet"} className="link mb-2 flex !min-h-11 items-center font-bold">
-      {n} {caretaker ? "to check" : "to send"}
+    <Link href={href} className="link mb-2 flex !min-h-11 items-center font-bold">
+      {text}
     </Link>
   );
 }

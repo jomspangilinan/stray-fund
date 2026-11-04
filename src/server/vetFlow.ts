@@ -869,9 +869,10 @@ export async function listVetDashboard(vetId: string): Promise<VetDashboard> {
   };
 }
 
-/** How many bookings wait for this vet to send evidence. Counted from the same list the vet desk shows. */
-export async function vetWaiting(vetId: string): Promise<number> {
-  return (await listVetDashboard(vetId)).bookings.filter((b) => b.evidence === "open").length;
+/** What waits for this vet: bookings that need evidence, and cats a caretaker confirmed that need a clear. Counted from the lists the vet desk shows. */
+export async function vetWaiting(vetId: string): Promise<{ toSend: number; toCheck: number }> {
+  const d = await listVetDashboard(vetId);
+  return { toSend: d.bookings.filter((b) => b.evidence === "open").length, toCheck: d.checkCats.length };
 }
 
 export type VetPayout = { kind: string; amount: number; status: string; paypalRef: string | null; date: string };
