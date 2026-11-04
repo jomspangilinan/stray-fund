@@ -1,8 +1,9 @@
 import { sql } from "drizzle-orm";
 import { db, type Tx } from "./db/client";
 import { CAPTURED, getPoolStatus, toInt, type PoolStatus } from "./ledger";
+import { cats } from "./db/schema";
 import { PERSONAS } from "./session";
-import { NEUTERED_CATS_SQL, publicLedgerRow, STATUS_GROUPS, type PublicLedgerRow } from "./public";
+import { allNotes, NEUTERED_CATS_SQL, publicLedgerRow, publicReason, STATUS_GROUPS, type PublicLedgerRow } from "./public";
 
 /*
  * The impact page and the public ledger. Both are aggregates or whitelisted rows: the ledger query selects
@@ -100,6 +101,9 @@ async function ledgerRows(tx: Tx): Promise<PublicLedgerRow[]> {
     ) l
     order by l.created_at desc, l.paypal_id desc nulls last
   `);
+  // A payout's reason is the Treasurer's own words, so it passes the same filter as the feed.
+  const [names, notes] = await Promise.all([tx.select({ name: cats.name }).from(cats).then((r) => r.map((c) => c.name)), allNotes(tx)]);
+  const payoutAction = (type: string) => (type === PAYOUT_TYPE.deposit ? "payout_deposit" : "payout_balance");
   return (rows as Record<string, unknown>[]).map((r) =>
     publicLedgerRow({
       date: String(r.day),
@@ -108,7 +112,7 @@ async function ledgerRows(tx: Tx): Promise<PublicLedgerRow[]> {
       fee: r.fee === null ? null : toInt(r.fee),
       cat: (r.cat as string | null) ?? null,
       catId: (r.cat_id as string | null) ?? null,
-      reason: (r.reason as string | null) ?? null,
+      reason: r.reason === null ? null : publicReason(payoutAction(String(r.type)), String(r.reason), (r.cat as string | null) ?? null, names, notes),
       paypalId: (r.paypal_id as string | null) ?? null,
       status: String(r.status),
       who: (r.who as string | null) ?? null,

@@ -357,16 +357,21 @@ function personApprovedPayout(row: Pick<AgentActionInput, "action" | "status" | 
   );
 }
 
-/** Never inputs, approver identities or gateway error text, which all live on the same row. */
 /**
- * Reasons the treasurer writes about reports can repeat a note, a street or a number. They show only if they pass the
- * same filter as a cat's bio; otherwise a fixed line shows.
+ * The Treasurer reads notes, so any reason it writes can repeat one, a street or a number. Every reason shows only if
+ * it passes the same filter as a cat's bio; otherwise a fixed line for that action shows.
  */
-const GUARDED_REASONS: Record<string, string> = {
+const REASON_FALLBACK: Record<string, string> = {
+  fund_cat: "The Treasurer funded this cat.",
   set_cat_place: "The Treasurer changed the order after a check.",
   ask_for_check: "The Treasurer asked a caretaker to look at a cat.",
+  caretaker_review: "The Treasurer asked a caretaker.",
+  payout_deposit: "The Treasurer sent the vet's first payment.",
+  payout_balance: "The Treasurer sent the vet's final payment.",
 };
+const OTHER_FALLBACK = "The Treasurer recorded this.";
 
+/** Never inputs, approver identities or gateway error text, which all live on the same row. */
 /**
  * Whether a reason that may name several cats is safe to show. Every known cat name is taken out first, since a
  * reason that weighs one cat against another has to name both, and a name is not a stray capital. Digits, address
@@ -399,12 +404,16 @@ export function reasonIsSafe(reason: string, catName: string, knownNames: readon
   return bioIsSafe(text, "");
 }
 
+/** The reason to print for an action: as written if it is safe, else that action's fixed line. */
+export function publicReason(action: string, reason: string, catName: string | null, knownNames: readonly string[], notes: readonly string[]): string {
+  return reasonIsSafe(reason, catName ?? "", knownNames, notes) ? reason : (REASON_FALLBACK[action] ?? OTHER_FALLBACK);
+}
+
 export function publicAgentAction(row: AgentActionInput, knownNames: readonly string[] = [], notes: readonly string[] = []): PublicAgentAction {
-  const fallback = GUARDED_REASONS[row.action];
   return {
     id: row.id,
     action: ACTION_LABEL[row.action] ?? "Treasurer action",
-    reason: fallback !== undefined && !reasonIsSafe(row.reason, row.cat ?? "", knownNames, notes) ? fallback : row.reason,
+    reason: publicReason(row.action, row.reason, row.cat, knownNames, notes),
     amount: row.amount ?? null,
     status: ACTION_STATUS_LABEL[row.status] ?? "Recorded",
     refused: ["denied", "failed", "rejected"].includes(row.status),
@@ -416,6 +425,11 @@ export function publicAgentAction(row: AgentActionInput, knownNames: readonly st
 }
 
 const MAX_AGENT_ACTIONS = 100;
+
+/** Every report note, for the filter only. Never returned. */
+export async function allNotes(tx: Pick<typeof db, "select"> = db): Promise<string[]> {
+  return (await tx.select({ note: reports.note }).from(reports).where(isNotNull(reports.note))).map((n) => n.note as string);
+}
 
 /** Newest first. The cat comes from the action's payout, or for funding from its recorded id. */
 export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promise<PublicAgentAction[]> {
@@ -447,9 +461,8 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
     cat_id: string | null;
     approved_by_person: boolean;
   }[]);
-  // A reason must not repeat a note on its own cat's reports.
-  const noteRows = await db.select({ catId: reports.catId, note: reports.note }).from(reports).where(isNotNull(reports.note));
-  const notesOf = (catId: string | null) => noteRows.filter((n) => n.catId === catId).map((n) => n.note as string);
+  // A reason must not repeat any note, on its own cat or another: a reason can name several cats.
+  const notes = await allNotes();
   return feed.map((r) =>
     publicAgentAction(
       {
@@ -464,7 +477,7 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
       signedOffByPerson: r.approved_by_person === true,
       },
       knownNames,
-      notesOf(r.cat_id),
+      notes,
     ),
   );
 }
@@ -889,7 +902,7 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
   const ids = [...new Set([...heldRows.map((c) => c.id), ...order.map((o) => o.cat.id)])];
   if (ids.length === 0) return { needsPerson: [], nextToFund: [] };
 
-  const [reportRows, actionRows, sights, knownNames, pool, limits] = await Promise.all([
+  const [reportRows, actionRows, sights, knownNames, pool, limits, notes] = await Promise.all([
     db
       .select({ id: reports.id, catId: reports.catId, note: reports.note, claim: reports.claim, source: reports.source, status: reports.status, createdAt: reports.createdAt })
       .from(reports)
@@ -906,6 +919,7 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
     db.select({ name: cats.name }).from(cats).then((r) => r.map((c) => c.name)),
     db.transaction((tx) => getPoolStatus(tx)),
     db.select({ packagePrice: guardrails.packagePrice }).from(guardrails).where(eq(guardrails.id, 1)),
+    allNotes(),
   ]);
 
   const reasonOf = new Map<string, string>();
@@ -914,9 +928,9 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
     reasonOf.set(`${a.action}:${a.cat_id}`, a.reason);
     if (a.action === ASK_ACTION) askedAbout.set(a.cat_id, a.report_id);
   }
-  const notesOf = (id: string) => reportRows.filter((r) => r.catId === id && r.note !== null).map((r) => r.note as string);
-  const safe = (reason: string, name: string, id: string, fallback: string) =>
-    reasonIsSafe(reason, name, knownNames, notesOf(id)) ? reason : fallback;
+  // Any cat's note: a reason that weighs two cats can repeat either one's.
+  const safe = (reason: string, name: string, fallback: string) =>
+    reasonIsSafe(reason, name, knownNames, notes) ? reason : fallback;
   const photoOf = (id: string) => {
     const photo = sights.filter((s) => s.catId === id).reverse().find((s) => s.publicReady && s.publicKey);
     return photoUrl(photo?.publicKey ?? null);
@@ -947,7 +961,7 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
         catId: c.id,
         name: c.name,
         photoUrl: photoOf(c.id),
-        reason: asked === undefined ? NEEDS_CHECK : safe(asked, c.name, c.id, "The Treasurer asked a caretaker to look at a cat."),
+        reason: asked === undefined ? NEEDS_CHECK : safe(asked, c.name, "The Treasurer asked a caretaker to look at a cat."),
         labels: h.labels,
         position: null,
         fundNote: null,
@@ -964,7 +978,7 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
       catId: o.cat.id,
       name: o.cat.name,
       photoUrl: photoOf(o.cat.id),
-      reason: placed === undefined ? o.why : safe(placed, o.cat.name, o.cat.id, "The Treasurer changed the order after a check."),
+      reason: placed === undefined ? o.why : safe(placed, o.cat.name, "The Treasurer changed the order after a check."),
       labels: vetReady ? ["Vet ready"] : [],
       position: i + 1,
       fundNote: i === 0 ? firstNote : null,
