@@ -19,7 +19,8 @@ describe("copy", () => {
     expect(approvalNotice({ claim: "injured", status: "open" })).toBe("This cat has an open report: hurt. Check it above before you approve.");
     expect(approvalNotice({ claim: "sick", status: "confirmed" })).toBe("A caretaker confirmed this cat is sick. A vet has not cleared it yet.");
     expect(vetNotice({ claim: "injured", status: "confirmed" })).toBe("A caretaker confirmed this cat is hurt.");
-    expect(vetNotice({ claim: "injured", status: "open" })).toBe("A neighbour says this cat is hurt. A caretaker hasn't checked yet.");
+    expect(vetNotice({ claim: "injured", status: "open", source: "neighbour" })).toBe("A neighbour says this cat is hurt. A caretaker hasn't checked yet.");
+    expect(vetNotice({ claim: "injured", status: "open", source: "photo" })).toBe("The AI thinks this cat may be hurt. A caretaker hasn't checked yet.");
   });
 
   it("says nothing without a report, for a kitten claim, or for a closed report", () => {
@@ -36,7 +37,7 @@ describe("a report on a cat that is already funded or booked", () => {
     await addPayout(w, { amount: 45000, status: "awaiting_approval" });
     await addReport(w.cat.id);
     const q = await getCaretakerQueue();
-    expect(q.awaitingApproval[0].catReport).toEqual({ claim: "injured", status: "open" });
+    expect(q.awaitingApproval[0].catReport).toEqual({ claim: "injured", status: "open", source: "neighbour" });
     expect(JSON.stringify(q.awaitingApproval)).not.toContain("SECRET NOTE");
   });
 
@@ -53,10 +54,10 @@ describe("a report on a cat that is already funded or booked", () => {
     const w = await makeWorld();
     await addReport(w.cat.id, { claim: "sick", reportedOn: "2026-11-02" });
     const dash = await listVetDashboard(w.vet.id);
-    expect(dash.bookings[0].catReport).toEqual({ claim: "sick", status: "open" });
+    expect(dash.bookings[0].catReport).toEqual({ claim: "sick", status: "open", source: "neighbour" });
     await addReport(w.cat.id, { claim: "injured", status: "confirmed" });
     const view = await getVetBooking(w.vet.id, w.booking.id);
-    expect(view?.booking.catReport).toEqual({ claim: "injured", status: "confirmed" });
+    expect(view?.booking.catReport).toEqual({ claim: "injured", status: "confirmed", source: "neighbour" });
     expect(JSON.stringify([dash, view])).not.toContain("SECRET NOTE");
   });
 });

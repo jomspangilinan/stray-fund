@@ -76,7 +76,7 @@ const rc = (id: string, name: string, over: Partial<RankableCat> = {}): RankedCa
   const cat = { id, name, sex: "unknown", flags: [], queuedAt: null, createdAt: new Date(0), ...over } as RankableCat;
   return { cat, tier: 5, waitDays: 0, why: "" };
 };
-const mv = (catId: string, beforeCatId: string | null, over: Partial<Move> = {}): Move => ({ catId, beforeCatId, reportId: null, updatedAt: new Date(0), ...over });
+const mv = (catId: string, beforeCatId: string | null, over: Partial<Move> = {}): Move => ({ catId, beforeCatId, reportId: null, passedCatIds: ["A", "B", "C", "D", "Z"], updatedAt: new Date(0), ...over });
 const ids = (r: RankedCat[]) => r.map((x) => x.cat.id);
 
 describe("applyMoves", () => {
@@ -98,6 +98,14 @@ describe("applyMoves", () => {
     const m = mv("D", "B");
     const without = ranked.filter((r) => r.cat.id !== "B");
     expect(ids(applyMoves(without, [m], new Set(["D"])))).toEqual(["A", "C", "D"]);
+    expect(ids(applyMoves(ranked, [m], new Set(["D"])))).toEqual(["A", "D", "B", "C"]);
+  });
+
+  it("covers a pair only if the cat it passes was passed when the move was made", () => {
+    // D was judged against B and C only. Y now ranks between B and C, so D above Y is not covered even though D is checked.
+    const withY = [rc("A", "A"), rc("B", "B"), rc("Y", "Y"), rc("C", "C"), rc("D", "D")];
+    const m = mv("D", "B", { passedCatIds: ["B", "C"] });
+    expect(ids(applyMoves(withY, [m], new Set(["D"])))).toEqual(["A", "B", "Y", "C", "D"]);
     expect(ids(applyMoves(ranked, [m], new Set(["D"])))).toEqual(["A", "D", "B", "C"]);
   });
 
@@ -129,9 +137,9 @@ describe("fundingOrder", () => {
   });
 
   it("applies a stored move whose report is confirmed, and ignores one whose report is open or dismissed", async () => {
-    const { mimi, tom } = await trio();
+    const { mimi, kit, tom } = await trio();
     const r = await makeReport({ catId: tom.id, claim: "injured", status: "confirmed" });
-    await db.insert(catPriority).values({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id, reason: "r" });
+    await db.insert(catPriority).values({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id, passedCatIds: [mimi.id, kit.id], reason: "r" });
     // The cat is held while confirmed, so it is not in the order at all.
     expect(await order()).toEqual(["Mimi", "Kit"]);
     await db.update(reports).set({ status: "cleared" }).where(eq(reports.id, r.id));
@@ -293,6 +301,62 @@ describe("placeCat", () => {
     expect(await db.select().from(catPriority)).toHaveLength(1);
     await db.update(cats).set({ status: "queued" }).where(eq(cats.id, kit.id));
     expect(await order()).toEqual(["Mimi", "Tom", "Kit"]);
+  });
+
+  it("a checked moved cat does not jump a cat that arrives later between it and its anchor, and one that ranks first stays first", async () => {
+    const t = await makeCat({ name: "T", queuedAt: daysAgo(9) });
+    await makeCat({ name: "B", queuedAt: daysAgo(8) });
+    const d = await makeCat({ name: "D", queuedAt: daysAgo(7) });
+    const r = await makeReport({ catId: d.id, claim: "kitten", status: "confirmed" });
+    expect((await place({ catId: d.id, beforeCatId: t.id, reportId: r.id })).ok).toBe(true);
+    expect(await order()).toEqual(["D", "T", "B"]);
+    await makeCat({ name: "Z", sex: "female", queuedAt: daysAgo(1) });
+    expect(await order()).toEqual(["Z", "D", "T", "B"]);
+    // Y waited between B and D, so D above T now also passes Y, whom the AI never weighed.
+    await makeCat({ name: "Y", queuedAt: new Date(NOW.getTime() - 7.5 * 86_400_000) });
+    expect(await order()).toEqual(["Z", "T", "B", "Y", "D"]);
+    expect((await db.select().from(catPriority)).map((x) => x.catId)).toEqual([d.id]);
+  });
+
+  it("a cat that rises later, B with a confirmed injured flag, is not jumped either", async () => {
+    const t = await makeCat({ name: "T", queuedAt: daysAgo(9) });
+    const b = await makeCat({ name: "B", queuedAt: daysAgo(8) });
+    const d = await makeCat({ name: "D", queuedAt: daysAgo(7) });
+    const r = await makeReport({ catId: d.id, claim: "kitten", status: "confirmed" });
+    // D goes before B: it passes B only.
+    expect((await place({ catId: d.id, beforeCatId: b.id, reportId: r.id })).ok).toBe(true);
+    expect(await order()).toEqual(["T", "D", "B"]);
+    await db.update(cats).set({ flags: ["injured"] }).where(eq(cats.id, b.id));
+    // B is now tier 3 and ranks first, so D above B would pass T as well, which was never weighed.
+    expect(await order()).toEqual(["B", "T", "D"]);
+    expect(t.id).toBeTruthy();
+  });
+
+  it("writes the set_cat_place row only when the order changed", async () => {
+    const { kit, tom } = await trio();
+    const same = await place({ catId: kit.id, beforeCatId: tom.id });
+    expect(same).toMatchObject({ ok: true, changed: false });
+    expect(await db.select().from(agentActions)).toHaveLength(0);
+    const r = await makeReport({ catId: tom.id, claim: "kitten", status: "confirmed" });
+    const moved = await place({ catId: tom.id, beforeCatId: kit.id, reportId: r.id });
+    expect(moved).toMatchObject({ ok: true, changed: true });
+    expect(await db.select().from(agentActions)).toHaveLength(1);
+    // Putting Tom back last changes the order again, so it is written.
+    expect(await place({ catId: tom.id, beforeCatId: null })).toMatchObject({ ok: true, changed: true });
+    expect(await db.select().from(agentActions)).toHaveLength(2);
+    // And now nothing changes.
+    expect(await place({ catId: tom.id, beforeCatId: null })).toMatchObject({ ok: true, changed: false });
+    expect(await db.select().from(agentActions)).toHaveLength(2);
+  });
+
+  it("reports the place the cat really ends up in, using every checked cat", async () => {
+    const { mimi, kit, tom } = await trio();
+    // Kit has a checked report too, so Tom above Kit and Mimi needs only Tom's report, and lands first.
+    await makeReport({ catId: kit.id, claim: "kitten", status: "confirmed" });
+    const r = await makeReport({ catId: tom.id, claim: "kitten", status: "confirmed" });
+    const out = await place({ catId: tom.id, beforeCatId: mimi.id, reportId: r.id });
+    expect(out).toMatchObject({ ok: true, place: 1 });
+    expect((await order())[0]).toBe("Tom");
   });
 
   it("a dismissed report undoes its move with no AI run, and a vet-cleared one keeps it", async () => {
@@ -611,6 +675,21 @@ describe("the public feed filters the treasurer's reasons", () => {
     expect(reasons).toContain("The Treasurer changed the order after a check.");
     expect(reasons).toContain("The Treasurer asked a caretaker to look at a cat.");
     expect(reasons).toContain("Pip's hurt report was confirmed, so Pip goes ahead.");
+  });
+
+  it("a reason that names other cats shows as written, and one with a street or a number still falls back", async () => {
+    const tom = await makeCat({ name: "Tom" });
+    await makeCat({ name: "Kit" });
+    await db.insert(agentActions).values([
+      { action: "set_cat_place", reason: "Tom goes ahead of Kit because a caretaker confirmed Tom is hurt.", status: "done", inputs: { catId: tom.id } },
+      { action: "set_cat_place", reason: "Tom goes ahead of Kit because Tom is hurt near Mabini Street.", status: "done", inputs: { catId: tom.id } },
+      { action: "set_cat_place", reason: "Tom goes ahead of Kit because Tom has waited 12 days.", status: "done", inputs: { catId: tom.id } },
+    ]);
+    const reasons = (await listAgentActions()).map((a) => a.reason);
+    expect(reasons).toContain("Tom goes ahead of Kit because a caretaker confirmed Tom is hurt.");
+    expect(reasons.filter((r) => r === "The Treasurer changed the order after a check.")).toHaveLength(2);
+    expect(JSON.stringify(reasons)).not.toContain("Mabini");
+    expect(JSON.stringify(reasons)).not.toContain("12 days");
   });
 
   it("the feed route sends the same filtered text", async () => {

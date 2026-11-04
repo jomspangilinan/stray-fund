@@ -3,7 +3,7 @@
  * not stop for it. People see it where they act. Only the claim word and the status come in, never the note.
  */
 
-export type ReportNotice = { claim: string; status: string };
+export type ReportNotice = { claim: string; status: string; /** neighbour, photo, caretaker or vet. Never a name. */ source?: string };
 
 const WORD: Record<string, string> = { injured: "hurt", pregnant: "pregnant", sick: "sick" };
 
@@ -23,6 +23,7 @@ export function vetNotice(n: ReportNotice | null): string | null {
   const w = n && word(n);
   if (!n || !w) return null;
   if (n.status === "confirmed") return `A caretaker confirmed this cat is ${w}.`;
+  if (n.status === "open" && n.source === "photo") return `The AI thinks this cat may be ${w}. A caretaker hasn't checked yet.`;
   if (n.status === "open") return `A neighbour says this cat is ${w}. A caretaker hasn't checked yet.`;
   return null;
 }

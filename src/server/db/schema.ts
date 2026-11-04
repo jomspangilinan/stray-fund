@@ -198,6 +198,9 @@ export const catPriority = pgTable("cat_priority", {
     .references(() => cats.id),
   beforeCatId: uuid("before_cat_id").references(() => cats.id),
   reportId: uuid("report_id").references(() => reports.id),
+  // The cats this move really passes over against rank.ts, at the moment it was made. A pair with any other cat is
+  // never covered by it, so a cat that arrives or rises later is not jumped unweighed.
+  passedCatIds: uuid("passed_cat_ids").array().notNull().default(sql`'{}'::uuid[]`),
   reason: text("reason").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

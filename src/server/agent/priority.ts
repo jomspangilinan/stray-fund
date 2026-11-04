@@ -22,7 +22,14 @@ export type WaitingRow = Pick<typeof cats.$inferSelect, "id" | "name" | "sex" | 
 export type PlacedCat = RankedCat<WaitingRow> & { moved: boolean };
 
 /** One stored move. `beforeCatId` null means last. */
-export type Move = { catId: string; beforeCatId: string | null; reportId: string | null; updatedAt: Date };
+export type Move = {
+  catId: string;
+  beforeCatId: string | null;
+  reportId: string | null;
+  /** The other cats of every pair the move turned against rank.ts when it was made. */
+  passedCatIds: string[];
+  updatedAt: Date;
+};
 
 type Success = { ok: true; [key: string]: unknown };
 type Failure = { ok: false; code: string; message: string; [key: string]: unknown };
@@ -68,19 +75,23 @@ async function checkedCats(tx: Tx | typeof db): Promise<Set<string>> {
 /** Stored moves whose report, if they cite one, is still checked. Others stay stored but do not apply. */
 async function liveMoves(tx: Tx | typeof db): Promise<Move[]> {
   const rows = await tx
-    .select({ catId: catPriority.catId, beforeCatId: catPriority.beforeCatId, reportId: catPriority.reportId, updatedAt: catPriority.updatedAt, reportStatus: reports.status })
+    .select({ catId: catPriority.catId, beforeCatId: catPriority.beforeCatId, reportId: catPriority.reportId, passedCatIds: catPriority.passedCatIds, updatedAt: catPriority.updatedAt, reportStatus: reports.status })
     .from(catPriority)
     .leftJoin(reports, eq(reports.id, catPriority.reportId))
     .orderBy(asc(catPriority.updatedAt), asc(catPriority.catId));
   return rows
     .filter((r) => r.reportId === null || (r.reportStatus !== null && CHECKED.includes(r.reportStatus)))
-    .map((r) => ({ catId: r.catId, beforeCatId: r.beforeCatId, reportId: r.reportId, updatedAt: r.updatedAt }));
+    .map((r) => ({ catId: r.catId, beforeCatId: r.beforeCatId, reportId: r.reportId, passedCatIds: r.passedCatIds, updatedAt: r.updatedAt }));
 }
 
-type Attempt = { order: RankedCat[] } | { skipped: "absent" } | { skipped: "unchecked"; unchecked: [string, string][] };
+type Attempt = { order: RankedCat[]; against: string[] } | { skipped: "absent" } | { skipped: "unchecked"; unchecked: [string, string][] };
 
-/** Tries one move on an order. Every pair it turns against rank.ts needs a checked cat. */
-function tryMove(order: RankedCat[], move: Move, checked: Set<string>, rankIndex: Map<string, number>): Attempt {
+/**
+ * Tries one move on an order. A pair the move turns against rank.ts is covered only if the other cat of the pair
+ * was passed when the move was made (`passed`, or anything when null, which is how a new move is tried) and a cat of
+ * the pair is checked. One uncovered pair skips the whole move. `against` lists the other cats of those pairs.
+ */
+function tryMove(order: RankedCat[], move: Move, checked: Set<string>, rankIndex: Map<string, number>, passed: Set<string> | null): Attempt {
   const from = order.findIndex((r) => r.cat.id === move.catId);
   if (from < 0) return { skipped: "absent" };
   if (move.beforeCatId === move.catId) return { skipped: "absent" };
@@ -90,6 +101,7 @@ function tryMove(order: RankedCat[], move: Move, checked: Set<string>, rankIndex
   const next = [...without.slice(0, at), order[from], ...without.slice(at)];
 
   const unchecked: [string, string][] = [];
+  const against: string[] = [];
   next.forEach((r, i) => {
     if (r.cat.id === move.catId) return;
     const wasAbove = order.findIndex((o) => o.cat.id === r.cat.id) < from;
@@ -97,9 +109,12 @@ function tryMove(order: RankedCat[], move: Move, checked: Set<string>, rankIndex
     if (wasAbove === isAbove) return;
     const [upper, lower] = isAbove ? [r.cat.id, move.catId] : [move.catId, r.cat.id];
     // Only a pair that now disagrees with rank.ts needs a reason.
-    if (rankIndex.get(upper)! > rankIndex.get(lower)! && !checked.has(upper) && !checked.has(lower)) unchecked.push([upper, lower]);
+    if (rankIndex.get(upper)! <= rankIndex.get(lower)!) return;
+    against.push(r.cat.id);
+    const covered = (checked.has(upper) || checked.has(lower)) && (passed === null || passed.has(r.cat.id));
+    if (!covered) unchecked.push([upper, lower]);
   });
-  return unchecked.length > 0 ? { skipped: "unchecked", unchecked } : { order: next };
+  return unchecked.length > 0 ? { skipped: "unchecked", unchecked } : { order: next, against };
 }
 
 function applyDetailed(ranked: RankedCat[], moves: Move[], checked: Set<string>): { order: RankedCat[]; moved: Set<string> } {
@@ -108,7 +123,7 @@ function applyDetailed(ranked: RankedCat[], moves: Move[], checked: Set<string>)
   let order = ranked;
   const moved = new Set<string>();
   for (const m of sorted) {
-    const tried = tryMove(order, m, checked, rankIndex);
+    const tried = tryMove(order, m, checked, rankIndex, new Set(m.passedCatIds));
     if ("order" in tried) {
       order = tried.order;
       moved.add(m.catId);
@@ -167,18 +182,16 @@ export async function placeCat(
   }
 
   const base = applyDetailed(ranked, moves.filter((m) => m.catId !== input.catId), checked).order;
-  const move: Move = { catId: input.catId, beforeCatId: input.beforeCatId, reportId: input.reportId, updatedAt: now };
+  const move: Move = { catId: input.catId, beforeCatId: input.beforeCatId, reportId: input.reportId, passedCatIds: [], updatedAt: now };
   const rankIndex = new Map(ranked.map((r, i) => [r.cat.id, i]));
 
   const at = base.findIndex((r) => r.cat.id === input.catId);
   const alreadyThere = input.beforeCatId === null ? at === base.length - 1 : base[at + 1]?.cat.id === input.beforeCatId;
 
   let needsReport = false;
-  let result: number;
-  if (alreadyThere) {
-    result = at + 1;
-  } else {
-    const tried = tryMove(base, move, cited, rankIndex);
+  let against: string[] = [];
+  if (!alreadyThere) {
+    const tried = tryMove(base, move, cited, rankIndex, null);
     if (!("order" in tried)) {
       const unchecked = "unchecked" in tried ? tried.unchecked : [];
       const passed = [...new Set(unchecked.map(([u, l]) => (u === input.catId ? names.get(l) : names.get(u)) ?? ""))].filter(Boolean);
@@ -190,27 +203,37 @@ export async function placeCat(
         { against: passed },
       );
     }
-    result = tried.order.findIndex((r) => r.cat.id === input.catId) + 1;
-    needsReport = !("order" in tryMove(base, move, new Set(), rankIndex));
+    against = tried.against;
+    needsReport = against.length > 0;
   }
 
+  const before = applyDetailed(ranked, moves, checked).order.map((r) => r.cat.id);
   await tx.delete(catPriority).where(eq(catPriority.catId, input.catId));
-  if (!alreadyThere) {
+  const kept = moves.filter((m) => m.catId !== input.catId);
+  const stored: Move | null = alreadyThere ? null : { ...move, reportId: needsReport ? input.reportId : null, passedCatIds: against };
+  if (stored) {
     await tx.insert(catPriority).values({
       catId: input.catId,
       beforeCatId: input.beforeCatId,
       // Kept only when the move needs it, so a report that was not needed cannot undo it later.
-      reportId: needsReport ? input.reportId : null,
+      reportId: stored.reportId,
+      passedCatIds: against,
       reason: input.reason,
       // The clock, not `now`: moves are told apart by when they were made, and a test's fixed time would tie them.
       updatedAt: sql`clock_timestamp()`,
     });
   }
-  await tx.insert(agentActions).values({
-    action: SET_PLACE_ACTION,
-    reason: input.reason,
-    status: "done",
-    inputs: { catId: input.catId, beforeCatId: input.beforeCatId, reportId: input.reportId },
-  });
-  return { ok: true, catId: input.catId, catName: names.get(input.catId), place: result, of: base.length };
+  // The same order the next read will give, with this move last (it is the newest).
+  const after = applyDetailed(ranked, stored ? [...kept, { ...stored, updatedAt: new Date(Math.max(now.getTime(), ...moves.map((m) => m.updatedAt.getTime())) + 1) }] : kept, checked).order.map((r) => r.cat.id);
+  const changed = before.some((id, i) => id !== after[i]);
+  // The public feed says the order changed only when it did.
+  if (changed) {
+    await tx.insert(agentActions).values({
+      action: SET_PLACE_ACTION,
+      reason: input.reason,
+      status: "done",
+      inputs: { catId: input.catId, beforeCatId: input.beforeCatId, reportId: input.reportId },
+    });
+  }
+  return { ok: true, changed, catId: input.catId, catName: names.get(input.catId), place: after.indexOf(input.catId) + 1, of: after.length };
 }

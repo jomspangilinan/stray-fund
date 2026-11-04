@@ -1,0 +1,1 @@
+ALTER TABLE "cat_priority" ADD COLUMN "passed_cat_ids" uuid[] DEFAULT '{}'::uuid[] NOT NULL;

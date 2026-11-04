@@ -9,7 +9,7 @@ import { db } from "./db/client";
 import { cats, earTipFlags, guardrails, nameSuggestions, sightings, treatments, users } from "./db/schema";
 import { ownFlags } from "./earTipFlags";
 import { CAPTURED, getPoolStatus, toInt } from "./ledger";
-import { bioIsSafe } from "./placeText";
+import { bioIsSafe, nameIsSafe } from "./placeText";
 import { PRIVATE_ACTIONS } from "./privateActions";
 import type { Session } from "./session";
 import { getStorage } from "./storage";
@@ -364,12 +364,27 @@ const GUARDED_REASONS: Record<string, string> = {
   ask_for_check: "The Treasurer asked a caretaker to look at a cat.",
 };
 
-export function publicAgentAction(row: AgentActionInput): PublicAgentAction {
+/**
+ * Whether a reason that may name several cats is safe to show. Every known cat name is taken out first, since a
+ * reason that weighs one cat against another has to name both, and a name is not a stray capital. Digits, address
+ * words and area names still fail. Names that are themselves unsafe are not taken out. Task 5 reuses this.
+ */
+export function reasonIsSafe(reason: string, catName: string, knownNames: readonly string[]): boolean {
+  let text = reason;
+  const names = [...new Set([catName, ...knownNames].map((n) => n.trim()).filter((n) => n && nameIsSafe(n)))].sort((a, b) => b.length - a.length);
+  for (const n of names) {
+    const escaped = n.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "giu"), "that cat");
+  }
+  return bioIsSafe(text, "");
+}
+
+export function publicAgentAction(row: AgentActionInput, knownNames: readonly string[] = []): PublicAgentAction {
   const fallback = GUARDED_REASONS[row.action];
   return {
     id: row.id,
     action: ACTION_LABEL[row.action] ?? "Treasurer action",
-    reason: fallback !== undefined && !bioIsSafe(row.reason, row.cat ?? "") ? fallback : row.reason,
+    reason: fallback !== undefined && !reasonIsSafe(row.reason, row.cat ?? "", knownNames) ? fallback : row.reason,
     amount: row.amount ?? null,
     status: ACTION_STATUS_LABEL[row.status] ?? "Recorded",
     refused: ["denied", "failed", "rejected"].includes(row.status),
@@ -384,6 +399,8 @@ const MAX_AGENT_ACTIONS = 100;
 
 /** Newest first. The cat comes from the action's payout, or for funding from its recorded id. */
 export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promise<PublicAgentAction[]> {
+  // Cat names are public. A reason that weighs one cat against another names both.
+  const knownNames = (await db.select({ name: cats.name }).from(cats)).map((c) => c.name);
   const { rows } = await db.execute(sql`
     select a.id, a.action, a.reason, a.amount, a.status, a.paypal_ref, a.created_at, c.name as cat,
            (a.approved_by is not null) as approved_by_person
@@ -409,7 +426,8 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
     cat: string | null;
     approved_by_person: boolean;
   }[]).map((r) =>
-    publicAgentAction({
+    publicAgentAction(
+      {
       id: r.id,
       action: r.action,
       reason: r.reason,
@@ -419,7 +437,9 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
       createdAt: new Date(r.created_at),
       cat: r.cat,
       signedOffByPerson: r.approved_by_person === true,
-    }),
+      },
+      knownNames,
+    ),
   );
 }
 
