@@ -2,7 +2,7 @@
 
 DRAFT for the owner to check. Working name; the name lives in one constant, `APP_NAME` in `src/lib/config.ts`.
 
-A shared fund for one neighbourhood's stray cats. Neighbours spot cats and donate. An AI treasurer picks which cat gets neutered next. Rules check every payment before it goes out, and a person signs off before any money reaches the vet. Every peso shows on a public ledger.
+A shared fund for one neighbourhood's stray cats. Neighbours spot cats, report the ones that look hurt, and donate. People check each report. An AI treasurer weighs what they found and picks which cat gets neutered next. Rules check every payment before it goes out, and a person signs off before any money reaches the vet. Every peso shows on a public ledger.
 
 Built for the PayPal AI Hackathon. It runs on PayPal sandbox money only.
 
@@ -13,13 +13,15 @@ Strays multiply when they are fed but not neutered. Neighbours want to help, but
 ## How it works
 
 1. **Spot.** A neighbour takes a live camera photo of a cat. Old photos can't be uploaded. The AI checks that it is a real cat, matches it to a known cat or makes a new card, and blurs people, signs and plates before anything is public.
-2. **Ear-tip.** The AI does not judge ear-tips; in tests it got them wrong. Neighbours answer Yes, No or Not sure. Two different people saying No queue the cat. A caretaker settles any disagreement.
-3. **Donate.** Neighbours give through PayPal Checkout into one shared fund. Fees are counted, so the fund only holds what arrived.
-4. **Decide.** The AI treasurer looks at the waiting cats and the fund, picks one and writes why, in plain words.
-5. **Pay the deposit.** Rules check the payee, the caps and the fund. If they pass, a caretaker approves the deposit, and then the partner vet gets it through PayPal Payouts.
-6. **Prove it.** The vet sends a receipt and a photo of the cat's ear. The AI reads the receipt; code compares it with the booking. A caretaker looks at the photo and taps "I saw the ear-tip".
-7. **Pay the balance.** Only after that, the rest is paid. The cat's card is updated.
-8. **Show it.** The Ledger lists every donation and payout with its PayPal reference. Proof shows the totals adding up. Treasurer shows what the AI decided and why.
+2. **Report.** After the photo, a neighbour can say a cat looks hurt, pregnant, sick or like a kitten, and add a note only caretakers see. There is no way to report without a photo taken then. A report is a claim: it holds the cat back from funding at once, and it moves nothing else until a person checks it.
+3. **Ear-tip.** The AI does not judge ear-tips; in tests it got them wrong. Neighbours answer Yes, No or Not sure. Two different people saying No queue the cat. A caretaker settles any disagreement.
+4. **Donate.** Neighbours give through PayPal Checkout into one shared fund. Fees are counted, so the fund only holds what arrived.
+5. **Check.** A caretaker with an ID tag confirms or dismisses each report, and it tops their desk. A confirmed report keeps the cat on hold until a registered vet clears it for surgery. A dismissed report ends the hold, and that person can't file the same claim on that cat again.
+6. **Decide.** The AI treasurer reads the reports, the waiting cats and the fund. It starts from the code's ranking and may go against it, but only by citing a report a person checked, and it must say who goes first and who waits longer because of it. If a report is later dismissed, the move lapses by itself. It never diagnoses.
+7. **Pay the deposit.** Rules check the payee, the caps and the fund. If they pass, a caretaker approves the deposit, and then the partner vet gets it through PayPal Payouts.
+8. **Prove it.** The vet sends a receipt and a photo of the cat's ear. The AI reads the receipt; code compares it with the booking. A caretaker looks at the photo and taps "I saw the ear-tip".
+9. **Pay the balance.** Only after that, the rest is paid. The cat's card is updated.
+10. **Show it.** The Ledger lists every donation and payout with its PayPal reference. Proof shows the totals adding up. Treasurer shows what the AI decided and why. Priority groups every cat by what happens next ("Needs a person first", "Next to fund") with the reason. A cat's page tells its story in one timeline: who reported what, who checked it, what the Treasurer decided, each PayPal payment, and the steps still ahead.
 
 A cat's card also has a Save image button that makes a 9:16 picture of the cat.
 
@@ -34,6 +36,7 @@ The hackathon's theme is "Build What's Next with PayPal and AI", and a project m
 | Step | What the AI does | What PayPal does |
 |---|---|---|
 | Donate | Nothing | A neighbour approves in PayPal Checkout. The server captures the order, and a webhook confirms it |
+| A report changes | Reads the reports, may call `set_cat_place` (only citing a report a person checked) or `ask_for_check`, writes the trade-off | Nothing |
 | Choose a cat | Looks at the waiting cats and the fund, calls `fund_next_cat`, writes why | Nothing. The fund sets the money aside in the app's own ledger |
 | Pay the deposit | After a vet books, calls `pay_vet_deposit` | If the money gate passes, the deposit waits for a caretaker, and then Payouts sends it to the vet. Code sets the amount and the payee |
 | Check the proof | Reads the receipt. Code compares it with the booking | Nothing |
@@ -48,7 +51,9 @@ The AI proposes. Rules check. A person approves.
 - **The AI proposes.** It calls a short list of tools by cat id and words. It never chooses an amount or a payee; code supplies both.
 - **Rules check.** One function, the money gate, runs every payout. It takes a lock, checks the guardrails from the database, writes the action down, and only then calls PayPal. Guardrails: allow-listed payees, a cap per cat, a cap per day, a verified receipt, a confirmed ear-tip, no duplicate payout.
 - **A person approves.** A caretaker confirms the ear-tip photo before the balance. Every deposit waits for a caretaker, whatever its amount, and a balance over the approval threshold waits too. A caretaker can also reject or hold.
-- **Untrusted input.** Receipts, photos and cat text are data. Text in an image can't authorise anything.
+- **Standing limits what a report can do.** A neighbour's report can hold a cat, never reorder the list. Code, not the AI, enforces this. `fund_next_cat` refuses a cat on hold, and `set_cat_place` refuses a move that cites no checked report.
+- **Public text is filtered.** Note text, reporter names and exact places are never public. The Treasurer's reasons pass the same filter as cat bios and are replaced by a fixed line if they repeat four words in a row from any note.
+- **Untrusted input.** Receipts, photos, notes and cat text are data. Text in an image can't authorise anything.
 - A daily cap on AI calls limits cost.
 
 ## Architecture in brief
@@ -83,7 +88,9 @@ You need Node 22 and Postgres 17.
 
 PayPal sandbox needs `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and a sandbox buyer account to pay with. With `DEMO_MODE=true` a role strip lets you act as neighbour, caretaker or vet.
 
-**Tests.** `npm test` runs the suite against `TEST_DATABASE_URL`. `npm run lint` and `npx tsc --noEmit` check the rest. `npm run e2e` runs one browser test of the main story against fakes, on a scratch database whose name ends in `_e2e` (see the end of `.env.example`).
+**Demo data.** The seed writes a story a judge finds at once: a neighbour's open hurt report (Hapon), a report a caretaker confirmed that now waits on the vet (Bituin), a dismissed one (Dilaw), and a plain waiting list. Its notes are invented, flagged `sample`, and each comes with a drawn stand-in photo. It writes no Treasurer decision: confirm Hapon's report as the caretaker, clear him as the vet, and the real Treasurer weighs it.
+
+**Tests.** `npm test` runs the suite against `TEST_DATABASE_URL`. `npm run lint` and `npx tsc --noEmit` check the rest. `npm run e2e` runs one browser test of the whole story against fakes (about a minute): a hurt report with the camera photo, the desk showing it first, a caretaker confirming, the fund refusing the cat, a vet clearing it, funding, the timeline, and no note text or coordinates on any public page. It uses a scratch database whose name ends in `_e2e`, passed as `E2E_DATABASE_URL` (see the end of `.env.example`). `npx tsx scripts/check-public-leaks.ts` fetches the public pages, `/priority`, `/api/priority`, a cat page with a timeline and the staff desks as a visitor and as each demo role, with a note holding a phone number, a street and a name; see its header for how to run it.
 
 **The subscription route.** For local work only, set `AI_PROVIDER=claude-cli`. Photo checks and the treasurer then run through `claude -p` on your own Claude login, with no Bedrock calls. The CLI is given no tools and runs in safe mode. Production refuses this setting. Results on this route do not prove Bedrock's model behaves the same.
 
@@ -100,6 +107,9 @@ Live site: `[LIVE URL]`. Pick Neighbour, Caretaker or Vet in the role strip. Pay
 Read this before you trust it with anything real.
 
 - **No real sign-in.** The Neighbour, Caretaker and Vet roles are simulated and labelled so. Anyone can pick Caretaker. Verified accounts come before any real money.
+- **Volunteer ID tags and the vet register are simulated.** The demo roles carry a verified badge with a tag number, but no volunteer process, ID check or vet register stands behind it. In the demo anyone can confirm a report or clear a cat.
+- **The Treasurer's weighing is lightly tested.** It was tried on the local `claude -p` route on a handful of cases, three runs each, never on Bedrock. See `.superpowers/sdd/2026-11-04-ai-priority-list/prompt-eval.md` for what held and what didn't. `[CONFIRM AFTER LIVE RUN]` for the same cases on Bedrock.
+- **A report can delay a cat once.** A false report holds a cat until a caretaker looks, and the reporter can't repeat it. Reports from caretakers and vets count as checked at once.
 - **Sandbox money only.** The app refuses to start with demo roles and live PayPal together, and the "test money" wording only shows when PayPal is not live.
 - **Demo caretakers see seeded places.** In demo mode the desks hide real coordinates, original photos and the vet's email. A public demo should still never use a real feeding spot.
 - **A vet and a caretaker could collude, and a photo could be forged.** The checks make that harder and leave a record; they don't make it impossible. We chose not to build a volunteer audit flow.
