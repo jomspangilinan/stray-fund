@@ -95,7 +95,7 @@ async function paypalConfirms(page: Page, payoutId: string, fee: string, eventId
 }
 
 /** Public pages and answers for a stranger: no note text, and the exact place at no precision above 2 decimals. */
-async function publicPagesAreClean(catId: string) {
+async function publicPagesAreClean(catId: string, { listed }: { listed: boolean } = { listed: true }) {
   const sighting = await db.one<{ exact_lat: number; exact_lng: number }>("select exact_lat, exact_lng from sightings where cat_id = $1", [catId]);
   const stranger = await request.newContext({ baseURL: BASE_URL });
   try {
@@ -106,7 +106,7 @@ async function publicPagesAreClean(catId: string) {
         expect(res.status(), p).toBeLessThan(400);
         const body = await res.text();
         // The page really carries the cat, so a clean scan means something.
-        if (p.includes("priority") && !rsc) expect(body, `${p} must name the cat`).toContain("Mocha");
+        if (listed && p.includes("priority") && !rsc) expect(body, `${p} must name the cat`).toContain("Mocha");
         for (const piece of NOTE_PIECES) expect(body, `${p} must not contain "${piece}"`).not.toContain(piece);
         for (const secret of [...coordinateForms(sighting.exact_lat), ...coordinateForms(sighting.exact_lng)]) {
           expect(body, `${p} must not contain the coordinate ${secret}`).not.toContain(secret);
@@ -524,7 +524,7 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
 
   // ---------------------------------------------------------------- privacy
   await test.step("no public page or answer holds the exact place, a note, a private key or an email", async () => {
-    await publicPagesAreClean(catId);
+    await publicPagesAreClean(catId, { listed: false }); // the cat has left the list by now
     const sighting = await db.one<{ exact_lat: number; exact_lng: number }>("select exact_lat, exact_lng from sightings where cat_id = $1", [catId]);
     const cat = await db.one<{ fuzzed_lat: number; fuzzed_lng: number }>("select fuzzed_lat, fuzzed_lng from cats where id = $1", [catId]);
     expect([cat.fuzzed_lat, cat.fuzzed_lng]).not.toEqual([Number(EXACT.lat), Number(EXACT.lng)]);
