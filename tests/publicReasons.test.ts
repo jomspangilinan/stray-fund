@@ -80,4 +80,25 @@ describe("every AI-written reason on a public page passes the filter", () => {
     await db.update(agentActions).set({ reason: "The receipt was checked, so the balance went out." }).where(eq(agentActions.id, payout.actionId));
     expect((await getLedger()).find((r) => r.type === "vet_balance")?.reason).toBe("The receipt was checked, so the balance went out.");
   });
+
+  it("a reason with a peso amount, a day count, PayPal or Treasurer passes; a phone number or street number still fails", async () => {
+    const { a } = await twoCats();
+    await db.insert(cats).values({ name: "Kit", areaName: "Brgy 1", status: "queued" });
+    const ok = [
+      "Tom goes ahead of Kit, who has waited 12 days, because a caretaker confirmed Tom is hurt.",
+      "Mimi gets the care package of ₱1,500 and Tom waits 1 day more.",
+      "The fund holds ₱450 and ₱1,350.50, so the Treasurer sent it by PayPal.",
+    ];
+    const bad = [
+      "Call 0917 555 0100 about Mimi.",
+      "Mimi lives at 12 Rizal St.",
+      "Mimi waited 12 days, call 0917 555 0100.",
+      "Mimi costs ₱1,500 at gate 12.",
+      "Mimi waited 0917 555 0100 days.",
+    ];
+    await db.insert(agentActions).values([...ok, ...bad].map((reason) => ({ action: "fund_cat", reason, status: "done", inputs: { catId: a.id } })));
+    const shown = (await listAgentActions()).map((r) => r.reason);
+    for (const r of ok) expect(shown).toContain(r);
+    for (const r of bad) expect(shown).not.toContain(r);
+  });
 });

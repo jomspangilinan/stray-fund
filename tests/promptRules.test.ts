@@ -47,10 +47,19 @@ describe("prompt rules that the money and privacy checks lean on", () => {
     expect(SYSTEM_PROMPT).toContain("a vet cleared for surgery");
   });
 
-  it("a checked report on a cat behind another must be weighed and the reason must show it, and tools are called before they are described", () => {
+  it("a checked report must be weighed neutrally: neutering only, kittens and waiting time, no medical comparison, either outcome valid", () => {
     expect(SYSTEM_PROMPT).toContain("you must weigh the two cats and show it");
     expect(SYSTEM_PROMPT).toContain("A reason that never mentions the checked report is not enough.");
     expect(SYSTEM_PROMPT).toContain("Never say a tool is unavailable unless a call to it failed.");
+    expect(SYSTEM_PROMPT).toContain("The fund pays for neutering only");
+    expect(SYSTEM_PROMPT).toContain("the kittens a surgery prevents and how long each cat has waited");
+    expect(SYSTEM_PROMPT).toContain("Never compare how serious two conditions are, and never say what a cat medically needs.");
+    expect(SYSTEM_PROMPT).toContain("Keeping the ranking and saying why is as valid as moving a cat.");
+    expect(SYSTEM_PROMPT).not.toContain("has a need the waiting cat does not");
+  });
+
+  it("reasons use cat names, never quote a note, and name nothing but pesos and days", () => {
+    expect(SYSTEM_PROMPT).toContain("Use cat names, never quote a note, and name no street, shop, person or number except pesos and days.");
   });
 
   it("the money rules stay word for word", () => {

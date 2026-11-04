@@ -400,9 +400,17 @@ export function noteEchoes(reason: string, grams: NoteGrams): boolean {
   return false;
 }
 
+/**
+ * What a reason may say without counting as a leak: a peso amount (₱450, ₱1,350.50), a day count (12 days) and the
+ * words PayPal and Treasurer. Taken out before the check only. A phone number or a street number has no such shape.
+ */
+const PESOS = /₱\s?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?(?![\p{N}])|₱\s?\d{1,7}(?:\.\d{1,2})?(?![\p{N}])/gu;
+const DAYS = /(?<![\p{N}.,-])\d{1,3}\s+days?(?![\p{L}\p{N}])/giu;
+const FUND_WORDS = /(?<![\p{L}\p{N}])(?:PayPal|Treasurer)(?![\p{L}\p{N}])/gu;
+
 export function reasonIsSafe(reason: string, catName: string, knownNames: readonly string[], notes: NoteGrams = new Set()): boolean {
   if (noteEchoes(reason, notes)) return false;
-  let text = reason;
+  let text = reason.replace(PESOS, "money").replace(DAYS, "some time").replace(FUND_WORDS, "the fund");
   const names = [...new Set([catName, ...knownNames].map((n) => n.trim()).filter((n) => n && nameIsSafe(n)))].sort((a, b) => b.length - a.length);
   for (const n of names) {
     const escaped = n.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
