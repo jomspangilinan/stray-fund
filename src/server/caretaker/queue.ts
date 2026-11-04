@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { AssessmentSchema, ReceiptSchema, type Assessment, type ReceiptReading } from "../ai/schemas";
 import { db } from "../db/client";
-import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reviewRequests, sightings, users, wakeups } from "../db/schema";
+import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reports, reviewRequests, sightings, users, wakeups } from "../db/schema";
 import { COLONY } from "@/lib/config";
 import { hidePrivateInDemo, maskEmail, placeForStaff } from "../demoPrivacy";
 import { bioIsSafe, nameIsSafe, safeBio } from "../placeText";
@@ -88,7 +88,56 @@ export type ReceiptItem = {
   packagePrice: number;
 };
 
+export type ReportItem = {
+  id: string;
+  claim: string;
+  /** "photo" is the AI's reading of the photo; anything else is a neighbour. Only these two are ever open. */
+  source: string;
+  catId: string | null;
+  catName: string | null;
+  sightingId: string | null;
+  /** A neighbour's free text. In the demo a real row's note is replaced here, not in the page. */
+  note: string | null;
+  /** Null on a photo report, which has no photo to agree with itself. */
+  photoAgrees: boolean | null;
+  /** The treasurer's question for the caretaker. Model text: show as text only. */
+  checkQuestion: string | null;
+  sample: boolean;
+  date: string;
+  exact: ExactSpot;
+  area: string;
+  exactHidden: boolean;
+};
+
+/** Hurt and sick come before pregnant, and a kitten last. */
+const CLAIM_ORDER: Record<string, number> = { injured: 0, sick: 0, pregnant: 1, kitten: 2 };
+
+/**
+ * The desk's order: reports with the treasurer's question first, then hurt or sick, pregnant, kitten, then oldest.
+ * Reports from one photo sit together at the place of the best of them, the one with a note leading.
+ */
+export function sortReports<T extends { id: string; claim: string; checkQuestion: string | null; sightingId: string | null; note: string | null; createdAt: Date }>(rows: T[]): T[] {
+  const byKey = [...rows].sort(
+    (a, b) =>
+      Number(b.checkQuestion !== null) - Number(a.checkQuestion !== null) ||
+      (CLAIM_ORDER[a.claim] ?? 3) - (CLAIM_ORDER[b.claim] ?? 3) ||
+      a.createdAt.getTime() - b.createdAt.getTime() ||
+      a.id.localeCompare(b.id),
+  );
+  const groups = new Map<string, T[]>();
+  for (const r of byKey) {
+    const key = r.sightingId ?? r.id;
+    groups.set(key, [...(groups.get(key) ?? []), r]);
+  }
+  // Array.sort is stable, so within a group the order above is kept apart from the note coming first.
+  return [...groups.values()].flatMap((g) => [...g].sort((a, b) => Number(b.note !== null) - Number(a.note !== null)));
+}
+
+export const HIDDEN_NOTE = "Hidden in the demo";
+
 export type CaretakerQueue = {
+  /** Open reports, always the first thing on the desk. */
+  reports: ReportItem[];
   awaitingApproval: PayoutItem[];
   needsReview: PayoutItem[];
   longSent: PayoutItem[];
@@ -222,6 +271,34 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     };
   });
 
+  const openReports = await db
+    .select({ r: reports, catName: cats.name, catArea: cats.areaName, catLat: cats.exactLat, catLng: cats.exactLng, catApprox: cats.locationApproximate, sLat: sightings.exactLat, sLng: sightings.exactLng })
+    .from(reports)
+    .leftJoin(cats, eq(cats.id, reports.catId))
+    .leftJoin(sightings, eq(sightings.id, reports.sightingId))
+    .where(eq(reports.status, "open"));
+  const demo = hidePrivateInDemo();
+  const reportItems: ReportItem[] = sortReports(openReports.map((x) => ({ ...x, ...x.r, createdAt: x.r.createdAt }))).map((x) => {
+    const lat = x.sLat ?? x.catLat;
+    const lng = x.sLat !== null ? x.sLng : x.catLng;
+    return {
+      id: x.r.id,
+      claim: x.r.claim,
+      source: x.r.source,
+      catId: x.r.catId,
+      catName: x.catName,
+      sightingId: x.r.sightingId,
+      // A visitor's real note can hold a name or a phone number. Seeded samples are ours, so they show.
+      note: x.r.note !== null && demo && !x.r.sample ? HIDDEN_NOTE : x.r.note,
+      photoAgrees: x.r.source === "photo" ? null : x.r.photoAgrees,
+      checkQuestion: x.r.checkQuestion !== null && demo && !x.r.sample && !bioIsSafe(x.r.checkQuestion) ? null : x.r.checkQuestion,
+      sample: x.r.sample,
+      date: manilaDate(x.r.createdAt),
+      ...placeForStaff(exactOf(lat, lng, x.sLat === null ? x.catApprox ?? false : false)),
+      area: x.catArea ?? COLONY.area_name,
+    };
+  });
+
   const receiptItemsFor = async (verification: "needs_review" | "awaiting_ear_tip_confirmation"): Promise<ReceiptItem[]> => {
     const rows = await db
       .select({
@@ -313,6 +390,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     .orderBy(asc(nameSuggestions.createdAt), asc(nameSuggestions.id));
 
   return {
+    reports: reportItems,
     awaitingApproval,
     needsReview: [...needsReviewRows, ...lateSuccessRows, ...retryRows],
     longSent,

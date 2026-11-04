@@ -3,6 +3,7 @@ import { describeError } from "../errors";
 import { catAdoptable, catAdopted, catSetDetails, catRename, catSetEarTip, catUndoNeutered, nameApprove, nameDismiss, photoHold, photoPublish, sightingConfirmNew, sightingMerge, sightingReject, wakeupDismiss, wakeupRetry } from "./cats";
 import { evidenceAccept, evidenceConfirmEarTip, evidenceReject, reviewResolve } from "./evidence";
 import { payoutAllowRetry, payoutApprove, payoutNote, payoutReject, payoutResolve } from "./payouts";
+import { reportConfirm, reportDismiss } from "./reports";
 import { guardrailsUpdate, payeeAdd, payeeRemove, vetUpdate } from "./rules";
 import { Refusal, type Body, type Handler, type Tone } from "./shared";
 
@@ -37,6 +38,8 @@ const HANDLERS = {
   vet_update: vetUpdate,
   wakeup_retry: wakeupRetry,
   wakeup_dismiss: wakeupDismiss,
+  report_confirm: reportConfirm,
+  report_dismiss: reportDismiss,
 } satisfies Record<string, Handler>;
 
 export const ACTION_NAMES = Object.keys(HANDLERS);

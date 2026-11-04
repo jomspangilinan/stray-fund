@@ -1,10 +1,11 @@
 import type { CaretakerQueue } from "@/server/caretaker/queue";
 
 /**
- * The sections of "To check", in the order they can hold up money or care. The desk, its jump row and the
+ * The sections of "To check", in the order they can hold up money or care. Reports about a cat come first, above payouts. The desk, its jump row and the
  * waiting line on the yard all read this one list, so the numbers cannot disagree.
  */
 export const DESK_SECTIONS = [
+  { id: "reports", title: "Reports to check", chip: "Reports", count: (q: CaretakerQueue) => q.reports.length },
   { id: "approvals", title: "Payouts to approve", chip: "Approve", count: (q: CaretakerQueue) => q.awaitingApproval.length },
   { id: "payout-review", title: "Payouts to rule on", chip: "Rule on", count: (q: CaretakerQueue) => q.needsReview.length },
   { id: "long-sent", title: "Sent, not confirmed", chip: "Not confirmed", count: (q: CaretakerQueue) => q.longSent.length },

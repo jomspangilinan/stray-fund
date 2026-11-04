@@ -7,7 +7,8 @@ import { ReceiptSchema, type ReceiptReading } from "./ai/schemas";
 import { RateLimited } from "./spot";
 import { COMPLETED_BOOKING, transitionCat } from "./catTransitions";
 import { db, withColonyLock, type Tx } from "./db/client";
-import { allowedPayees, bookings, cats, guardrails, payouts, receipts, treatments, users } from "./db/schema";
+import { allowedPayees, bookings, cats, guardrails, payouts, receipts, reports, treatments, users } from "./db/schema";
+import { HOLD_CLAIMS } from "./reports";
 import { CONFIRMED_BOOKING } from "./guardrails";
 import { CAPTURED, returnSurplus, toInt, unspentForCat } from "./ledger";
 import { storeOriginal } from "./photos";
@@ -761,7 +762,9 @@ export type VetBookingRow = {
   /** Where the booking stands for the vet. "open" means the vet has evidence to send. */
   evidence: EvidenceState["state"];
 };
-export type VetDashboard = { fundedCats: VetCat[]; bookings: VetBookingRow[] };
+/** A cat a caretaker confirmed is hurt, pregnant or sick, waiting for a vet to see it and clear it. */
+export type VetCheckCat = { id: string; name: string; area: string; exact: ExactPlace; exactHidden: boolean; claims: string[] };
+export type VetDashboard = { checkCats: VetCheckCat[]; fundedCats: VetCat[]; bookings: VetBookingRow[] };
 
 function exactOf(row: { exactLat: number | null; exactLng: number | null; locationApproximate: boolean }): { exact: ExactPlace; exactHidden: boolean } {
   return placeForStaff(
@@ -834,7 +837,28 @@ export async function listVetDashboard(vetId: string): Promise<VetDashboard> {
     .innerJoin(cats, eq(cats.id, bookings.catId))
     .where(eq(bookings.vetId, vetId))
     .orderBy(desc(bookings.createdAt));
+  const confirmed = await db
+    .select({
+      id: cats.id,
+      name: cats.name,
+      areaName: cats.areaName,
+      exactLat: cats.exactLat,
+      exactLng: cats.exactLng,
+      locationApproximate: cats.locationApproximate,
+      claim: reports.claim,
+    })
+    .from(reports)
+    .innerJoin(cats, eq(cats.id, reports.catId))
+    .where(and(eq(reports.status, "confirmed"), inArray(reports.claim, [...HOLD_CLAIMS])))
+    .orderBy(asc(reports.createdAt), asc(reports.id));
+  const checkCats: VetCheckCat[] = [];
+  for (const c of confirmed) {
+    const seen = checkCats.find((x) => x.id === c.id);
+    if (seen) seen.claims.push(c.claim);
+    else checkCats.push({ id: c.id, name: c.name, area: c.areaName, ...exactOf(c), claims: [c.claim] });
+  }
   return {
+    checkCats,
     fundedCats: funded.map((c) => ({ id: c.id, name: c.name, sex: effectiveSex(c), area: c.areaName, ...exactOf(c) })),
     bookings: await Promise.all(
       mine.map(async (b) => {

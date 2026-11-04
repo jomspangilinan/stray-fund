@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { BookCatForm } from "@/components/BookCatForm";
+import { ClearCatButton } from "@/components/ClearCatButton";
 import { ExactLocation } from "@/components/ExactLocation";
 import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
@@ -12,6 +13,7 @@ import { listVetDashboard, type VetBookingRow } from "@/server/vetFlow";
 
 export const metadata: Metadata = { title: "Vet | Stray Fund" };
 
+const CLAIM_WORD: Record<string, string> = { injured: "hurt", pregnant: "pregnant", sick: "sick" };
 const BOOKING_STATUS: Record<string, string> = { confirmed: "Confirmed", completed: "Completed" };
 /** What happens next for a booking, in the vet's words. */
 const NEXT_STEP: Record<VetBookingRow["evidence"], string> = {
@@ -56,13 +58,34 @@ async function Dashboard() {
     return <p className="note note-bad mt-8 font-bold">This page is for partner vets.</p>;
   }
 
-  const { fundedCats, bookings } = await listVetDashboard(session.userId);
+  const { checkCats, fundedCats, bookings } = await listVetDashboard(session.userId);
   const today = manilaDate(new Date());
   const send = bookings.filter((b) => b.evidence === "open");
   const rest = bookings.filter((b) => b.evidence !== "open");
   return (
     <>
-      <section className="mt-8" aria-labelledby="send">
+      {checkCats.length > 0 && (
+        <section className="mt-8" aria-labelledby="check">
+          <h2 id="check" className="h2">
+            Cats to check <span className="soft">({checkCats.length})</span>
+          </h2>
+          <p className="small soft mt-1">Only clear a cat you&apos;ve seen.</p>
+          <ul className="mt-4 grid gap-3">
+            {checkCats.map((c) => (
+              <li key={c.id} className="card">
+                <h3 className="text-base font-extrabold">{c.name}</h3>
+                <p className="small">A caretaker says: {c.claims.map((k) => CLAIM_WORD[k] ?? k).join(", ")}.</p>
+                <div className="mt-2">
+                  <ExactLocation exact={c.exact} area={c.area} exactHidden={c.exactHidden} />
+                </div>
+                <ClearCatButton catId={c.id} catName={c.name} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className={checkCats.length > 0 ? "mt-10" : "mt-8"} aria-labelledby="send">
         <h2 id="send" className="h2">
           Waiting for you {send.length > 0 && <span className="soft">({send.length})</span>}
         </h2>

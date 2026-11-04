@@ -10,6 +10,7 @@ import { DeskJump } from "@/components/desk/DeskJump";
 import { DeskNav } from "@/components/desk/DeskNav";
 import { EarTipPhotos, Receipts } from "@/components/desk/EvidenceSections";
 import { Approvals, LongSent, NeedsReview } from "@/components/desk/PayoutSections";
+import { Reports } from "@/components/desk/ReportSection";
 import { Sightings } from "@/components/desk/SightingSection";
 import { Reviews, Wakeups } from "@/components/desk/TreasurerSections";
 import { isDemoMode } from "@/lib/config";
@@ -35,6 +36,7 @@ async function ToCheck() {
   return (
     <>
       <DeskJump queue={q} />
+      <Reports items={q.reports} />
       <Approvals items={q.awaitingApproval} />
       <NeedsReview items={q.needsReview} />
       <LongSent items={q.longSent} />
