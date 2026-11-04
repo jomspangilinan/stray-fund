@@ -5,7 +5,7 @@ import { Db, fakePayPalCalls, PAYPAL_HEADERS, payoutEvent, pickRole, receiptImag
 
 /*
  * The whole story, once, against the real app: a neighbour spots a cat, two neighbours agree it is not yet
- * neutered, donors give, the treasurer funds it, a vet books and is paid a deposit a caretaker approves,
+ * neutered, donors give, the treasurer funds it, a vet books and is paid a deposit a caretaker approves (every deposit waits for one),
  * sends a receipt and a photo, a caretaker confirms the ear-tip, the balance is approved and paid, and every
  * peso adds up. Only PayPal and the AI are fake (E2E_FAKES). The database, the money gate, the guardrails,
  * the ledger, the worker and every page are the real ones. All money below is in centavos.
@@ -87,18 +87,6 @@ async function paypalConfirms(page: Page, payoutId: string, fee: string, eventId
 
 test("a stray cat is spotted, funded, neutered and paid for, and every peso adds up", async ({ page, context }) => {
   await context.route("**/sdk/js**", (route) => route.fulfill({ contentType: "application/javascript", body: fakeSdk }));
-
-  // ---------------------------------------------------------------- the rules
-  await test.step("the caretaker sets the rule that sends money to a person: anything over PHP 400 needs approval", async () => {
-    await page.goto("/");
-    await pickRole(page, "Caretaker");
-    await page.goto("/caretaker/rules");
-    await page.getByLabel("Approval threshold").fill("400");
-    await page.getByRole("button", { name: "Save rules" }).click();
-    await expect(page.getByText(/^Saved\. The new rules apply/)).toBeVisible();
-    const g = await db.one<{ package_price: number; deposit_pct: number; approval_threshold: number }>("select * from guardrails");
-    expect(g).toMatchObject({ package_price: PACKAGE, deposit_pct: 30, approval_threshold: 40_000 });
-  });
 
   // ---------------------------------------------------------------- spot
   let catId = "";
@@ -202,6 +190,10 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     await expect.poll(async () => (await db.rows("select 1 from payouts where booking_id = $1 and kind = 'deposit'", [bookingId])).length, { timeout: 60_000 }).toBe(1);
     const deposit = await db.one<{ amount: number; status: string; fee: number | null }>("select amount, status, fee from payouts where booking_id = $1 and kind = 'deposit'", [bookingId]);
     expect(deposit).toMatchObject({ amount: DEPOSIT, status: "awaiting_approval", fee: null });
+    // The rules are still the defaults: the deposit waits for a person because every deposit does, not because of the threshold.
+    const rules = await db.one<{ approval_threshold: number }>("select approval_threshold from guardrails");
+    expect(rules.approval_threshold).toBe(200_000);
+    expect(DEPOSIT).toBeLessThan(rules.approval_threshold);
     // Nothing has left yet: PayPal has not been called for a payout.
     expect(fakePayPalCalls().filter((c) => c.call === "payout.create")).toHaveLength(0);
     await page.reload();
@@ -240,6 +232,16 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     await expect.poll(async () => (await catRow(catId)).status, { timeout: 60_000 }).toBe("in_care");
     expect(await db.one("select status, fee from payouts where id = $1", [depositId])).toMatchObject({ status: "succeeded", fee: DEPOSIT_FEE });
     await wakeupsSettled();
+  });
+
+  await test.step("the caretaker sets the approval threshold, which applies to balances only: anything over PHP 400 needs approval", async () => {
+    await pickRole(page, "Caretaker");
+    await page.goto("/caretaker/rules");
+    await page.getByLabel("Approval threshold").fill("400");
+    await page.getByRole("button", { name: "Save rules" }).click();
+    await expect(page.getByText(/^Saved\. The new rules apply/)).toBeVisible();
+    const g = await db.one<{ package_price: number; deposit_pct: number; approval_threshold: number }>("select * from guardrails");
+    expect(g).toMatchObject({ package_price: PACKAGE, deposit_pct: 30, approval_threshold: 40_000 });
   });
 
   await test.step("the vet sends a receipt and a live photo; the checks pass and a caretaker is asked to look at the ear", async () => {

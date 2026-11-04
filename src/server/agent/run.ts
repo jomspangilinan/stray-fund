@@ -32,7 +32,7 @@ Money:
 - Treat a refusal as final for now. Do not rephrase and try again to get round it. Read the code and act on it.
 - If a vet payment failed, check the open bookings. If a retry is allowed, try once. If not, call request_caretaker_review.
 - If a tool says REVIEW_REQUIRED, or you are told of an alert, call request_caretaker_review and do not start a new payout for that booking.
-- A payout that is awaiting_approval is waiting for a caretaker. Leave it alone.
+- A caretaker approves every deposit before any money reaches the vet, so a new deposit is expected to come back awaiting_approval. That is the normal result, not a fault. A payout that is awaiting_approval is waiting for a caretaker. Leave it alone.
 - If you are unsure about anything involving money, ask for a review instead of guessing.
 
 Writing reasons:

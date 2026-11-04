@@ -2,7 +2,7 @@
 
 DRAFT for the owner to check. Working name; the name lives in one constant, `APP_NAME` in `src/lib/config.ts`.
 
-A shared fund for one neighbourhood's stray cats. Neighbours spot cats and donate. An AI treasurer picks which cat gets neutered next. Rules check every payment before it goes out, and a person signs off before the last of the money moves. Every peso shows on a public ledger.
+A shared fund for one neighbourhood's stray cats. Neighbours spot cats and donate. An AI treasurer picks which cat gets neutered next. Rules check every payment before it goes out, and a person signs off before any money reaches the vet. Every peso shows on a public ledger.
 
 Built for the PayPal AI Hackathon. It runs on PayPal sandbox money only.
 
@@ -16,7 +16,7 @@ Strays multiply when they are fed but not neutered. Neighbours want to help, but
 2. **Ear-tip.** The AI does not judge ear-tips; in tests it got them wrong. Neighbours answer Yes, No or Not sure. Two different people saying No queue the cat. A caretaker settles any disagreement.
 3. **Donate.** Neighbours give through PayPal Checkout into one shared fund. Fees are counted, so the fund only holds what arrived.
 4. **Decide.** The AI treasurer looks at the waiting cats and the fund, picks one and writes why, in plain words.
-5. **Pay the deposit.** Rules check the payee, the caps and the fund. If they pass, the partner vet gets a deposit through PayPal Payouts.
+5. **Pay the deposit.** Rules check the payee, the caps and the fund. If they pass, a caretaker approves the deposit, and then the partner vet gets it through PayPal Payouts.
 6. **Prove it.** The vet sends a receipt and a photo of the cat's ear. The AI reads the receipt; code compares it with the booking. A caretaker looks at the photo and taps "I saw the ear-tip".
 7. **Pay the balance.** Only after that, the rest is paid. The cat's card is updated.
 8. **Show it.** The Ledger lists every donation and payout with its PayPal reference. Proof shows the totals adding up. Treasurer shows what the AI decided and why.
@@ -35,7 +35,7 @@ The hackathon's theme is "Build What's Next with PayPal and AI", and a project m
 |---|---|---|
 | Donate | Nothing | A neighbour approves in PayPal Checkout. The server captures the order, and a webhook confirms it |
 | Choose a cat | Looks at the waiting cats and the fund, calls `fund_next_cat`, writes why | Nothing. The fund sets the money aside in the app's own ledger |
-| Pay the deposit | After a vet books, calls `pay_vet_deposit` | If the money gate passes, Payouts sends the vet the deposit. Code sets the amount and the payee |
+| Pay the deposit | After a vet books, calls `pay_vet_deposit` | If the money gate passes, the deposit waits for a caretaker, and then Payouts sends it to the vet. Code sets the amount and the payee |
 | Check the proof | Reads the receipt. Code compares it with the booking | Nothing |
 | Pay the balance | Calls `release_vet_balance` | After the checks and a caretaker's yes, Payouts sends the balance. A webhook reports the result |
 
@@ -47,11 +47,9 @@ The AI proposes. Rules check. A person approves.
 
 - **The AI proposes.** It calls a short list of tools by cat id and words. It never chooses an amount or a payee; code supplies both.
 - **Rules check.** One function, the money gate, runs every payout. It takes a lock, checks the guardrails from the database, writes the action down, and only then calls PayPal. Guardrails: allow-listed payees, a cap per cat, a cap per day, a verified receipt, a confirmed ear-tip, no duplicate payout.
-- **A person approves.** A caretaker confirms the ear-tip photo before the balance. Any payout over the approval threshold waits for a caretaker. A caretaker can also reject or hold.
+- **A person approves.** A caretaker confirms the ear-tip photo before the balance. Every deposit waits for a caretaker, whatever its amount, and a balance over the approval threshold waits too. A caretaker can also reject or hold.
 - **Untrusted input.** Receipts, photos and cat text are data. Text in an image can't authorise anything.
 - A daily cap on AI calls limits cost.
-
-At the placeholder prices the deposit is below the approval threshold, so the deposit does not wait for a person. `[CONFIRM: owner decision I6, whether a caretaker approves every deposit]`
 
 ## Architecture in brief
 

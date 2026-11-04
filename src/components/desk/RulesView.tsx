@@ -19,7 +19,7 @@ export function Rules({ rules }: { rules: RulesView }) {
           <Field label="Deposit percent (1 to 100)" name="depositPct" type="number" defaultValue={l.depositPct} />
           <Field label="Cap per cat" name="maxPerCat" type="number" defaultValue={pesos(l.maxPerCat)} />
           <Field label="Cap per day" name="maxPerDay" type="number" defaultValue={pesos(l.maxPerDay)} />
-          <Field label="Approval threshold" name="approvalThreshold" type="number" defaultValue={pesos(l.approvalThreshold)} hint="Payouts above this wait for a caretaker." />
+          <Field label="Approval threshold" name="approvalThreshold" type="number" defaultValue={pesos(l.approvalThreshold)} hint="Balances above this wait for a caretaker. Every deposit waits, whatever the amount." />
           <Field label="Cat match confidence minimum (0 to 1)" name="matchConfidenceMin" defaultValue={l.matchConfidenceMin} />
         </ActionForm>
       </div>
