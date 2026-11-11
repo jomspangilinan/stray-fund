@@ -18,6 +18,8 @@ import {
 } from "../src/server/ledger";
 import { getLedger } from "../src/server/impact";
 import { truncateAll } from "./helpers/db";
+import { ledgerCount } from "../src/lib/ledgerCount";
+import { niceDate } from "../src/lib/niceDate";
 
 let seq = 0;
 let clock = Date.parse("2026-01-01T00:00:00Z");
@@ -297,6 +299,12 @@ describe("ledger names", () => {
     const [booking] = await db.insert(bookings).values({ catId: cat.id, vetId: vet.id, packagePrice: 150000, status: "booked" }).returning();
     const [action] = await db.insert(agentActions).values({ action: "payout", reason: "test", status: "done" }).returning();
     await db.insert(payouts).values({ catId: cat.id, bookingId: booking.id, payeeUserId: vet.id, amount: 1000, fee: 0, kind: "deposit", actionId: action.id, status: "succeeded" });
+    // The line over the grid: the filtered count only when a filter hides rows, and "row" for one.
+    expect(ledgerCount(8, 8)).toBe("8 rows · tap one for details");
+    expect(niceDate("2026-10-24")).toBe("24 Oct 2026");
+    expect(niceDate("a date to be set")).toBe("a date to be set");
+    expect(ledgerCount(3, 8)).toBe("3 of 8 rows · tap one for details");
+    expect(ledgerCount(1, 1)).toBe("1 row · tap one for details");
     const who = (await getLedger()).map((r) => r.who);
     expect(JSON.stringify(who)).not.toContain("demo_");
     expect(who).toContain("A neighbour");

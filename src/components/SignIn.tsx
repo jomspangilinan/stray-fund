@@ -4,6 +4,15 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
+/** Same shape as USERNAME_PATTERN in src/server/session.ts, which stays the real check. Copied because this is a client file. */
+const NAME_SHAPE = /^[A-Za-z0-9_]{3,20}$/;
+
+/** Help as the name is typed: the format rule once it breaks, else the one thing to know before Continue. Nothing for an empty field. */
+export function nameHint(name: string): string | null {
+  if (name === "") return null;
+  return NAME_SHAPE.test(name) ? "No password: use the same name to come back." : "3 to 20 letters, digits or _";
+}
+
 /**
  * Header control when compact, a full form when inline. Sign-in needs only a username.
  * A signed-in caretaker or vet also finds their console link in the account menu.
@@ -121,6 +130,7 @@ export function SignIn({
   }
   if (username) return null;
 
+  const hint = nameHint(name);
   const form = (
     <form onSubmit={signIn} className="grid gap-2" noValidate>
       <label htmlFor={inline ? "username-inline" : "username"} className="font-bold">
@@ -136,15 +146,18 @@ export function SignIn({
           autoCapitalize="none"
           spellCheck={false}
           maxLength={20}
-          aria-describedby={error ? "signin-error" : "signin-help"}
+          placeholder="ate_lorna"
+          aria-describedby={error ? "signin-error" : hint ? "signin-help" : undefined}
         />
         <button className="btn shrink-0" disabled={busy || name.length < 3}>
           Continue
         </button>
       </div>
-      <p id="signin-help" className="small soft">
-        3 to 20 letters, digits or underscores. No password. Use the same name to come back.
-      </p>
+      {hint && (
+        <p id="signin-help" className="small soft">
+          {hint}
+        </p>
+      )}
       {error && (
         <p id="signin-error" role="alert" className="font-bold text-danger">
           {error}

@@ -4,6 +4,7 @@ import { DeskItem } from "./DeskItem";
 import { Section, Where } from "./DeskParts";
 import { CatPicker, Hidden } from "./Fields";
 import { STATUS_LABEL } from "@/server/public";
+import { niceDate } from "@/lib/niceDate";
 
 const SIGHTING_REASON: Record<string, string> = {
   possible_match: "The AI thinks this may be a cat we know, but was not sure enough.",
@@ -29,8 +30,8 @@ export function Sightings({ items, cats }: { items: SightingItem[]; cats: Careta
   return (
     <Section id="sightings" count={items.length}>
       {items.map((s) => (
-        <DeskItem key={s.id} label={`Photo from ${s.date}`}>
-          <h3 className="text-base font-extrabold">Photo from {s.date}</h3>
+        <DeskItem key={s.id} label={`Photo from ${niceDate(s.date)}`}>
+          <h3 className="text-base font-extrabold">Photo from {niceDate(s.date)}</h3>
           <p className="small">{(s.reason && SIGHTING_REASON[s.reason]) ?? "A caretaker needs to decide."}</p>
           {s.catName && <p className="small">Linked to: {s.catName}</p>}
           <Where exact={s.exact} area={s.area} exactHidden={s.exactHidden} />

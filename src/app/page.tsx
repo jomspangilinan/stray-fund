@@ -9,6 +9,7 @@ import { CatPhoto } from "@/components/CatPhoto";
 import { Yard, YardSkeleton } from "@/components/Yard";
 import { getHomeData, getMissions, getYard } from "@/server/public";
 import { getSession } from "@/server/session";
+import { niceDate } from "@/lib/niceDate";
 
 async function Home() {
   await connection();
@@ -40,7 +41,7 @@ async function Home() {
       {mission && (
         <section aria-label="A mission" className="yard-row !pl-3">
           <Link href={`/cats/${mission.catId}`} className="relative h-14 w-14 flex-none overflow-hidden rounded-in" aria-hidden="true" tabIndex={-1}>
-            <CatPhoto url={mission.photoUrl} name={mission.title} sizes="56px" />
+            <CatPhoto url={mission.photoUrl} name={mission.catName} sizes="56px" />
           </Link>
           <div className="min-w-0 flex-1">
             <p className="font-bold leading-tight">{mission.title}</p>
@@ -75,7 +76,7 @@ async function Home() {
             </p>
             <p className="small soft mt-2">
               {latestAction.amount !== null ? `${formatPesoShort(latestAction.amount)}, ` : ""}
-              {latestAction.status}, {latestAction.date}
+              {latestAction.status}, {niceDate(latestAction.date)}
               {" "}
               <Link href={`/agent#a-${latestAction.id}`} className="font-bold text-main underline underline-offset-4">
                 Why

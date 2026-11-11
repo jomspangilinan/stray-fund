@@ -24,6 +24,7 @@ export type MissionKind = "find" | "ear" | "home";
 export type Mission = {
   kind: MissionKind;
   catId: string;
+  catName: string;
   title: string;
   detail: string;
   action: "spot" | "share" | "card";
@@ -59,7 +60,7 @@ export function pickMissions(cats: MissionCat[], now: Date): Mission[] {
   for (const c of cats) {
     const days = Math.max(0, Math.floor((now.getTime() - c.lastSeenAt.getTime()) / DAY_MS));
     const waiting = WAITING.includes(c.status);
-    const base = { catId: c.id, photoUrl: c.photoUrl };
+    const base = { catId: c.id, catName: c.name, photoUrl: c.photoUrl };
     if (waiting && days >= UNSEEN_DAYS) {
       const u = urgency(c.flags);
       scored.push({

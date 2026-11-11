@@ -4,6 +4,7 @@ import type { ReceiptItem } from "@/server/caretaker/queue";
 import { DeskItem } from "./DeskItem";
 import { Section } from "./DeskParts";
 import { Field, Hidden } from "./Fields";
+import { niceDate } from "@/lib/niceDate";
 
 function Reading({ r }: { r: ReceiptItem }) {
   const p = r.parsed;
@@ -13,7 +14,7 @@ function Reading({ r }: { r: ReceiptItem }) {
       {p ? (
         <>
           <p className="break-words">Clinic: {p.clinic ?? "unreadable"}</p>
-          <p>Date: {p.date ?? "unreadable"}</p>
+          <p>Date: {p.date ? niceDate(p.date) : "unreadable"}</p>
           <p>Total: {p.total_centavos === null ? "unreadable" : formatPeso(p.total_centavos)}</p>
           <p className="break-words">Currency: {p.currency ?? "unreadable"}. Receipt number: {p.receipt_number ?? "unreadable"}.</p>
           <p className="break-words">Cat name: {p.cat_name ?? "none"}</p>
@@ -36,7 +37,7 @@ export function Receipts({ items }: { items: ReceiptItem[] }) {
           <DeskItem key={r.id} label={r.catName}>
             <h3 className="text-base font-extrabold">{r.catName}</h3>
             <p className="small">
-              Vet {r.vetName}, clinic on account: {r.clinicName ?? "none"}. Sent {r.date}.
+              Vet {r.vetName}, clinic on account: {r.clinicName ?? "none"}. Sent {niceDate(r.date)}.
             </p>
             <p className="small">
               Package {formatPeso(r.packagePrice)}, deposit paid {formatPeso(r.depositPaid)}.
@@ -88,7 +89,7 @@ export function EarTipPhotos({ items }: { items: ReceiptItem[] }) {
         <DeskItem key={r.id} label={r.catName}>
           <h3 className="text-base font-extrabold">{r.catName}</h3>
           <p className="small">
-            Vet {r.vetName}. Sent {r.date}. The receipt passed every check. Package {formatPeso(r.packagePrice)}, deposit paid {formatPeso(r.depositPaid)}.
+            Vet {r.vetName}. Sent {niceDate(r.date)}. The receipt passed every check. Package {formatPeso(r.packagePrice)}, deposit paid {formatPeso(r.depositPaid)}.
           </p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             {/* eslint-disable-next-line @next/next/no-img-element -- private evidence behind a signed-in route */}

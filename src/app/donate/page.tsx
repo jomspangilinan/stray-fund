@@ -20,9 +20,8 @@ export default function DonatePage() {
   return (
     <main>
       <PageHead title="Donate">
-        All gifts go into one shared fund that pays vets to spay or neuter strays.{" "}
-        <Link href="/ledger" className="link !inline !min-h-0">
-          See the Fund
+        <Link href="/impact" className="link !inline !min-h-0">
+          Where it goes
         </Link>
       </PageHead>
       <Suspense fallback={<BlockSkeleton label="Loading the donation form" />}>

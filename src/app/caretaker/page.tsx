@@ -13,7 +13,6 @@ import { Approvals, LongSent, NeedsReview } from "@/components/desk/PayoutSectio
 import { Reports } from "@/components/desk/ReportSection";
 import { Sightings } from "@/components/desk/SightingSection";
 import { Reviews, Wakeups } from "@/components/desk/TreasurerSections";
-import { isDemoMode } from "@/lib/config";
 import { deskTotal } from "@/lib/deskSections";
 import { getCaretakerQueue } from "@/server/caretaker/queue";
 
@@ -53,22 +52,10 @@ async function ToCheck() {
   );
 }
 
-/** Read at request time, so the line is true whichever mode the server runs in. */
-async function DeskNote() {
-  await connection();
-  return isDemoMode()
-    ? "Caretaker desk. Demo mode hides exact places and private photos."
-    : "Caretaker desk. Exact places and private photos show here and nowhere else.";
-}
-
 export default function CaretakerPage() {
   return (
     <main>
-      <PageHead title="To check">
-        <Suspense fallback="Caretaker desk.">
-          <DeskNote />
-        </Suspense>
-      </PageHead>
+      <PageHead title="To check" />
       <DeskNav current="/caretaker" />
       <Suspense fallback={<ListSkeleton rows={3} label="Loading" />}>
         <DeskGate>

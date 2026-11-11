@@ -3,6 +3,7 @@ import type { CaretakerQueue } from "@/server/caretaker/queue";
 import { DeskItem } from "./DeskItem";
 import { Section } from "./DeskParts";
 import { Field, Hidden } from "./Fields";
+import { niceDate } from "@/lib/niceDate";
 
 export function Reviews({ items }: { items: CaretakerQueue["reviews"] }) {
   return (
@@ -11,7 +12,7 @@ export function Reviews({ items }: { items: CaretakerQueue["reviews"] }) {
         <DeskItem key={r.id} label={r.subject}>
           <h3 className="text-base font-extrabold break-words">{r.subject}</h3>
           <p className="small break-words">{r.reason}</p>
-          <p className="small soft">Asked {r.date}</p>
+          <p className="small soft">Asked {niceDate(r.date)}</p>
           <ActionForm action="review_resolve" submitLabel="Close this question">
             <Hidden name="reviewId" value={r.id} />
             <Field label="Note: what you decided or did" name="resolution" missing="Say what you decided or did." />
@@ -29,7 +30,7 @@ export function Wakeups({ items }: { items: CaretakerQueue["failedWakeups"] }) {
         <DeskItem key={w.id} label={w.kind}>
           <h3 className="text-base font-extrabold">{w.kind}</h3>
           <p className="small">
-            Failed after {w.attempts} tries, queued {w.date}.
+            Failed after {w.attempts} tries, queued {niceDate(w.date)}.
           </p>
           <ActionForm action="wakeup_retry" submitLabel="Try again">
             <Hidden name="wakeupId" value={w.id} />

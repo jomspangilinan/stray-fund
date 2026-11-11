@@ -39,6 +39,8 @@ export function ledgerTotals(rows: readonly PublicLedgerRow[]): LedgerTotals {
 
 export type Conservation = {
   text: string;
+  /** Only the refund and below-zero clauses, for when Proof draws the bar instead of the sum. "" when neither applies. */
+  note: string;
   balanced: boolean;
   parts: { donated: number; paypalFees: number; paidToVets: number; payoutFees: number; held: number; pool: number };
 };
@@ -61,7 +63,11 @@ export function conservation(p: PoolStatus): Conservation {
     ` + set aside for cats ${formatPeso(parts.held)} + still free ${formatPeso(parts.pool)}` +
     (p.reversedGross > 0 ? `. Donated is after ${formatPeso(p.reversedGross)} that PayPal took back` : "") +
     (parts.pool < 0 ? `. The fund is below zero because some of that money was already spent, so no new cat is funded until donations cover it` : "");
-  return { text, balanced, parts };
+  const note = [
+    p.reversedGross > 0 ? `Donated is after ${formatPeso(p.reversedGross)} that PayPal took back.` : "",
+    parts.pool < 0 ? "The fund is below zero because some of that money was already spent, so no new cat is funded until donations cover it." : "",
+  ].filter(Boolean).join(" ");
+  return { text, note, balanced, parts };
 }
 
 export type BarPart = { key: "vets" | "aside" | "free" | "fees"; label: string; amount: number };

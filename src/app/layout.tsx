@@ -26,7 +26,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className={`${gabarito.variable} h-full antialiased`}>
       <body className="min-h-full">
         <Suspense
-          fallback={<div aria-hidden="true" className="fixed inset-x-0 bottom-0 z-30 h-20 bg-surface md:inset-y-0 md:right-auto md:h-auto md:w-52" />}
+          fallback={<div aria-hidden="true" className="fixed inset-x-0 bottom-0 z-30 h-20 border-t border-pale bg-surface md:border-t-0 md:inset-y-0 md:right-auto md:h-auto md:w-52" />}
         >
           <TabBar />
         </Suspense>

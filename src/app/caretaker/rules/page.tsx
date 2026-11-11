@@ -18,7 +18,7 @@ async function RulesBody() {
 export default function CaretakerRulesPage() {
   return (
     <main>
-      <PageHead title="Rules">What the treasurer may spend, and which vets it may pay.</PageHead>
+      <PageHead title="Rules" />
       <DeskNav current="/caretaker/rules" />
       <Suspense fallback={<ListSkeleton rows={3} label="Loading" />}>
         <DeskGate>

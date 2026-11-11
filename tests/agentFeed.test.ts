@@ -8,7 +8,7 @@ import { GET } from "../src/app/api/agent/feed/route";
 import { AgentFeed } from "../src/components/AgentFeed";
 import { truncateAll } from "./helpers/db";
 import { addPayout, makeBooking, makeCaretaker, makeVet } from "./helpers/payoutFixtures";
-import { feedHeadline, feedStory } from "../src/lib/feedCopy";
+import { TREASURER_INTRO, feedHeadline, feedStory } from "../src/lib/feedCopy";
 import { eq } from "drizzle-orm";
 
 const SENTINELS = ["inputs-sentinel", "gateway-sentinel", "HTTP 400", "passedOver", "topPick", "approved", "bookingId"];
@@ -135,6 +135,14 @@ describe("the public agent feed", () => {
     expect(pay("Refused by the rules", false)?.person).toBe("The spending rules stopped it.");
     expect(pay("Rejected", false)?.person).toBe("It was stopped and nothing was paid.");
     expect(pay("Rejected", false)?.person).not.toMatch(/rules|signed/);
+    // A funding card says "AI pick" in a chip once, instead of repeating a sentence on every card.
+    expect(feedStory({ action: "Funded a cat", status: "Done", signedOffByPerson: false })).toBeNull();
+    const funded = { id: "f1", action: "Funded a cat", reason: "r", amount: 150_000, status: "Done", refused: false, signedOffByPerson: false, paypalRef: null, date: "Nov 11", cat: "Mingming" };
+    const card = renderToStaticMarkup(createElement(AgentFeed, { initial: [funded] }));
+    expect(card).toContain("AI pick");
+    expect(card).not.toContain("The AI treasurer chose");
+    // The page header must not claim a person checks every pick: cards on the same page can say no one signed off.
+    expect(TREASURER_INTRO).toBe("The AI picks. Rules check it; a caretaker checks anything unclear.");
   });
   it("a payment being checked says so, and never claims it was sent or needed no sign-off", () => {
     const checking = { action: "Vet first payment", status: "Being checked", signedOffByPerson: false };

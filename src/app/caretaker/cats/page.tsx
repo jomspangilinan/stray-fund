@@ -19,7 +19,7 @@ async function Cats() {
 export default function CaretakerCatsPage() {
   return (
     <main>
-      <PageHead title="Cats">Sex, flags and the last steps to a home.</PageHead>
+      <PageHead title="Cats" />
       <DeskNav current="/caretaker/cats" />
       <Suspense fallback={<ListSkeleton rows={3} label="Loading" />}>
         <DeskGate>

@@ -16,7 +16,7 @@ export default function FeederPage() {
   return (
     <main>
       <PageHead title="Feeder watch">
-        Prop this phone by the feeder. When something moves, it takes a photo and sends it in.
+        Prop this phone by the feeder. It snaps whatever moves.
       </PageHead>
       <Suspense fallback={<BlockSkeleton label="Loading the camera" />}>
         <Watch />

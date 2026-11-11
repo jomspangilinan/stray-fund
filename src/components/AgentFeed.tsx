@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { feedHeadline, feedStory } from "@/lib/feedCopy";
 import { formatPeso } from "@/lib/money";
 import type { PublicAgentAction } from "@/server/public";
+import { niceDate } from "@/lib/niceDate";
 
 const POLL_MS = 5_000;
 
@@ -64,8 +65,9 @@ export function AgentFeed({ initial }: { initial: PublicAgentAction[] }) {
                 </ol>
               )}
               <p className="small soft mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+                {a.action === "Funded a cat" && <span className="tag">AI pick</span>}
                 <span className={`tag ${a.refused ? "tag-bad" : ""}`}>{a.status}</span>
-                <span>{a.date}</span>
+                <span>{niceDate(a.date)}</span>
                 {a.paypalRef && (
                   <>
                     <span className="break-all">PayPal {a.paypalRef}</span>

@@ -430,7 +430,12 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
 
     await page.goto("/impact");
     await expect(page.getByText("This adds up exactly, across every donation and payout.")).toBeVisible();
-    await expect(page.getByText(`Donated ${peso(grossIn)} = PayPal fees ${peso(fees)} + paid to vets ${peso(vetPaid)} + payout fees ${peso(payoutFees)} + set aside for cats ${peso(held)} + still free ${peso(left)}`)).toBeVisible();
+    // The bar's legend carries the sum; the headline carries the total donated.
+    await expect(page.getByText(`${peso(grossIn)} donated`, { exact: true })).toBeVisible();
+    const legend = page.getByRole("region", { name: "Where every peso went" }).getByRole("listitem");
+    for (const [label, amount] of [["Paid to vets", vetPaid], ["Set aside for cats", held], ["Still free", left], ["Fees", fees + payoutFees]] as const) {
+      await expect(legend.filter({ hasText: label })).toContainText(peso(amount));
+    }
     await expect(page.getByRole("term").filter({ hasText: "Cats neutered" }).locator("xpath=following-sibling::dd[1]")).toHaveText("1");
     await page.goto("/ledger");
     await expect(page.getByRole("heading", { name: "Ledger" })).toBeVisible();
@@ -518,7 +523,7 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
     ]);
     await page.goto("/impact");
     await expect(page.getByText("This adds up exactly, across every donation and payout.")).toBeVisible();
-    await expect(page.getByText(`Donated ${peso(grossIn)} = PayPal fees ${peso(fees)}`, { exact: false })).toBeVisible();
+    await expect(page.getByText(`${peso(grossIn)} donated`, { exact: true })).toBeVisible();
     await expect(page.getByText(`${peso(REFUND)} that PayPal took back`, { exact: false })).toBeVisible();
   });
 

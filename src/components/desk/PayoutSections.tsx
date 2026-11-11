@@ -5,6 +5,7 @@ import type { PayoutItem } from "@/server/caretaker/queue";
 import { DeskItem } from "./DeskItem";
 import { Section } from "./DeskParts";
 import { Field, Hidden } from "./Fields";
+import { niceDate } from "@/lib/niceDate";
 
 const KIND: Record<string, string> = { deposit: "Deposit", balance: "Balance" };
 
@@ -15,7 +16,7 @@ function PayoutFacts({ p }: { p: PayoutItem }) {
         {formatPeso(p.amount)} to {p.vetName}
       </h3>
       <p className="small">
-        {KIND[p.kind] ?? p.kind} for {p.catName}, {p.date}. Attempts: {p.attempts}.
+        {KIND[p.kind] ?? p.kind} for {p.catName}, {niceDate(p.date)}. Attempts: {p.attempts}.
       </p>
       {p.batchId && <p className="small break-all soft">PayPal batch: {p.batchId}</p>}
       {p.agentReason && <p className="mt-2 small soft">The treasurer wrote: {p.agentReason}</p>}

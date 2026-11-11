@@ -19,9 +19,11 @@ export function TabBar() {
   return (
     <nav
       aria-label="Main"
-      className="fixed inset-x-0 bottom-0 z-30 bg-surface pb-[env(safe-area-inset-bottom)] md:inset-y-0 md:right-auto md:w-52 md:px-3 md:pt-20"
+      className="fixed inset-x-0 bottom-0 z-30 border-t border-pale bg-surface pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_12px_rgba(18,53,42,0.12)] md:border-t-0 md:shadow-none md:inset-y-0 md:right-auto md:w-52 md:px-3 md:pt-20"
     >
-      <ul className="mx-auto flex max-w-xl items-end justify-around px-1 pb-1 pt-1.5 md:grid md:max-w-none md:gap-1 md:p-0">
+      {/* On phones the page fades out just above the bar, so a card scrolling under it does not look cut in half. */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-full h-6 bg-linear-to-t from-bg to-transparent md:hidden" />
+      <ul className="relative mx-auto flex max-w-xl items-end justify-around px-1 pb-1 pt-1.5 md:grid md:max-w-none md:gap-1 md:p-0">
         {TABS.map((t) => {
           const active = isActiveTab(t, pathname);
           const spot = t.key === "spot";
@@ -37,8 +39,8 @@ export function TabBar() {
                 <span
                   className={
                     spot
-                      ? "-mt-5 grid h-14 w-14 place-items-center rounded-out bg-main text-white md:mt-0 md:h-9 md:w-9 md:rounded-in"
-                      : "grid h-7 w-7 place-items-center"
+                      ? "-mt-5 grid h-14 w-14 place-items-center rounded-out bg-main text-white ring-4 ring-surface md:mt-0 md:ring-0 md:h-9 md:w-9 md:rounded-in"
+                      : `grid h-7 w-14 place-items-center rounded-full md:w-7 ${active ? "bg-pale md:bg-transparent" : ""}`
                   }
                 >
                   <svg viewBox="0 0 24 24" className={spot ? "h-7 w-7 md:h-5 md:w-5" : "h-6 w-6"} fill="currentColor" aria-hidden="true">

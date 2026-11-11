@@ -115,6 +115,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { DonateForm } from "../src/components/DonateForm";
 import { moneyIsTest } from "../src/lib/config";
 import { testMoneyLine } from "../src/lib/moneyCopy";
+import { PersonaSwitcher } from "../src/components/PersonaSwitcher";
+import { nameHint } from "../src/components/SignIn";
 
 describe("I2: 'Test money only' is only said when it is true", () => {
   it("moneyIsTest follows PAYPAL_ENV", () => {
@@ -135,10 +137,25 @@ describe("I2: 'Test money only' is only said when it is true", () => {
     expect(draw(false)).not.toMatch(/test money|sandbox/i);
     const out = renderToStaticMarkup(createElement(DonateForm, { clientId: "x", username: null, testMoney: false }));
     expect(out).not.toMatch(/test money|sandbox/i);
+    // Signed out: one line about giving, and the username rule only once a name breaks it.
+    expect(out).toContain("Give ₱100, ₱500, ₱1,500 or any amount through PayPal.");
+    expect(out).not.toContain("Pick ₱100");
+    expect(out).not.toContain("3 to 20 letters");
+    expect(out).toContain('placeholder="ate_lorna"');
+    expect(nameHint("")).toBeNull();
+    expect(nameHint("ab")).toBe("3 to 20 letters, digits or _");
+    // A valid name gets the one fact it needs before Continue, whether or not a demo badge is on screen.
+    expect(nameHint("ate_lorna")).toBe("No password: use the same name to come back.");
+    expect(nameHint("bad name!")).toBe("3 to 20 letters, digits or _");
   });
 
   it("shared lines drop the claim when the money is live", () => {
     expect(testMoneyLine(true)).toMatch(/test money/i);
     expect(testMoneyLine(false)).toBe("");
+    // The role strip is the one demo badge; it claims test money only when it is true.
+    const strip = (testMoney: boolean) => renderToStaticMarkup(createElement(PersonaSwitcher, { current: null, testMoney }));
+    expect(strip(true)).toContain("Test money · Demo roles");
+    expect(strip(false)).toContain("Demo roles");
+    expect(strip(false)).not.toMatch(/test money/i);
   });
 });

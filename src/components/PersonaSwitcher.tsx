@@ -5,8 +5,8 @@ import { DEMO_ROLES } from "@/lib/demoRoles";
 import { landingAfterSwitch } from "@/lib/nav";
 import { useState } from "react";
 
-/** Demo only, and simulated: it switches to a demo account and is not a real sign-in. The layout renders this only when DEMO_MODE is on; the API checks it again. */
-export function PersonaSwitcher({ current }: { current: string | null }) {
+/** The one demo badge (test money is claimed only when moneyIsTest() is true). Demo only, and simulated: it switches to a demo account and is not a real sign-in. The layout renders this only when DEMO_MODE is on; the API checks it again. */
+export function PersonaSwitcher({ current, testMoney }: { current: string | null; testMoney: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +30,7 @@ export function PersonaSwitcher({ current }: { current: string | null }) {
   return (
     <div className="bg-pale">
       <div className="mx-auto flex max-w-2xl items-center gap-x-2 px-4 py-1 text-[0.8125rem]">
-        <span className="font-semibold text-soft">Demo roles, simulated</span>
+        <span className="font-semibold text-soft">{testMoney ? "Test money · Demo roles" : "Demo roles"}</span>
         <div role="group" aria-label="View the app as" className="flex gap-1">
           {DEMO_ROLES.map((p) => (
             <button

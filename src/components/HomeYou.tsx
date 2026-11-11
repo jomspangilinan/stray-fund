@@ -8,7 +8,8 @@ import { NewsList } from "./NewsList";
 
 /** News and the weekly count for the signed-in person. Signed out, it just invites a first spot. */
 export async function HomeYou() {
-  const thanks = await getHomeThanks();
+  // The same thanks can come from two events (two neighbours confirming one ear-tip); say it once.
+  const thanks = [...new Map((await getHomeThanks()).map((t) => [`${t.name} ${t.text}`, t])).entries()];
   const session = await getSession();
   const strip = thanks.length > 0 && (
     <section className="mt-8" aria-labelledby="thanks-title">
@@ -16,11 +17,9 @@ export async function HomeYou() {
         Thanks, neighbours
       </h2>
       <ul className="mt-2 flex flex-wrap gap-2">
-        {thanks.map((t, i) => (
-          <li key={i} className="tag !whitespace-normal !rounded-in !py-1.5">
-            <span>
-              <strong>{t.name}</strong> {t.text}
-            </span>
+        {thanks.map(([key, t]) => (
+          <li key={key} className="small rounded-in bg-surface px-3 py-1.5">
+            <strong>{t.name}</strong> {t.text}
           </li>
         ))}
       </ul>

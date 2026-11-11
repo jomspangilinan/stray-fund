@@ -21,7 +21,7 @@ const cat = (patch: Partial<MissionCat> = {}): MissionCat => ({
 describe("pickMissions", () => {
   it("asks to find a waiting cat not sighted for 3 or more days, with the days in the detail", () => {
     const [m] = pickMissions([cat({ name: "Muning", lastSeenAt: daysAgo(4) })], NOW);
-    expect(m).toMatchObject({ kind: "find", title: "Help find Muning", action: "spot" });
+    expect(m).toMatchObject({ kind: "find", title: "Help find Muning", catName: "Muning", action: "spot" });
     expect(m.detail).toBe("Last seen 4 days ago.");
   });
 
@@ -115,7 +115,7 @@ describe("pickMissions", () => {
 
   it("carries only whitelisted fields", () => {
     const [m] = pickMissions([cat({ lastSeenAt: daysAgo(5), photoUrl: "/p.jpg" })], NOW);
-    expect(Object.keys(m).sort()).toEqual(["action", "catId", "detail", "kind", "photoUrl", "title"]);
+    expect(Object.keys(m).sort()).toEqual(["action", "catId", "catName", "detail", "kind", "photoUrl", "title"]);
   });
 
   it("clears a mission once a new sighting is in the data", () => {

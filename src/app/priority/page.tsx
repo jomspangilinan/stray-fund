@@ -18,8 +18,8 @@ async function List() {
 export default function PriorityPage() {
   return (
     <main>
-      <PageSwitch label="Fund" pages={FUND_PAGES} current="/priority" action={{ href: "/donate", label: "Donate" }} />
-      <PageHead title="Priority">What the Treasurer is doing for each cat.</PageHead>
+      <PageHead title="Priority" action={{ href: "/donate", label: "Donate" }} />
+      <PageSwitch label="Fund" pages={FUND_PAGES} current="/priority" />
       <Suspense fallback={<ListSkeleton rows={3} label="Loading the priority list" />}>
         <List />
       </Suspense>

@@ -42,10 +42,10 @@ export function SignInGate({ demo, children }: { demo: boolean; children: React.
       <div className="card grid gap-4">
         {demo && (
           <div className="grid gap-2">
-            <button type="button" className="btn-pop w-full" onClick={tryDemo} disabled={busy}>
+            <button type="button" className="btn w-full" onClick={tryDemo} disabled={busy}>
               {busy ? "Starting" : "Try it now"}
             </button>
-            <p className="small soft">Uses a shared demo neighbour, so you may see what others tried. Simulated, not a real sign-in.</p>
+            <p className="small soft">Shared demo account: others may have used it.</p>
             {error && (
               <p role="alert" className="font-bold text-danger">
                 {error}

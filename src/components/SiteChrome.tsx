@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { APP_NAME, isDemoMode } from "@/lib/config";
+import { APP_NAME, isDemoMode, moneyIsTest } from "@/lib/config";
 import { consoleFor } from "@/lib/nav";
 import { eq } from "drizzle-orm";
 import { db } from "@/server/db/client";
@@ -12,7 +12,7 @@ import { SignIn } from "./SignIn";
 export async function DemoBar() {
   if (!isDemoMode()) return null;
   const session = await getSession();
-  return <PersonaSwitcher current={session?.username ?? null} />;
+  return <PersonaSwitcher current={session?.username ?? null} testMoney={moneyIsTest()} />;
 }
 
 export function Brand() {

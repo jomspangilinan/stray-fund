@@ -3,6 +3,7 @@ import type { CaretakerQueue } from "@/server/caretaker/queue";
 import { DeskItem } from "./DeskItem";
 import { Section, Where } from "./DeskParts";
 import { Hidden } from "./Fields";
+import { niceDate } from "@/lib/niceDate";
 
 export function EarTips({ items }: { items: CaretakerQueue["earTipPending"] }) {
   return (
@@ -14,7 +15,7 @@ export function EarTips({ items }: { items: CaretakerQueue["earTipPending"] }) {
             Neighbours so far: {c.yes} said ear-tipped, {c.no} said not.
           </p>
           <Where exact={c.exact} area={c.area} exactHidden={c.exactHidden} />
-          <ActionForm action="cat_set_ear_tip" submitLabel="Ear is tipped, already neutered">
+          <ActionForm action="cat_set_ear_tip" submitLabel="Ear is tipped, already neutered" quiet>
             <Hidden name="catId" value={c.id} />
             <Hidden name="earTip" value="present" />
           </ActionForm>
@@ -74,7 +75,7 @@ export function HeldPhotos({ items }: { items: CaretakerQueue["heldPhotos"] }) {
       {items.map((p) => (
         <DeskItem key={p.sightingId} label={p.catName ?? "No cat yet"}>
           <h3 className="text-base font-extrabold">{p.catName ?? "No cat yet"}</h3>
-          <p className="small">Taken {p.date}. Not shown publicly.</p>
+          <p className="small">Taken {niceDate(p.date)}. Not shown publicly.</p>
           {/* eslint-disable-next-line @next/next/no-img-element -- a private photo behind a signed-in route */}
           <img src={`/api/caretaker/images/sighting/${p.sightingId}`} alt="The original photo" className="mt-3 max-h-72 w-full rounded-in object-contain" />
           <ActionForm action="photo_publish" submitLabel="Publish with areas blurred">

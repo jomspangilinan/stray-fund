@@ -169,6 +169,10 @@ describe("a refund after the money was allocated", () => {
     expect(conservation(p).text).toContain("after ₱100.00 that PayPal took back");
     expect(conservation(p).text).toContain("still free -₱81.60");
     expect(conservation(p).text).toContain("below zero");
+    // Proof hides the long sum when its bar is drawn, so the refund and below-zero clauses also come on their own.
+    expect(conservation(p).note).toContain("₱100.00 that PayPal took back");
+    expect(conservation(p).note).toContain("below zero");
+    expect(conservation(p).note).not.toContain("Donated ₱");
 
     // New money arrives, but the pool is still short, so nothing new can be funded from the old gap.
     const [other] = await db.insert(cats).values({ name: "Tuti", areaName: "Brgy 2" }).returning();

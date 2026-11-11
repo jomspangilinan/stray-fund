@@ -204,7 +204,7 @@ export function LiveCamera({
   const openButton = canRetry ? (
     <button
       type="button"
-      className="btn min-h-14 min-w-56 px-8 text-lg"
+      className="btn min-h-14 min-w-56 px-8 text-lg enabled:!bg-white enabled:!text-ink"
       onClick={() => start(facing)}
       disabled={disabled}
     >

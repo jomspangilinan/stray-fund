@@ -11,6 +11,7 @@ import { vetNotice } from "@/lib/reportNotice";
 import { isUuid } from "@/server/public";
 import { getSession } from "@/server/session";
 import { getVetBooking, type VetBookingView, type VetPayout } from "@/server/vetFlow";
+import { niceDate } from "@/lib/niceDate";
 
 export const metadata: Metadata = { title: "Booking | Stray Fund" };
 
@@ -40,7 +41,7 @@ function Payouts({ payouts }: { payouts: VetPayout[] }) {
         <li key={`${p.kind}-${i}`} className="rounded-in bg-bg p-3">
           <p className="text-lg font-extrabold">{formatPeso(p.amount)}</p>
           <p className="small">
-            {PAYOUT_KIND[p.kind] ?? p.kind}, {PAYOUT_STATUS[p.status] ?? p.status}, {p.date}
+            {PAYOUT_KIND[p.kind] ?? p.kind}, {PAYOUT_STATUS[p.status] ?? p.status}, {niceDate(p.date)}
           </p>
           <p className="small break-all soft">PayPal reference: {p.paypalRef ?? "none yet"}</p>
         </li>
@@ -109,7 +110,7 @@ async function BookingView({ params }: { params: Promise<{ id: string }> }) {
   return (
     <>
       <PageHead title={booking.catName}>
-        Visit on {booking.scheduledFor ?? "a date to be set"}. Package {formatPeso(booking.packagePrice)}.
+        Visit on {booking.scheduledFor ? niceDate(booking.scheduledFor) : "a date to be set"}. Package {formatPeso(booking.packagePrice)}.
       </PageHead>
       {vetNotice(booking.catReport) && <p className="note note-bad mt-3 small font-bold">{vetNotice(booking.catReport)}</p>}
       <div className="mt-3">

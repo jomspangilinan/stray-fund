@@ -11,6 +11,7 @@ import { vetNotice } from "@/lib/reportNotice";
 import { manilaDate } from "@/server/public";
 import { getSession } from "@/server/session";
 import { listVetDashboard, type VetBookingRow } from "@/server/vetFlow";
+import { niceDate } from "@/lib/niceDate";
 
 export const metadata: Metadata = { title: "Vet | Stray Fund" };
 
@@ -32,14 +33,14 @@ function BookingCard({ b }: { b: VetBookingRow }) {
     <>
       <h3 className="text-base font-extrabold">{b.catName}</h3>
       <p className="small">
-        {BOOKING_STATUS[b.status] ?? b.status}, visit on {b.scheduledFor ?? "a date to be set"}. Package {formatPeso(b.packagePrice)}.
+        {BOOKING_STATUS[b.status] ?? b.status}, visit on {b.scheduledFor ? niceDate(b.scheduledFor) : "a date to be set"}. Package {formatPeso(b.packagePrice)}.
       </p>
       <p className="mt-1 font-bold">{NEXT_STEP[b.evidence]}</p>
       {vetNotice(b.catReport) && <p className="note note-bad mt-2 small font-bold">{vetNotice(b.catReport)}</p>}
       <div className="mt-2">
         <ExactLocation exact={b.exact} area={b.area} exactHidden={b.exactHidden} />
       </div>
-      <Link href={`/vet/bookings/${b.id}`} className={`${b.evidence === "open" ? "btn" : "btn-quiet"} mt-4 inline-flex items-center`}>
+      <Link href={`/vet/bookings/${b.id}`} className={`${b.evidence === "open" ? "btn w-full justify-center" : "btn-quiet"} mt-4 inline-flex items-center`}>
         {b.evidence === "open" ? `Send for ${b.catName}` : `See ${b.catName}`}
       </Link>
     </>
@@ -116,7 +117,8 @@ async function Dashboard() {
               <li key={c.id} className="card">
                 <h3 className="text-base font-extrabold">{c.name}</h3>
                 <p className="small soft">
-                  {c.sex === "unknown" ? "Sex unknown" : c.sex === "female" ? "Female" : "Male"}, {c.area}
+                  {c.sex === "unknown" ? "Sex unknown" : c.sex === "female" ? "Female" : "Male"}
+                  {!c.exactHidden && `, ${c.area}`}
                 </p>
                 <div className="mt-2">
                   <ExactLocation exact={c.exact} area={c.area} exactHidden={c.exactHidden} />
@@ -151,7 +153,7 @@ async function Dashboard() {
 export default function VetPage() {
   return (
     <main>
-      <PageHead title="Vet desk">Take a funded cat, then send the receipt and a photo once the surgery is done.</PageHead>
+      <PageHead title="Vet desk" />
       <Suspense fallback={<ListSkeleton rows={3} label="Loading" />}>
         <Dashboard />
       </Suspense>

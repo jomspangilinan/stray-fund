@@ -34,8 +34,7 @@ export function DonateForm({ clientId, username, demo = false, testMoney = true 
   if (!username) {
     return (
       <SignInGate demo={demo}>
-        <p className="font-bold">Pick ₱100, ₱500, ₱1,500 or your own amount.</p>
-        <p className="soft">{testMoney ? "Pay with PayPal. Test money only. The Fund pages show where it goes." : "Pay with PayPal. The Fund pages show where it goes."}</p>
+        <p className="font-bold">Give ₱100, ₱500, ₱1,500 or any amount through PayPal.</p>
       </SignInGate>
     );
   }

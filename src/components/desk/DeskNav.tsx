@@ -8,9 +8,5 @@ const PAGES = [
 
 /** The three caretaker screens: what to check, the cat list, the spending rules. */
 export function DeskNav({ current }: { current: string }) {
-  return (
-    <div className="mt-4">
-      <PageSwitch label="Caretaker desk" pages={PAGES} current={current} />
-    </div>
-  );
+  return <PageSwitch label="Caretaker desk" pages={PAGES} current={current} />;
 }

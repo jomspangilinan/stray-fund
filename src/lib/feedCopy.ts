@@ -4,6 +4,9 @@ const FIRST = "Vet first payment";
 const FINAL = "Vet final payment";
 const STOPPED = ["Rejected", "Refused by the rules"];
 
+/** The Treasurer page's one line. Only rules check every pick; a caretaker checks what is unclear, so it doesn't claim more. */
+export const TREASURER_INTRO = "The AI picks. Rules check it; a caretaker checks anything unclear.";
+
 const isPayment = (a: Pick<PublicAgentAction, "action">) => a.action === FIRST || a.action === FINAL;
 
 /** Starts with a plain verb and the cat, so a row reads as one sentence. Other actions already read that way. */
@@ -23,9 +26,8 @@ export function feedHeadline(a: Pick<PublicAgentAction, "action" | "cat" | "stat
   return `${verb} the ${what} for ${who}`;
 }
 
-/** What the AI proposed and what a person did about it. Only said when the data says so. */
+/** What the AI proposed and what a person did about it. Only said when the data says so. A funding card has no story: it shows an "AI pick" chip instead. */
 export function feedStory(a: Pick<PublicAgentAction, "action" | "status" | "signedOffByPerson">): { ai: string; person: string | null } | null {
-  if (a.action === "Funded a cat") return { ai: "The AI treasurer chose this cat, inside the spending rules.", person: null };
   if (!isPayment(a)) return null;
   const ai = "The AI treasurer proposed it.";
   if (a.status === "Refused by the rules") return { ai, person: "The spending rules stopped it." };

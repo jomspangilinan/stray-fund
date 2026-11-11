@@ -17,7 +17,7 @@ async function Ledger() {
   const initial = await getLedger();
   return (
     <>
-      {moneyIsTest() && <p className="note mb-3">{testMoneyLine(true)}</p>}
+      {moneyIsTest() && <p className="note mb-3 mt-3">{testMoneyLine(true)}</p>}
       <LedgerGridLoader initial={initial} />
     </>
   );
@@ -26,8 +26,8 @@ async function Ledger() {
 export default function LedgerPage() {
   return (
     <main>
-      <PageSwitch label="Fund" pages={FUND_PAGES} current="/ledger" action={{ href: "/donate", label: "Donate" }} />
-      <PageHead title="Ledger">Every donation and every payment to a vet.</PageHead>
+      <PageHead title="Ledger" action={{ href: "/donate", label: "Donate" }} />
+      <PageSwitch label="Fund" pages={FUND_PAGES} current="/ledger" />
       <Suspense fallback={<ListSkeleton rows={4} label="Loading the ledger" />}>
         <Ledger />
       </Suspense>

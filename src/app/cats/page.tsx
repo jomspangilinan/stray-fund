@@ -44,7 +44,7 @@ async function Grid({ searchParams }: { searchParams: Promise<{ status?: string 
 export default function CatsPage({ searchParams }: PageProps<"/cats">) {
   return (
     <main className="play">
-      <PageHead title="Cats">Exact spots stay private.</PageHead>
+      <PageHead title="Cats" />
       <Suspense fallback={<ListSkeleton label="Loading the cats" />}>
         <Grid searchParams={searchParams} />
       </Suspense>

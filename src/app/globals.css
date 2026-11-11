@@ -889,8 +889,8 @@ input[type="checkbox"] {
   top: 93.75%;
   box-sizing: border-box;
   height: 1.625rem;
-  max-width: 4rem;
-  padding: 0 0.625rem;
+  max-width: 5.25rem;
+  padding: 0 0.5rem;
   overflow: hidden;
   border-radius: 999px;
   background: var(--ink);
@@ -1102,15 +1102,6 @@ input[type="checkbox"] {
     color 120ms var(--ease-out);
 }
 /* Four labels need the whole row, so the action drops under the switch. */
-.page-switch-wide {
-  flex-wrap: wrap;
-}
-.page-switch-wide .seg {
-  flex-basis: 100%;
-}
-.page-switch-wide .btn-pop {
-  margin-left: auto;
-}
 .seg a[aria-current="page"] {
   background: var(--surface);
   color: var(--main);

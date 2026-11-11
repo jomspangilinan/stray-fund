@@ -21,16 +21,6 @@ async function shareCard(catId: string, name: string): Promise<"shared" | "copie
   }
 }
 
-function nameOf(m: Mission): string {
-  return (
-    m.title
-      .replace(/^Help (find )?/, "")
-      .replace(/^Confirm /, "")
-      .replace(/ find a home$/, "")
-      .replace(/'s ear-tip$/, "") || "this cat"
-  );
-}
-
 export function MissionList({ missions }: { missions: Mission[] }) {
   const [note, setNote] = useState<Record<string, string>>({});
   return (
@@ -39,7 +29,7 @@ export function MissionList({ missions }: { missions: Mission[] }) {
         <li key={`${m.kind}-${m.catId}`}>
           <div className="row press relative">
             <span className="relative h-20 w-20 flex-none overflow-hidden rounded-out">
-              <CatPhoto url={m.photoUrl} name={nameOf(m)} sizes="80px" />
+              <CatPhoto url={m.photoUrl} name={m.catName} sizes="80px" />
             </span>
             <div className="min-w-0 flex-1">
               {/* The whole row opens the cat: this link stretches over it, and the buttons sit above it. */}
@@ -61,7 +51,7 @@ export function MissionList({ missions }: { missions: Mission[] }) {
                 type="button"
                 className="btn-quiet relative z-10 !min-h-11 flex-none"
                 onClick={async () => {
-                  const r = await shareCard(m.catId, nameOf(m));
+                  const r = await shareCard(m.catId, m.catName);
                   if (r === "copied") setNote((n) => ({ ...n, [m.catId]: "Link copied." }));
                   if (r === "failed") setNote((n) => ({ ...n, [m.catId]: "Could not share. Try again." }));
                 }}

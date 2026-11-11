@@ -39,6 +39,9 @@ describe("StaffLocation", () => {
   it("holds no coordinates at all in a demo render, including the link", () => {
     const out = html({ exact: null, exactHidden: true });
     expect(out).toContain("See area on map");
+    // One compact line: the area and a small "Map" link, no repeated disclaimer.
+    expect(out).toContain(">Map<");
+    expect(out).not.toContain("Exact spots are hidden");
     expect(out).toContain("Tiong%20Bahru");
     expect(out).not.toMatch(/-?\d+\.\d{3,}/);
     expect(out).not.toContain("%2C");

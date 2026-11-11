@@ -83,8 +83,8 @@ async function Helped() {
 export default function HelpedPage() {
   return (
     <main className="play">
-      <PageSwitch label="Helped" pages={HELPED_PAGES} current="/helped" />
       <PageHead title="Cats I've helped" />
+      <PageSwitch label="Helped" pages={HELPED_PAGES} current="/helped" />
       <Suspense fallback={<ListSkeleton rows={3} label="Loading your cats" />}>
         <Helped />
       </Suspense>

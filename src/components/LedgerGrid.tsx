@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ledgerCount } from "@/lib/ledgerCount";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AgGridReact } from "ag-grid-react";
 import {
@@ -26,11 +27,13 @@ import {
 } from "@/lib/impact";
 import { formatPeso } from "@/lib/money";
 import type { PublicLedgerRow } from "@/server/public";
+import { niceDate } from "@/lib/niceDate";
 
 // Community edition only. No Enterprise module is registered, so none can run or show a watermark.
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 const POLL_MS = 15_000;
+const FIT_ROWS = 25;
 const PHONE = "(max-width: 640px)";
 
 /** The grid's look comes from the app tokens in globals.css, so the two never drift. */
@@ -137,7 +140,7 @@ function Detail({ row, onClose }: { row: Row | null; onClose: () => void }) {
               <h2 id="ledger-detail-title" className="h2">
                 {typeLabel(row.type)}
               </h2>
-              <p className="small soft">{row.date}</p>
+              <p className="small soft">{niceDate(row.date)}</p>
             </div>
             <p className="text-2xl font-extrabold tracking-tight">{out ? `-${formatPeso(row.amount)}` : formatPeso(row.amount)}</p>
           </div>
@@ -224,7 +227,18 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
 
   const columns = useMemo<ColDef<GridRow>[]>(
     () => [
-      { colId: "date", headerName: "Date", field: "date", width: 112, sort: "desc", cellClass: "tabular-nums" },
+      {
+        colId: "date",
+        headerName: "Date",
+        field: "date",
+        width: 118,
+        sort: "desc",
+        filter: !phone,
+        // Sorted, filtered and exported as YYYY-MM-DD; shown as "24 Oct 2026".
+        valueFormatter: (p) => (p.value ? niceDate(p.value) : ""),
+        getQuickFilterText: (p) => (p.value ? `${p.value} ${niceDate(p.value)}` : ""),
+        cellClass: "tabular-nums",
+      },
       {
         colId: "what",
         headerName: "What",
@@ -253,7 +267,7 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
       {
         colId: "amount",
         headerName: "Amount",
-        filter: "agNumberColumnFilter",
+        filter: phone ? false : "agNumberColumnFilter",
         width: phone ? 120 : 130,
         type: "rightAligned",
         headerClass: "ag-right-aligned-header",
@@ -265,7 +279,7 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
       {
         colId: "fee",
         headerName: "Fee",
-        filter: "agNumberColumnFilter",
+        filter: phone ? false : "agNumberColumnFilter",
         width: 110,
         hide: phone,
         type: "rightAligned",
@@ -291,7 +305,7 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
   );
 
   const defaultColDef = useMemo<ColDef<GridRow>>(
-    () => ({ sortable: true, filter: true, resizable: !phone, suppressMovable: true }),
+    () => ({ sortable: true, filter: !phone, resizable: !phone, suppressMovable: true }),
     [phone],
   );
 
@@ -302,6 +316,8 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
   }, []);
 
   const totals = useMemo(() => ledgerTotals(shown), [shown]);
+  // A short ledger fits its rows, so no empty block sits under them; a long one scrolls inside a fixed frame.
+  const fitRows = rows.length <= FIT_ROWS;
 
   const onReady = (e: GridReadyEvent<GridRow>) => {
     apiRef.current = e.api;
@@ -330,6 +346,8 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
         const r = p.node?.data;
         if (!r) return "";
         switch (p.column.getColId()) {
+          case "date":
+            return csvSafe(r.date);
           case "amount":
             return csvPesos(r.amount);
           case "fee":
@@ -382,16 +400,17 @@ export function LedgerGrid({ initial }: { initial: Row[] }) {
         </button>
       </div>
       <p className="small soft mt-2" role="status">
-        Showing {shown.length} of {rows.length}. Tap or press Enter on a row for the reason and PayPal reference.
+        {ledgerCount(shown.length, rows.length)}
       </p>
       {stale && (
         <p role="status" className="note note-bad mt-2 font-bold">
           Could not refresh the ledger. What you see may be out of date, and we will keep trying.
         </p>
       )}
-      <div className="mt-2 h-[clamp(24rem,calc(100dvh-15rem),36rem)] max-w-full overflow-hidden rounded-out">
+      <div className={`mt-2 max-w-full overflow-hidden rounded-out ${fitRows ? "" : "h-[clamp(24rem,calc(100dvh-15rem),36rem)]"}`}>
         <AgGridReact<GridRow>
           theme={theme}
+          domLayout={fitRows ? "autoHeight" : "normal"}
           rowData={rows}
           columnDefs={columns}
           defaultColDef={defaultColDef}

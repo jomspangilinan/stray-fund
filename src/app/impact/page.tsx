@@ -7,11 +7,11 @@ import { PageHead } from "@/components/PageHead";
 import { PageSwitch } from "@/components/PageSwitch";
 import { FUND_PAGES } from "@/lib/nav";
 import { barParts, conservation } from "@/lib/impact";
-import { moneyIsTest } from "@/lib/config";
+import { isDemoMode, moneyIsTest } from "@/lib/config";
 import { formatPeso } from "@/lib/money";
 import { getImpact } from "@/server/impact";
 
-export const metadata: Metadata = { title: "Impact | Stray Fund" };
+export const metadata: Metadata = { title: "Proof | Stray Fund" };
 
 async function Impact() {
   await connection();
@@ -32,6 +32,7 @@ async function Impact() {
         <h2 id="adds-up" className="h2">
           Where every peso went
         </h2>
+        <p className="mt-2 text-2xl font-extrabold tracking-tight tabular-nums">{formatPeso(c.parts.donated)} donated</p>
         {bar && (
           <>
             <div className="mt-3 flex h-6 gap-0.5 overflow-hidden rounded-in" role="img" aria-label={bar.map((b) => `${b.label} ${formatPeso(b.amount)}`).join(", ")}>
@@ -50,7 +51,8 @@ async function Impact() {
             </ul>
           </>
         )}
-        <p className="mt-4 font-bold leading-snug">{c.text}</p>
+        {/* The bar and legend show the sum; the sentence spelling it out shows only when there is no bar. */}
+        {bar ? c.note && <p className="mt-4 font-bold leading-snug">{c.note}</p> : <p className="mt-4 font-bold leading-snug">{c.text}</p>}
         {c.balanced ? (
           <p className="note note-ok mt-3">This adds up exactly, across every donation and payout.</p>
         ) : (
@@ -85,7 +87,8 @@ async function Impact() {
         </p>
       </section>
 
-      {moneyIsTest() && (
+      {/* With DEMO_MODE on, the role strip already says test money on every page. */}
+      {moneyIsTest() && !isDemoMode() && (
         <p className="note mt-8">
           All money here is PayPal sandbox test money. Nobody was charged and no vet was paid in real pesos.
         </p>
@@ -97,8 +100,8 @@ async function Impact() {
 export default function ImpactPage() {
   return (
     <main>
-      <PageSwitch label="Fund" pages={FUND_PAGES} current="/impact" action={{ href: "/donate", label: "Donate" }} />
-      <PageHead title="Impact" />
+      <PageHead title="Proof" action={{ href: "/donate", label: "Donate" }} />
+      <PageSwitch label="Fund" pages={FUND_PAGES} current="/impact" />
       <Suspense fallback={<BlockSkeleton label="Loading impact" />}>
         <Impact />
       </Suspense>

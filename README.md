@@ -27,7 +27,7 @@ A cat's card also has a Save image button that makes a 9:16 picture of the cat.
 
 ## Why PayPal
 
-The whole idea is that money moves visibly. Checkout takes donations, Payouts pays the vet, and webhooks tell the app what actually settled. Each payout carries a stable `sender_batch_id`, so a retry can't pay twice. The treasurer is also offered two read-only PayPal agent toolkit tools, `get_order` and `list_transactions`, with personal details removed. `[CONFIRM AFTER LIVE RUN]` The ledger's PayPal reference column lets anyone match a row to a PayPal record.
+The whole idea is that money moves visibly. Checkout takes donations, Payouts pays the vet, and webhooks tell the app what actually settled. Each payout carries a stable `sender_batch_id`, so a retry can't pay twice. The treasurer is also offered two read-only PayPal agent toolkit tools, `get_order` and `list_transactions`, with personal details removed. Neither has been called through the app yet, and list_transactions returned 403 on the sandbox app. The ledger's PayPal reference column lets anyone match a row to a PayPal record.
 
 ## How AI and PayPal move money together
 
@@ -96,11 +96,11 @@ PayPal sandbox needs `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and a sandbox bu
 
 ## Deploy
 
-See [docs/deploy.md](docs/deploy.md): S3 buckets, IAM keys, billing alert, Render Blueprint (`render.yaml`), PayPal webhook, first-boot check, live checks and the "Before real money" list. Nothing in it has been run against a real AWS account yet. `[CONFIRM AFTER LIVE RUN]`
+See [docs/deploy.md](docs/deploy.md): S3 buckets, IAM keys, billing alert, Render Blueprint (`render.yaml`), PayPal webhook, first-boot check, live checks and the "Before real money" list. Nothing in it has been run against a real AWS account yet.
 
 ## Test it
 
-Live site: `[LIVE URL]`. Pick Neighbour, Caretaker or Vet in the role strip. Pay with a PayPal sandbox buyer account `[OWNER: add the sandbox buyer login judges should use, or say how to get one]`. The Postman collection is in `docs/postman/`.
+There is no live site for judging. Run it locally (above) or watch the video. Pick Neighbour, Caretaker or Vet in the role strip. The Postman collection is in docs/postman/.
 
 ## What this is not yet
 
@@ -108,7 +108,7 @@ Read this before you trust it with anything real.
 
 - **No real sign-in.** The Neighbour, Caretaker and Vet roles are simulated and labelled so. Anyone can pick Caretaker. Verified accounts come before any real money.
 - **Volunteer ID tags and the vet register are simulated.** The demo roles carry a verified badge with a tag number, but no volunteer process, ID check or vet register stands behind it. In the demo anyone can confirm a report or clear a cat.
-- **The Treasurer's weighing is lightly tested, and its public words are not guaranteed.** When a cat with a checked report is waiting and the cat being funded has none, code makes the funding reason name that cat. It cannot make the Treasurer fund, and a reason that quotes a note shows as a fixed line. In the last six local runs (weigh 3, hostile 3) the weighing reached a public reason in 1 of 3 weigh runs, and the model said a tool failed that it never called in 1 of 6 runs (8 of 45 valid runs over three rounds). See the eval below. It was tried on the local `claude -p` route on a handful of cases, three runs each, never on Bedrock. See `.superpowers/sdd/2026-11-04-ai-priority-list/prompt-eval.md` for what held and what didn't. `[CONFIRM AFTER LIVE RUN]` for the same cases on Bedrock.
+- **The Treasurer's weighing is lightly tested, and its public words are not guaranteed.** When a cat with a checked report is waiting and the cat being funded has none, code makes the funding reason name that cat. It cannot make the Treasurer fund, and a reason that quotes a note shows as a fixed line. In the last six local runs (weigh 3, hostile 3) the weighing reached a public reason in 1 of 3 weigh runs, and the model said a tool failed that it never called in 1 of 6 runs (8 of 45 valid runs over three rounds). See the eval below. It was tried on the local `claude -p` route on a handful of cases, three runs each, never on Bedrock. See `.superpowers/sdd/2026-11-04-ai-priority-list/prompt-eval.md` for what held and what didn't.
 - **A report can delay a cat once.** A false report holds a cat until a caretaker looks, and the reporter can't repeat it. A report counts as checked at once only when a caretaker files it through Edit details. A caretaker or vet who reports from the photo screen files an ordinary open report, like a neighbour.
 - **The public filter for the Treasurer's reasons is simple.** It catches digits, place words, stray capitals and four words copied from a note. It misses a name or place written in lowercase and a number spelled out in words. Peso amounts, day counts and the words PayPal and Treasurer are let through on purpose. On the demo desk the Treasurer's payout reasons and review requests are hidden whole instead of filtered.
 - **Sandbox money only.** The app refuses to start with demo roles and live PayPal together, and the "test money" wording only shows when PayPal is not live.
@@ -122,7 +122,7 @@ Read this before you trust it with anything real.
 - **Two neighbours can queue a cat.** Names are free to make, so one person could use two. Without a verified ear-tip photo the balance never releases, but the deposit may already be paid.
 - **Refunds and chargebacks are handled in code but not proven on real PayPal.** A refund whose webhook is lost is not polled.
 - **Items under "Before real money" in [docs/deploy.md](docs/deploy.md)** are open: MFA and key rotation, TLS-only bucket policies, a separate live PayPal app, payouts stuck at PayPal that need a developer, and more.
-- **Not yet verified on real PayPal or Bedrock:** real webhook signatures and payload shapes, a donation captured through the screen, the treasurer on Bedrock, the toolkit's `get_order` through the app and `list_transactions` (it returned 403 on the sandbox app), phone camera over HTTPS, real S3. Sandbox order, capture and payout calls were run once from a script. `[CONFIRM AFTER LIVE RUN]`
+- **Not yet verified on real PayPal or Bedrock:** real webhook signatures and payload shapes, a donation captured through the screen, the treasurer on Bedrock, the toolkit's `get_order` through the app and `list_transactions` (it returned 403 on the sandbox app), phone camera over HTTPS, real S3. Sandbox order, capture and payout calls were run once from a script.
 - **Cut or later:** adoption fees, foster allowance, monthly sponsors, merging duplicate cats, a map.
 
 ## Licence
