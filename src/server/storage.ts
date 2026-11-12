@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { describeError } from "./errors";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 /** The object is gone, as opposed to storage being unreachable. Retrying will not help. */
 export class StoredObjectMissing extends Error {
@@ -19,6 +20,8 @@ export interface Storage {
   putPrivate(key: string, buf: Buffer, type: string): Promise<void>;
   putPublic(key: string, buf: Buffer, type: string): Promise<void>;
   getPrivate(key: string): Promise<Buffer>;
+  /** Removes a public copy. A key that is already gone is not an error. Throws for a key that is not a public key. */
+  deletePublic(key: string): Promise<void>;
   publicUrl(key: string): string;
 }
 
@@ -29,6 +32,10 @@ const PUBLIC_KEY = new RegExp(`^photos/${UUID}\\.jpg$`);
 /** Keys are random and never derived from user input. */
 export const newPrivateKey = () => `originals/${randomUUID()}.jpg`;
 export const newPublicKey = () => `photos/${randomUUID()}.jpg`;
+
+const assertPublicKey = (key: string) => {
+  if (!PUBLIC_KEY.test(key)) throw new Error("Invalid storage key");
+};
 
 export type Driver = "s3" | "local" | "memory";
 
@@ -56,6 +63,10 @@ export function createMemoryStorage(): MemoryStorage {
     },
     async putPublic(key, buf) {
       pub.set(key, Buffer.from(buf));
+    },
+    async deletePublic(key) {
+      assertPublicKey(key);
+      pub.delete(key);
     },
     async getPrivate(key) {
       const b = priv.get(key);
@@ -106,6 +117,10 @@ export function createS3Storage(opts: S3Options = {}): Storage {
         new PutObjectCommand({ Bucket: publicBucket(), Key: key, Body: buf, ContentType: type }),
       );
     },
+    async deletePublic(key) {
+      assertPublicKey(key);
+      await getClient().send(new DeleteObjectCommand({ Bucket: publicBucket(), Key: key }));
+    },
     async getPrivate(key) {
       const res = await getClient()
         .send(new GetObjectCommand({ Bucket: privateBucket(), Key: key }))
@@ -144,6 +159,11 @@ export function createLocalStorage(dir: string = LOCAL_DATA_DIR): Storage {
       readFile(localPath(dir, "private", key)).catch((e: NodeJS.ErrnoException) => {
         throw e.code === "ENOENT" ? new StoredObjectMissing() : e;
       }),
+    deletePublic: async (key) => {
+      await unlink(localPath(dir, "public", key)).catch((e: NodeJS.ErrnoException) => {
+        if (e.code !== "ENOENT") throw e;
+      });
+    },
     publicUrl: (key) => `/api/dev-photos/${key}`,
   };
 }
@@ -155,6 +175,16 @@ export async function readLocalPublic(dir: string, key: string): Promise<Buffer 
     return await readFile(localPath(dir, "public", key));
   } catch {
     return null;
+  }
+}
+
+/** Deletes a public copy that must no longer be readable. A failure is logged (class name only: storage errors can carry keys) and never thrown. */
+export async function removePublicCopy(key: string | null | undefined): Promise<void> {
+  if (!key) return;
+  try {
+    await getStorage().deletePublic(key);
+  } catch (e) {
+    console.error(`[storage] could not delete a public copy: ${describeError(e)}`);
   }
 }
 

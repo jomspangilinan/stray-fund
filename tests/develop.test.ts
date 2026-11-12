@@ -336,6 +336,20 @@ describe("developNext", () => {
     // The cat keeps its grey look-alike: only the winner sets the colours.
     expect((await catOf(out.catId!)).avatar).toBeNull();
   });
+
+  it("deletes the public copy it made when it loses the race", async () => {
+    const out = await queued(await photo(MIDDLE));
+    setCatFinderForTests(async () => {
+      await db.update(sightings).set({ developedAt: new Date() }).where(eq(sightings.id, out.sightingId));
+      return { box: CAT_BOX, mask: null };
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const put = vi.spyOn(memoryStorage, "putPublic");
+    expect(await developNext()).toBe("developed");
+    const made = put.mock.calls[0][0];
+    expect(() => memoryStorage.readPublic(made)).toThrow();
+    expect((await sightingOf(out.sightingId)).publicKey).toBeNull();
+  });
 });
 
 describe("findCat with the real model", () => {

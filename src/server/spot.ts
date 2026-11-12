@@ -14,7 +14,7 @@ import { fuzzLocation } from "./location";
 import { attachReports, filePhotoReports } from "./reports";
 import { maskUsable, publishCatOnly, publishScrubbed, storeOriginal, type Box } from "./photos";
 import { avatarFromPhoto } from "./photoAvatar";
-import { getStorage } from "./storage";
+import { getStorage, removePublicCopy } from "./storage";
 
 export type Sex = "female" | "male" | "unknown";
 export type SpotState = "new_cat" | "matched" | "needs_review" | "rejected" | "queued_for_ai";
@@ -232,20 +232,22 @@ async function developNow(
   try {
     const { key } = await publishCatOnly(originalKey, { box, mask });
     const avatar = await avatarFromPhoto(i.jpeg, box);
-    return await db.transaction(async (tx) => {
+    const developed = await db.transaction(async (tx) => {
       const won = await tx
         .update(sightings)
         .set({ publicKey: key, publicReady: true, developedAt: new Date() })
         .where(and(eq(sightings.id, sightingId), sql`${sightings.developedAt} is null`))
         .returning({ id: sightings.id });
-      // Lost to another publisher: log it and leave the public copy just made. Task 8 adds the delete.
-      if (won.length === 0) {
-        console.error("[spot] phone cut-out lost the develop race; its public copy is left in place");
-        return false;
-      }
+      if (won.length === 0) return false;
       await tx.update(cats).set({ avatar }).where(eq(cats.id, catId));
       return true;
     });
+    // Lost to another publisher (or a caretaker's hold): the copy just made belongs to no sighting, so it is deleted.
+    if (!developed) {
+      console.error("[spot] phone cut-out lost the develop race; its public copy is deleted");
+      await removePublicCopy(key);
+    }
+    return developed;
   } catch (e) {
     console.error(`[spot] phone cut-out not published: ${e instanceof Error ? e.name : typeof e}`);
     return false;
@@ -513,10 +515,13 @@ export async function publishPhoto(sightingId: string, originalKey: string, regi
   if (!Array.isArray(regions)) return;
   try {
     const { key } = await publishScrubbed(originalKey, regions as Box[]);
-    await db
+    const set = await db
       .update(sightings)
       .set({ publicKey: key, publicReady: true })
-      .where(and(eq(sightings.id, sightingId), sql`${sightings.publicKey} is null`));
+      .where(and(eq(sightings.id, sightingId), sql`${sightings.publicKey} is null`))
+      .returning({ id: sightings.id });
+    // The sighting already has a public copy: the one just made is a replaced key, so it goes.
+    if (set.length === 0) await removePublicCopy(key);
   } catch (e) {
     // Class name only: errors from storage can carry keys.
     console.error(`[spot] could not publish photo: ${e instanceof Error ? e.name : typeof e}`);

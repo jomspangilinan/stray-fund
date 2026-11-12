@@ -25,6 +25,8 @@ import { storeOriginal } from "../src/server/photos";
 import { getCatCard, listAgentActions, manilaDate } from "../src/server/public";
 import { SESSION_COOKIE, signSession, type Role } from "../src/server/session";
 import { getStorage } from "../src/server/storage";
+import { setCatFinderForTests } from "../src/server/catFinder";
+import { developNext } from "../src/server/develop";
 import { assertCanSubmitEvidence } from "../src/server/vetFlow";
 import { truncateAll } from "./helpers/db";
 import { FakeGateway, addPayout, fundCat, makeBooking, makeCaretaker, makeVet, makeWorld } from "./helpers/payoutFixtures";
@@ -862,6 +864,44 @@ describe("photos", () => {
     expect(row).toMatchObject({ publicReady: false, publicKey: null });
     expect((await getCatCard(cat.id))!.cat.photoUrl).toBeNull();
     expect((await act("photo_hold", { sightingId: s.id })).status).toBe(409);
+  });
+
+  it("holding deletes the public copy, so its old address stops working", async () => {
+    const { s } = await heldSighting({ ...ASSESS });
+    await act("photo_publish", { sightingId: s.id, noSensitive: true });
+    const key = (await sightingRow(s.id)).publicKey!;
+    const storage = getStorage() as unknown as { readPublic: (k: string) => Buffer };
+    expect(() => storage.readPublic(key)).not.toThrow();
+    expect((await act("photo_hold", { sightingId: s.id })).status).toBe(200);
+    expect(() => storage.readPublic(key)).toThrow();
+  });
+
+  it("a delete that fails is logged and the hold still stands", async () => {
+    const { s } = await heldSighting({ ...ASSESS });
+    await act("photo_publish", { sightingId: s.id, noSensitive: true });
+    const key = (await sightingRow(s.id)).publicKey!;
+    const err = Object.assign(new Error("denied"), { name: "AccessDenied", statusCode: 403 });
+    vi.spyOn(getStorage(), "deletePublic").mockRejectedValueOnce(err);
+    const logged = vi.spyOn(console, "error");
+    expect((await act("photo_hold", { sightingId: s.id })).status).toBe(200);
+    expect(await sightingRow(s.id)).toMatchObject({ publicReady: false, publicKey: null });
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("AccessDenied (HTTP 403)"));
+    expect(JSON.stringify(logged.mock.calls)).not.toContain(key);
+  });
+
+  it("holding a plain photo that is still waiting for the worker stops the worker publishing it", async () => {
+    const { cat } = await heldSighting({ ...ASSESS });
+    const { key } = await storeOriginal(await image());
+    const [s] = await db.insert(sightings).values({ catId: cat.id, originalKey: key, state: "new_cat", needsDevelop: true, createdAt: new Date(Date.now() - 3_600_000) }).returning();
+    expect((await act("photo_hold", { sightingId: s.id })).status).toBe(200);
+    expect((await sightingRow(s.id)).developedAt).not.toBeNull();
+    setCatFinderForTests(async () => ({ box: null, mask: null }));
+    try {
+      expect(await developNext()).toBe("idle");
+    } finally {
+      setCatFinderForTests(null);
+    }
+    expect(await sightingRow(s.id)).toMatchObject({ publicReady: false, publicKey: null });
   });
 });
 

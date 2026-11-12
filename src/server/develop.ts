@@ -6,7 +6,7 @@ import { findCat, type Found } from "./catFinder";
 import { publishCatOnly, type KeepArea } from "./photos";
 import { avatarFromPhoto } from "./photoAvatar";
 import { PHONE_TIER_GRACE_SECONDS } from "./spot";
-import { getStorage } from "./storage";
+import { getStorage, removePublicCopy } from "./storage";
 
 /*
  * The server tier of D11: the worker develops public photos the phone could not cut out, oldest first.
@@ -122,8 +122,11 @@ export async function developNext(): Promise<"developed" | "idle"> {
       if (s.catId) await tx.update(cats).set({ avatar }).where(eq(cats.id, s.catId));
       return true;
     });
-    // Lost to the phone tier: its copy stands and this one is left in place. Task 8 adds the delete.
-    if (!won) console.error("[develop] the photo was developed elsewhere first; this public copy is left in place");
+    // Lost to the phone tier (or a caretaker's hold): this copy belongs to no sighting, so it is deleted.
+    if (!won) {
+      console.error("[develop] the photo was developed elsewhere first; this public copy is deleted");
+      await removePublicCopy(key);
+    }
     return "developed";
   } catch (e) {
     // Class name only: errors from storage can carry keys.

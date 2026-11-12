@@ -10,7 +10,7 @@ import { uniqueName } from "../catNames";
 import { NAME_APPROVED, NAME_DISMISSED, NAME_SET } from "../privateActions";
 import { parseCatName } from "@/lib/catNames";
 import { publishScrubbed, type Box } from "../photos";
-import { StoredObjectMissing } from "../storage";
+import { removePublicCopy, StoredObjectMissing } from "../storage";
 import { attachReports, confirmOpenClaim, dismissCatlessReports, fileStaffReport, HOLD_CLAIMS } from "../reports";
 import { enqueueWakeup } from "../wakeups";
 import { autoPublishable, needsHumanTick, regionsOf } from "../photoGate";
@@ -377,7 +377,8 @@ export const photoPublish: Handler = async (caretakerId, body) => {
     if (e instanceof StoredObjectMissing) throw new Refusal(409, "The original photo is missing, so it cannot be published.");
     throw e;
   }
-  return withColonyLock(async (tx) => {
+  try {
+    return await withColonyLock(async (tx) => {
     const moved = await tx
       .update(sightings)
       .set({ publicKey: key, publicReady: true })
@@ -391,26 +392,36 @@ export const photoPublish: Handler = async (caretakerId, body) => {
       inputs: { sightingId, catId: s.catId, regions: regions.length, confirmedNoSensitive: regions.length === 0 },
     });
     return "Published, with the marked areas blurred.";
-  });
+    });
+  } catch (e) {
+    // The copy just made is not the sighting's public copy (someone else published first, or the audit failed): do not leave it readable.
+    await removePublicCopy(key);
+    throw e;
+  }
 };
 
 export const photoHold: Handler = async (caretakerId, body) => {
   const sightingId = reqUuid(body, "sightingId", "The sighting");
-  return withColonyLock(async (tx) => {
-    const moved = await tx
+  const droppedKey = await withColonyLock(async (tx) => {
+    const [before] = await tx.select().from(sightings).where(eq(sightings.id, sightingId)).for("update");
+    // A public no-AI photo still waiting for the worker is held too, so the worker never publishes it later.
+    const waiting = !!before && before.needsDevelop && before.developedAt === null;
+    if (!before || (!before.publicReady && !waiting)) throw new Refusal(409, "This photo is not public.");
+    await tx
       .update(sightings)
-      .set({ publicReady: false, publicKey: null })
-      .where(and(eq(sightings.id, sightingId), eq(sightings.publicReady, true)))
-      .returning({ id: sightings.id, catId: sightings.catId });
-    if (moved.length === 0) throw new Refusal(409, "This photo is not public.");
+      .set({ publicReady: false, publicKey: null, ...(waiting ? { developedAt: new Date() } : {}) })
+      .where(eq(sightings.id, sightingId));
     await audit(tx, {
       action: "photo_held",
       caretakerId,
       reason: "A caretaker held back a photo.",
-      inputs: { sightingId, catId: moved[0].catId },
+      inputs: { sightingId, catId: before.catId },
     });
-    return "Held back. It no longer shows on any public page.";
+    return before.publicKey;
   });
+  // The hold has committed. Only now is the public copy deleted, and a failed delete never undoes the hold.
+  await removePublicCopy(droppedKey);
+  return "Held back. It no longer shows on any public page.";
 };
 
 // ---------- Wakeups the agent gave up on ----------

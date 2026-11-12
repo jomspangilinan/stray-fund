@@ -1271,6 +1271,25 @@ describe("processSpot: the public path (no AI)", () => {
     expect(s).toMatchObject({ publicReady: false, developedAt: null, needsDevelop: true });
   });
 
+  it("phone tier: a copy that lost the develop race is deleted", async () => {
+    const u = await makeUser();
+    const storage = getStorage() as unknown as { readPublic: (k: string) => Buffer };
+    const real = getStorage().putPublic.bind(getStorage());
+    const keys: string[] = [];
+    vi.spyOn(getStorage(), "putPublic").mockImplementationOnce(async (key, buf, type) => {
+      keys.push(key);
+      await real(key, buf, type);
+      await db.update(sightings).set({ developedAt: new Date() });
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const out = await plain(u.id, { box: BOX, mask: await maskOf({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }) });
+    expect(out.developed).toBe(false);
+    expect(keys).toHaveLength(1);
+    expect(() => storage.readPublic(keys[0])).toThrow();
+    const [s] = await sightingRows();
+    expect(s.publicKey).toBeNull();
+  });
+
   it("phone tier: a publish that throws leaves the photo for the worker", async () => {
     const u = await makeUser();
     const storage = getStorage();

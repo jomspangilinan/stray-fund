@@ -52,6 +52,18 @@ describe("memoryStorage", () => {
   });
 });
 
+describe("memoryStorage deletePublic", () => {
+  it("removes a public copy, tolerates a missing one and refuses other keys", async () => {
+    const s = createMemoryStorage();
+    const key = newPublicKey();
+    await s.putPublic(key, Buffer.from("q"), "image/jpeg");
+    await s.deletePublic(key);
+    expect(() => s.readPublic(key)).toThrow();
+    await s.deletePublic(key);
+    await expect(s.deletePublic("../x")).rejects.toThrow("Invalid storage key");
+  });
+});
+
 describe("s3Storage with a stub client", () => {
   function stub() {
     const sent: { name: string; input: Record<string, unknown> }[] = [];
@@ -96,6 +108,17 @@ describe("s3Storage with a stub client", () => {
     expect(sent[0].input).toMatchObject({ Bucket: "priv-bucket", Key: "originals/x.jpg" });
   });
 
+  it("deletes public objects from the public bucket and refuses other keys", async () => {
+    const { s, sent } = stub();
+    const key = newPublicKey();
+    await s.deletePublic(key);
+    expect(sent[0].name).toBe("DeleteObjectCommand");
+    expect(sent[0].input).toMatchObject({ Bucket: "pub-bucket", Key: key });
+    await expect(s.deletePublic("../x")).rejects.toThrow("Invalid storage key");
+    await expect(s.deletePublic(newPrivateKey())).rejects.toThrow("Invalid storage key");
+    expect(sent).toHaveLength(1);
+  });
+
   it("builds public urls from the base url", () => {
     expect(stub().s.publicUrl("photos/x.jpg")).toBe("https://cdn.example.com/photos/x.jpg");
   });
@@ -131,6 +154,16 @@ describe("localStorage driver and dev route", () => {
     await expect(s.putPublic("../escape.jpg", Buffer.from("x"), "image/jpeg")).rejects.toThrow();
     await expect(s.getPrivate("../../etc/passwd")).rejects.toThrow();
     expect(await readLocalPublic(dir, "photos/../../x.jpg")).toBeNull();
+  });
+
+  it("deletes a public file, ignores a missing one and refuses other keys", async () => {
+    const { dir, s } = await make();
+    const uk = newPublicKey();
+    await s.putPublic(uk, Buffer.from("open"), "image/jpeg");
+    await s.deletePublic(uk);
+    expect(await readLocalPublic(dir, uk)).toBeNull();
+    await s.deletePublic(uk);
+    await expect(s.deletePublic("../escape.jpg")).rejects.toThrow("Invalid storage key");
   });
 
   it("route returns 404 in production", async () => {

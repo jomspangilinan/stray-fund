@@ -134,7 +134,7 @@ Replace the placeholders in the policy: `YOUR-PRIVATE-BUCKET`, `YOUR-PUBLIC-BUCK
     {
       "Sid": "PublicPhotos",
       "Effect": "Allow",
-      "Action": "s3:PutObject",
+      "Action": ["s3:PutObject", "s3:DeleteObject"],
       "Resource": "arn:aws:s3:::YOUR-PUBLIC-BUCKET/photos/*"
     },
     {
@@ -174,7 +174,7 @@ Replace the placeholders in the policy: `YOUR-PRIVATE-BUCKET`, `YOUR-PUBLIC-BUCK
 
 The three `Bedrock...` statements are the three-part policy AWS documents for a `global.` inference profile (https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html): the profile in your region, the regional model reached through that profile, and the region-less global model ARN (`arn:aws:bedrock:::foundation-model/...`, where AWS sets `aws:RequestedRegion` to `unspecified`). All three are needed; removing any one denies the call. They name one model and one profile, with no wildcards. The app calls `InvokeModel` without streaming, so nothing else is allowed. If you change `AI_MODEL`, change the model name in all three statements. If your organisation uses a Service Control Policy that blocks unused regions, it must allow `unspecified` for Bedrock (same page).
 
-The code only calls `PutObject` and `GetObject` on S3, so the policy grants nothing else (no `ListBucket`, no delete). One side effect to expect: S3 answers a missing key with 403 instead of 404 when the caller cannot list the bucket, so a missing original shows as an access error. Live check 7 below will show it.
+The code only calls `PutObject` and `GetObject` on S3, plus `DeleteObject` on the public `photos/*` keys (a caretaker who withdraws a photo, or a publish that lost a race, deletes the public copy), so the policy grants nothing else (no `ListBucket`, no delete of originals). Until `s3:DeleteObject` is on the role, a withdrawn photo's public copy stays readable at its old URL: the hold still commits and the failed delete is logged as `[storage] could not delete a public copy`. One side effect to expect: S3 answers a missing key with 403 instead of 404 when the caller cannot list the bucket, so a missing original shows as an access error. Live check 7 below will show it.
 
 **Bedrock sends the photo to other regions.** A `global.` profile may process a request in any supported commercial region. If photos could show people, decide whether that is acceptable for your users; a geographic profile keeps processing in one geography, and its availability for this model has not been checked. **Required before real money:** decide this, and test one real model call with this exact policy (ask first: it costs money and needs your OK).
 
