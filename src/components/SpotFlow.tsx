@@ -241,10 +241,10 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
           onVideoReady={setVideo}
           bracketBox={bracketBox}
           onStageRect={setStage}
-          scanning={sending && Boolean(capturedUrl) && aiPath}
+          scanning={false}
           stageNote={
-            sending && capturedUrl && !aiPath ? (
-              <CaptureCard photoUrl={capturedUrl} label={sendLabel} />
+            sending && capturedUrl ? (
+              <CaptureCard photoUrl={capturedUrl} label={aiPath ? null : sendLabel} />
             ) : !(sending && capturedUrl) && detector.state !== "off" ? (
               <p className="cam-status" role="status" aria-live="polite">
                 {detector.state === "found" ? "Cat found" : "Looking for a cat"}
@@ -265,14 +265,7 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
           overlay={
             sending && capturedUrl ? (
               <>
-                {aiPath ? (
-                  <div className="cam-frozen">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={capturedUrl} alt="The photo you just took" className="h-full w-full object-cover" />
-                  </div>
-                ) : (
-                  <CaptureDip />
-                )}
+                <CaptureDip />
                 <CaptureFlash />
               </>
             ) : null

@@ -65,3 +65,11 @@ export function developLines({ developed, soon }: { developed: boolean; soon: bo
   if (soon) return { card: null, yard: "Your cat is in the yard. The photo will appear soon." };
   return { card: "Developing…", yard: "Your cat is in the yard." };
 }
+
+/** Poll state tagged with the photo it belongs to, so it can never be read as another photo's. */
+export type Tagged<T> = { id: string | null; value: T };
+
+/** The state for `id`: the stored value if it was stored for this photo, otherwise `fresh`. */
+export function forSighting<T>(stored: Tagged<T>, id: string | null, fresh: T): T {
+  return stored.id === id && id !== null ? stored.value : fresh;
+}

@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NEUTRAL_AVATAR } from "../src/lib/avatar";
-import { developLines, pollDeveloped, type DevelopStatus } from "../src/lib/developPoll";
+import { developLines, forSighting, pollDeveloped, type DevelopStatus } from "../src/lib/developPoll";
 import { DEVELOP_POLL_LIMIT_MS, DEVELOP_POLL_MS, DEVELOP_SOON_MS } from "../src/lib/scanSteps";
 import { CaptureCard } from "../src/components/CaptureAnimation";
 
@@ -107,5 +107,17 @@ describe("the capture card", () => {
   });
   it("never mentions AI or a check", () => {
     expect(html("Developing…")).not.toMatch(/\bAI\b|check/i);
+  });
+});
+
+describe("poll state per photo", () => {
+  const fresh = { developed: false, soon: false };
+  it("gives a second photo a fresh state, not the first photo's", () => {
+    const first = { id: "photo-1", value: { developed: true, soon: true } };
+    expect(forSighting(first, "photo-1", fresh)).toEqual({ developed: true, soon: true });
+    expect(forSighting(first, "photo-2", fresh)).toEqual(fresh);
+  });
+  it("is fresh with no photo", () => {
+    expect(forSighting({ id: "photo-1", value: { developed: true, soon: true } }, null, fresh)).toEqual(fresh);
   });
 });
