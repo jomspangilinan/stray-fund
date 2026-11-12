@@ -429,7 +429,8 @@ export const photoHold: Handler = async (caretakerId, body) => {
     if (!before || (!before.publicReady && !waiting)) throw new Refusal(409, "This photo is not public.");
     await tx
       .update(sightings)
-      .set({ publicReady: false, publicKey: null, ...(waiting ? { developedAt: new Date() } : {}) })
+      // A held photo is not re-cut: a later publish by a person is the copy that stays.
+      .set({ publicReady: false, publicKey: null, needsRecut: false, ...(waiting ? { developedAt: new Date() } : {}) })
       .where(eq(sightings.id, sightingId));
     await audit(tx, {
       action: "photo_held",
@@ -480,6 +481,8 @@ export const photoRotate: Handler = async (caretakerId, body) => {
       if (s.publicReady) {
         newKey = (await publishCatOnly(s.originalKey, { box: catBox, mask: null }, regionsOf(assessment))).key;
         patch.publicKey = newKey;
+        // The new copy is the circle, so the worker cuts the cat out of the turned original once more.
+        patch.needsRecut = true;
       }
       await tx.update(sightings).set(patch).where(eq(sightings.id, sightingId));
       await audit(tx, {
