@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { COLONY } from "@/lib/config";
 import { NEUTRAL_AVATAR, parseAvatar } from "@/lib/avatar";
 import { goalPercent } from "@/lib/goal";
-import { careMarks, pickYard, yardStage, type YardCat, type YardGroup } from "@/lib/yard";
+import { YOURS_WINDOW_HOURS, careMarks, pickYard, yardStage, type YardCat, type YardGroup } from "@/lib/yard";
 import { pickMissions, type Mission, type MissionCat } from "@/lib/missions";
 import { hidePrivateInDemo } from "./demoPrivacy";
 import { db } from "./db/client";
@@ -867,7 +867,8 @@ export type PublicYard = {
  * is read through parseAvatar, so only fixed palette names can reach the drawing. Nothing about where a cat is.
  */
 export async function getYard(viewerId: string | null): Promise<PublicYard> {
-  const [rows, goal, helped] = await Promise.all([
+  const since = new Date(Date.now() - YOURS_WINDOW_HOURS * 3_600_000);
+  const [rows, goal, helped, yoursRows] = await Promise.all([
     db
       .select({ ...publicCatColumns, avatar: cats.avatar })
       .from(cats)
@@ -875,9 +876,23 @@ export async function getYard(viewerId: string | null): Promise<PublicYard> {
       .limit(MAX_CATS),
     getGoalProgress(),
     viewerId ? getHelpedEntries(viewerId) : Promise.resolve([] as HelpedEntry[]),
+    viewerId
+      ? db
+          .selectDistinct({ catId: sightings.catId })
+          .from(sightings)
+          .where(and(eq(sightings.caughtByUserId, viewerId), inArray(sightings.state, ["matched", "new_cat"]), isNotNull(sightings.catId), sql`${sightings.createdAt} >= ${since}`))
+      : Promise.resolve([] as { catId: string | null }[]),
   ]);
-  const treats = await loadTreatments(rows.map((r) => r.id));
-  const all: YardCat[] = rows.map((r) => {
+  const yours = new Set(yoursRows.flatMap((r) => (r.catId ? [r.catId] : [])));
+  // The viewer's own recent cats are shown even when newer cats have pushed them out of the newest MAX_CATS.
+  const have = new Set(rows.map((r) => r.id));
+  const missing = [...yours].filter((id) => !have.has(id));
+  const extra = missing.length
+    ? await db.select({ ...publicCatColumns, avatar: cats.avatar }).from(cats).where(inArray(cats.id, missing))
+    : [];
+  const everyone = [...rows, ...extra];
+  const treats = await loadTreatments(everyone.map((r) => r.id));
+  const all: YardCat[] = everyone.map((r) => {
     const pub = publicCat(r, contextFor(r.id, [], treats));
     return {
       id: r.id,
@@ -887,6 +902,7 @@ export async function getYard(viewerId: string | null): Promise<PublicYard> {
       avatar: parseAvatar(r.avatar) ?? NEUTRAL_AVATAR,
       marks: careMarks(pub.journey),
       female: r.sex === "female",
+      yours: yours.has(r.id),
     };
   });
   return {
@@ -896,7 +912,6 @@ export async function getYard(viewerId: string | null): Promise<PublicYard> {
     goal,
   };
 }
-
 
 // ---------- The priority list ----------
 

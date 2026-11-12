@@ -882,6 +882,21 @@ input[type="checkbox"] {
     transform: scale(1);
   }
 }
+/* "Yours" marks a cat the viewer spotted in the last day. It sits on the cat's head, away from the name tag. */
+.yard-yours {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, -20%);
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: var(--pop, #f5c542);
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.25rem;
+  white-space: nowrap;
+}
 /* A name tag under each cat, always shown so touch users see names. Its top edge is the feet line (15/16 of the square). */
 .yard-name {
   position: absolute;

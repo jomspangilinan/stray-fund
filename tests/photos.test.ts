@@ -11,6 +11,9 @@ import {
   storeOriginal,
   type KeepArea,
 } from "../src/server/photos";
+import { FUR } from "../src/lib/avatar";
+import { avatarFromPixels } from "../src/lib/photoAvatar";
+import { avatarFromPhoto } from "../src/server/photoAvatar";
 import { getStorage } from "../src/server/storage";
 import { checkerImage, gpsJpeg, greyRegion, variance } from "./helpers/images";
 
@@ -374,5 +377,45 @@ describe("catOnly", () => {
     expect(m.format).toBe("jpeg");
     expect(m.exif).toBeUndefined();
     expect([m.width, m.height]).toEqual([400, 300]);
+  });
+});
+
+describe("avatarFromPhoto", () => {
+  const rgb = (hex: string) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+  const jpegOf = (px: (x: number, y: number) => string) => {
+    const data = Buffer.alloc(64 * 64 * 3);
+    for (let y = 0; y < 64; y++)
+      for (let x = 0; x < 64; x++) data.set(rgb(px(x, y)), (y * 64 + x) * 3);
+    return sharp(data, { raw: { width: 64, height: 64, channels: 3 } }).jpeg({ quality: 100, chromaSubsampling: "4:4:4" }).toBuffer();
+  };
+
+  it("reads a one-colour photo as a solid cat", async () => {
+    expect(await avatarFromPhoto(await jpegOf(() => FUR.ginger), null)).toEqual({ pattern: "solid", base: "ginger", accent: "ginger" });
+  });
+
+  it("reads black on one side and white on the other as a tuxedo", async () => {
+    const a = await avatarFromPhoto(await jpegOf((x) => (x < 32 ? FUR.black : FUR.white)), { x: 0, y: 0, w: 1, h: 1 });
+    expect(a.pattern).toBe("tuxedo");
+    expect([a.base, a.accent].sort()).toEqual(["black", "white"]);
+  });
+
+  it("reads 80% grey and 20% cream as a bicolour", async () => {
+    // 64 columns: the last 13 (about 20%) are cream.
+    expect(await avatarFromPhoto(await jpegOf((x) => (x < 51 ? FUR.grey : FUR.cream)), { x: 0, y: 0, w: 1, h: 1 })).toEqual({ pattern: "bicolour", base: "grey", accent: "cream" });
+  });
+
+  it("crops to the box, and to the middle when there is none", async () => {
+    const img = await jpegOf((x, y) => (x >= 16 && x < 48 && y >= 16 && y < 48 ? FUR.brown : FUR.white));
+    expect((await avatarFromPhoto(img, { x: 0.25, y: 0.25, w: 0.5, h: 0.5 })).base).toBe("brown");
+    expect((await avatarFromPhoto(img, null)).base).toBe("brown");
+    expect((await avatarFromPhoto(img, { x: 0, y: 0, w: 0.2, h: 0.2 })).base).toBe("white");
+  });
+
+  it("keeps a second colour below 15% out of the avatar and ignores see-through pixels", () => {
+    const px = new Uint8Array(16 * 16 * 4);
+    for (let p = 0; p < 256; p++) px.set([...rgb(p < 38 ? FUR.cream : FUR.grey), 255], p * 4);
+    expect(avatarFromPixels(px, 16, 16)).toEqual({ pattern: "solid", base: "grey", accent: "grey" });
+    for (let p = 0; p < 256; p++) px[p * 4 + 3] = p < 128 ? 0 : 255;
+    expect(avatarFromPixels(px, 16, 16).base).toBe("grey");
   });
 });

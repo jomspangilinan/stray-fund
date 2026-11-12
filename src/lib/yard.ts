@@ -21,7 +21,12 @@ export type YardCat = {
   marks: CareMark[];
   /** A girl wears a ribbon. Only this yes or no reaches the drawing. */
   female: boolean;
+  /** The viewer spotted this cat in the last 24 hours. Only a yes or no; never who else did. */
+  yours: boolean;
 };
+
+/** A cat the viewer spotted this recently stays in their yard and wears a "Yours" tag. */
+export const YOURS_WINDOW_HOURS = 24;
 
 /** At 3 cats or fewer a cat is this many times its size at a full yard. */
 export const YARD_FEW = 3;
@@ -135,9 +140,9 @@ export function yardStage(neutered: number, goal: number): 0 | 1 | 2 | 3 {
   return 0;
 }
 
-/** Up to YARD_MAX cats: waiting cats the viewer helped, waiting cats, the viewer's other helped cats, then the rest. */
+/** Up to YARD_MAX cats: the viewer's own recent spots first, then waiting cats the viewer helped, waiting cats, the viewer's other helped cats, then the rest. */
 export function pickYard(all: YardCat[], helped: ReadonlySet<string>, max: number = YARD_MAX): YardCat[] {
-  const rank = (c: YardCat) => (c.group === "waiting" ? 0 : 2) + (helped.has(c.id) ? 0 : 1);
+  const rank = (c: YardCat) => (c.yours ? -1 : (c.group === "waiting" ? 0 : 2) + (helped.has(c.id) ? 0 : 1));
   return all
     .map((c, i) => ({ c, i }))
     .sort((a, b) => rank(a.c) - rank(b.c) || a.i - b.i)

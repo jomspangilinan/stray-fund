@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { NEUTRAL_AVATAR } from "../src/lib/avatar";
 import { TAG_MAX, YARD_MAX, careMarks, phoneBoxes, placeAt, tagName, pickYard, slotFor, slotsFor, yardScale, yardSlots, yardStage, type YardCat } from "../src/lib/yard";
 import { closePool, db } from "../src/server/db/client";
-import { cats, sightings, treatments } from "../src/server/db/schema";
+import { cats, sightings, treatments, users } from "../src/server/db/schema";
 import { getYard } from "../src/server/public";
 import { truncateAll } from "./helpers/db";
 
@@ -12,7 +12,7 @@ const cat = (id: string, group: YardCat["group"] = "neutered"): YardCat => ({
   group,
   statusLabel: group,
   avatar: NEUTRAL_AVATAR,
-  marks: [], female: false,
+  marks: [], female: false, yours: false,
 });
 
 describe("slots", () => {
@@ -202,7 +202,7 @@ describe("getYard whitelist", () => {
     const yard = await getYard(null);
     expect(Object.keys(yard).sort()).toEqual(["cats", "goal", "stage", "total"]);
     expect(yard.cats).toHaveLength(1);
-    expect(Object.keys(yard.cats[0]).sort()).toEqual(["avatar", "female", "group", "id", "marks", "name", "statusLabel"]);
+    expect(Object.keys(yard.cats[0]).sort()).toEqual(["avatar", "female", "group", "id", "marks", "name", "statusLabel", "yours"]);
     expect(yard.cats[0]).toMatchObject({ name: "Mimi", group: "waiting", avatar: { pattern: "tabby", base: "ginger", accent: "brown" }, marks: ["collar"], female: false });
     const text = JSON.stringify(yard);
     for (const s of ["10.987654321", "120.123456789", "10.55555555", "120.66666666", "exact", "fuzzed", "secret-marking-sentinel", "bio-sentinel", "originals/", "orange"]) {
@@ -231,6 +231,31 @@ describe("getYard whitelist", () => {
     const yard = await getYard(null);
     expect(yard.cats).toHaveLength(2);
     for (const c of yard.cats) expect(c.avatar).toEqual(NEUTRAL_AVATAR);
+  });
+
+  it("marks cats the viewer spotted in the last 24 hours as yours, even under 200 newer cats", async () => {
+    const [me] = await db.insert(users).values({ username: "yard_viewer", role: "donor" }).returning();
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
+    const [recent, old] = await db
+      .insert(cats)
+      .values([
+        { name: "Recent", areaName: "x", createdAt: hoursAgo(300) },
+        { name: "Old", areaName: "x", createdAt: hoursAgo(301) },
+      ])
+      .returning();
+    await db.insert(sightings).values([
+      { catId: recent.id, originalKey: "o/1.jpg", state: "new_cat", caughtByUserId: me.id, createdAt: hoursAgo(1) },
+      { catId: old.id, originalKey: "o/2.jpg", state: "new_cat", caughtByUserId: me.id, createdAt: hoursAgo(25) },
+    ]);
+    await db.insert(cats).values(Array.from({ length: 200 }, (_, i) => ({ name: `N${i}`, areaName: "x", createdAt: hoursAgo(i / 100) })));
+    const mine = await getYard(me.id);
+    const byName = Object.fromEntries(mine.cats.map((c) => [c.name, c.yours]));
+    expect(byName.Recent).toBe(true);
+    expect(mine.cats[0].name).toBe("Recent");
+    expect(mine.cats.filter((c) => c.yours)).toHaveLength(1);
+    expect(byName.Old).toBeUndefined();
+    const anon = await getYard(null);
+    expect(anon.cats.every((c) => !c.yours)).toBe(true);
   });
 
   it("says how many cats there are in total when the yard shows fewer", async () => {

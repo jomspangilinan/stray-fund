@@ -17,6 +17,7 @@ const cat = (id: string, name: string, avatar: Avatar, group: YardCat["group"] =
   avatar,
   marks: [],
   female: false,
+  yours: false,
 });
 const yard = (cats: YardCat[], stage: PublicYard["stage"] = 1): PublicYard => ({ cats, total: cats.length, stage, goal });
 
@@ -124,6 +125,15 @@ describe("Yard", () => {
     const again = renderToStaticMarkup(createElement(Yard, { yard: yard([cat("11111111-1111-4111-8111-111111111111", "Mimi", { ...a, base: "grey" })]) }));
     const pos = (h: string) => h.match(/left:[^;]+;top:[^;]+/)?.[0];
     expect(pos(one)).toBe(pos(again));
+  });
+});
+
+describe("Yours tag", () => {
+  it("tags only the viewer's own cats", () => {
+    const mine = { ...cat("a", "Mine", { pattern: "solid", base: "ginger", accent: "ginger" }), yours: true };
+    const html = renderToStaticMarkup(createElement(Yard, { yard: yard([mine, cat("b", "Other", { pattern: "solid", base: "grey", accent: "grey" })]) }));
+    expect(html.match(/yard-yours/g)).toHaveLength(1);
+    expect(html).toContain(">Yours<");
   });
 });
 

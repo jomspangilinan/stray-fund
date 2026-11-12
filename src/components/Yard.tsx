@@ -69,6 +69,7 @@ export function Yard({ yard, intro = false }: { yard: PublicYard; intro?: boolea
                     <span className="yard-bob">
                       <CatAvatar avatar={c.avatar} id={c.id} marks={c.marks} ribbon={c.female} />
                     </span>
+                    {c.yours && <span className="yard-yours">Yours</span>}
                     <span className="yard-name" aria-hidden="true">
                       {tagName(c.name)}
                     </span>
