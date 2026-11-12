@@ -129,7 +129,7 @@ Read this before you trust it with anything real.
 - **Refunds and chargebacks are handled in code but not proven on real PayPal.** A refund whose webhook is lost is not polled.
 - **Items under "Before real money" in [docs/deploy.md](docs/deploy.md)** are open: MFA and key rotation, TLS-only bucket policies, a separate live PayPal app, payouts stuck at PayPal that need a developer, and more.
 - **Not yet verified on real PayPal or Bedrock:** real webhook signatures and payload shapes, a donation captured through the screen, the treasurer on Bedrock, the toolkit's `get_order` through the app and `list_transactions` (it returned 403 on the sandbox app), phone camera over HTTPS, real S3. Sandbox order, capture and payout calls were run once from a script.
-- **Cut or later:** adoption fees, foster allowance, monthly sponsors, merging duplicate cats, a map.
+- **Cut or later:** adoption fees, foster allowance, monthly sponsors, a map. Merging duplicate cats works only for a duplicate a plain public photo made, while it is spotted and has no history ("Same cat as…" on the caretaker's cat profile).
 
 ## Licence
 

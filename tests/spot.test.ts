@@ -721,7 +721,7 @@ describe("public photo", () => {
     }
   });
 
-  it("publishes with an empty region list only when the AI says nothing sensitive is left", async () => {
+  it("publishes with an empty region list when the AI says nothing sensitive is left", async () => {
     script.assess = () => assessWith({ no_sensitive_content: true, sensitive_regions: [] });
     const u = await makeUser();
     await processSpot({ ai: true, jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });

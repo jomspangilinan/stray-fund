@@ -878,9 +878,11 @@ describe("photos", () => {
   it("holding removes the photo from public pages", async () => {
     const { cat, s } = await heldSighting({ ...ASSESS });
     await act("photo_publish", { sightingId: s.id, noSensitive: true });
+    // A circle copy waiting for the worker's re-cut: the hold cancels the re-cut too.
+    await db.update(sightings).set({ needsRecut: true }).where(eq(sightings.id, s.id));
     expect((await act("photo_hold", { sightingId: s.id })).status).toBe(200);
     const row = await sightingRow(s.id);
-    expect(row).toMatchObject({ publicReady: false, publicKey: null });
+    expect(row).toMatchObject({ publicReady: false, publicKey: null, needsRecut: false });
     expect((await getCatCard(cat.id))!.cat.photoUrl).toBeNull();
     expect((await act("photo_hold", { sightingId: s.id })).status).toBe(409);
   });
@@ -994,6 +996,8 @@ describe("photo_rotate", () => {
     const row = await sightingRow(s.id);
     expect(row.publicReady).toBe(true);
     expect(row.publicKey).not.toBe(old);
+    // The new copy is the circle, so the worker re-cuts the turned original.
+    expect(row.needsRecut).toBe(true);
     const storage = getStorage() as unknown as Mem;
     expect(() => storage.readPublic(old)).toThrow();
     const meta = await sharp(storage.readPublic(row.publicKey!)).metadata();
@@ -1003,7 +1007,7 @@ describe("photo_rotate", () => {
   it("a private photo publishes nothing", async () => {
     const { s } = await rotatable();
     expect((await act("photo_rotate", { sightingId: s.id, direction: "left" })).status).toBe(200);
-    expect(await sightingRow(s.id)).toMatchObject({ publicReady: false, publicKey: null });
+    expect(await sightingRow(s.id)).toMatchObject({ publicReady: false, publicKey: null, needsRecut: false });
   });
 
   it("a photo still waiting for the worker is only turned, and the worker develops the turned original", async () => {
@@ -1217,8 +1221,17 @@ describe("cat_merge", () => {
       inputs: { catId: dup.cat.id, name: dup.cat.name, intoCatId: real.id, intoName: real.name, sightingIds: [dup.s.id] },
     });
     expect((await listAgentActions()).find((f) => f.id === row.id)?.action).toBe("Caretaker merged a cat added twice");
-    // The merge leaves no history against the real cat.
+    // The duplicate is gone, so a second merge finds nothing.
     expect((await act("cat_merge", { catId: dup.cat.id, intoCatId: real.id })).status).toBe(404);
+  });
+
+  it("leaves no history against the real cat: a plain real cat can still be removed after a merge", async () => {
+    const real = await plainCat();
+    const dup = await plainCat();
+    expect((await act("cat_merge", { catId: dup.cat.id, intoCatId: real.cat.id })).status).toBe(200);
+    expect(await sightingRow(dup.s.id)).toMatchObject({ catId: real.cat.id, needsDevelop: true });
+    expect(await act("cat_remove", { catId: real.cat.id })).toMatchObject({ status: 200, ok: true });
+    expect(await catRow(real.cat.id)).toBeUndefined();
   });
 
   it("refuses a duplicate with a report (409) and changes nothing", async () => {
