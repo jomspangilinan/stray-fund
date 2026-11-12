@@ -7,7 +7,6 @@ import { PageHead } from "@/components/PageHead";
 import { PageSwitch } from "@/components/PageSwitch";
 import { HELPED_PAGES } from "@/lib/nav";
 import { SignInGate } from "@/components/SignInGate";
-import { isDemoMode } from "@/lib/config";
 import { helpedLine } from "@/lib/helpedLine";
 import { CelebrationNote } from "@/components/CelebrationNote";
 import { streakLabel } from "@/lib/streak";
@@ -23,7 +22,7 @@ async function Helped() {
   const session = await getSession();
   if (!session) {
     return (
-      <SignInGate demo={isDemoMode()}>
+      <SignInGate>
         <p className="font-bold">The cats you have helped show up here.</p>
         <p className="soft">Each one comes with what was given, plus the streak and badges.</p>
       </SignInGate>

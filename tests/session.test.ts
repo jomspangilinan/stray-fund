@@ -18,7 +18,7 @@ import { POST as donationPost } from "../src/app/api/donations/route";
 import { ensureDemoPersonas } from "../src/server/demoPersonas";
 import { GET as catGet } from "../src/app/api/cats/[id]/route";
 import { POST as caretakerPost } from "../src/app/api/caretaker/[action]/route";
-import { DEMO_ROLES, GATE_PERSONA } from "../src/lib/demoRoles";
+import { DEMO_ROLES } from "../src/lib/demoRoles";
 import {
   AuthError,
   getSession,
@@ -220,10 +220,9 @@ describe("demo neighbour", () => {
     expect(text).not.toContain("120.123456789");
   });
 
-  it("is what Try it now signs in as, and the roles strip offers it", async () => {
-    expect(GATE_PERSONA).toBe("neighbour");
+  it("the roles strip's Neighbour is the one-tap way into the demo, as an ordinary neighbour with no desk", async () => {
     expect(DEMO_ROLES.map((r) => r.key)).toEqual(["neighbour", "caretaker", "vet"]);
-    keepCookie(await post({ persona: GATE_PERSONA }));
+    keepCookie(await post({ persona: "neighbour" }));
     expect((await getSession())?.role).toBe("donor");
   });
 });

@@ -18,7 +18,7 @@ type Outcome =
   | { kind: "cancelled" }
   | { kind: "error"; message: string };
 
-export function DonateForm({ clientId, username, demo = false, testMoney = true }: { clientId: string; username: string | null; demo?: boolean; testMoney?: boolean }) {
+export function DonateForm({ clientId, username, testMoney = true }: { clientId: string; username: string | null; testMoney?: boolean }) {
   const customId = useId();
   const [preset, setPreset] = useState<number | "other">(50_000);
   const [custom, setCustom] = useState("");
@@ -33,7 +33,7 @@ export function DonateForm({ clientId, username, demo = false, testMoney = true 
 
   if (!username) {
     return (
-      <SignInGate demo={demo}>
+      <SignInGate>
         <p className="font-bold">Give ₱100, ₱500, ₱1,500 or any amount through PayPal.</p>
       </SignInGate>
     );

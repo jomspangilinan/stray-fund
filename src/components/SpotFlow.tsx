@@ -45,7 +45,7 @@ function padded(b: { x: number; y: number; w: number; h: number }) {
 
 const AREA = COLONY.area_name.split(",")[0];
 
-export function SpotFlow({ username, demo = false }: { username: string | null; demo?: boolean }) {
+export function SpotFlow({ username }: { username: string | null }) {
   const [phase, setPhase] = useState<Phase>({ kind: "camera" });
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -115,7 +115,7 @@ export function SpotFlow({ username, demo = false }: { username: string | null; 
 
   if (!username) {
     return (
-      <SignInGate demo={demo}>
+      <SignInGate>
         <p className="font-bold">Take a photo of a stray cat.</p>
         <p className="soft">We check if the cat is already in the yard, and add it if it is new. Your exact spot stays private.</p>
       </SignInGate>
