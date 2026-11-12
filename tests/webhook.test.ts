@@ -136,6 +136,25 @@ describe("signature", () => {
   });
 });
 
+describe("body cap", () => {
+  it("refuses a body over 64 KB with 413 before any call to PayPal", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    fetchSpy.mockClear();
+    const res = await send("x".repeat(64 * 1024 + 1));
+    expect(res.status).toBe(413);
+    expect(fetchSpy).toHaveBeenCalledTimes(0);
+    expect(await eventRows()).toHaveLength(0);
+  });
+
+  it("still processes a genuine event just under the cap", async () => {
+    const u = await makeDonor();
+    const { orderId } = await makePendingOrder(u.id);
+    const res = await send(JSON.stringify(captureEvent("EV-CAP", orderId)));
+    expect(res.status).toBe(200);
+    expect(await eventRows()).toHaveLength(1);
+  });
+});
+
 describe("events", () => {
   it("records a capture and queues one wakeup", async () => {
     const u = await makeDonor();

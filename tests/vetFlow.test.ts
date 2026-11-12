@@ -1475,7 +1475,7 @@ describe("vet routes", () => {
       await signIn(vet, "vet");
       expect((await bookingPost(bookReq({ catId: "nope", date: today() }))).status).toBe(404);
       expect(
-        (await bookingPost(new Request("http://x", { method: "POST", body: "{bad" }))).status,
+        (await bookingPost(new Request("http://x", { method: "POST", headers: { "content-type": "application/json" }, body: "{bad" }))).status,
       ).toBe(400);
       const [cat] = await db.insert(cats).values({ name: "C", areaName: "A", status: "queued" }).returning();
       expect((await bookingPost(bookReq({ catId: cat.id, date: today() }))).status).toBe(409);

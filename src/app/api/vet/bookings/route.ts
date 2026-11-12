@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { bodyRefusal, JSON_BODY_MAX, readJson } from "@/server/http";
 import { RateLimited } from "@/server/spot";
 import { describeError } from "@/server/errors";
 import { isUuid, manilaDate } from "@/server/public";
@@ -16,8 +17,10 @@ export async function POST(req: Request) {
 
     let body: { catId?: unknown; date?: unknown };
     try {
-      body = (await req.json()) as typeof body;
-    } catch {
+      body = (await readJson(req, JSON_BODY_MAX)) as typeof body;
+    } catch (e) {
+      const refused = bodyRefusal(e);
+      if (refused) return fail(refused.message, refused.status);
       return fail("Send the booking as JSON", 400);
     }
     if (typeof body?.catId !== "string" || !isUuid(body.catId)) return fail("There is no such cat", 404);

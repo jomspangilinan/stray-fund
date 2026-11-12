@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
+import { bodyRefusal, readLimited, WEBHOOK_BODY_MAX } from "@/server/http";
 import { handleWebhookEvent, verifyWebhook, type WebhookEvent } from "@/server/paypal/webhook";
 
 export async function POST(req: Request) {
-  // Read once, as text. The same bytes go to verification and to JSON.parse.
-  const raw = await req.text();
   try {
+    // Read once, capped. The same bytes go to verification and to JSON.parse.
+    let raw: string;
+    try {
+      raw = Buffer.from(await readLimited(req, WEBHOOK_BODY_MAX)).toString("utf8");
+    } catch (e) {
+      const refused = bodyRefusal(e);
+      if (refused) return NextResponse.json({ error: refused.message }, { status: refused.status });
+      throw e;
+    }
     if (!(await verifyWebhook(req.headers, raw))) {
       return NextResponse.json({ error: "Bad signature" }, { status: 400 });
     }

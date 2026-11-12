@@ -5,6 +5,44 @@ export class BodyTooLarge extends Error {
   }
 }
 
+export const JSON_BODY_MAX = 4 * 1024;
+export const WEBHOOK_BODY_MAX = 64 * 1024;
+
+export class UnsupportedMediaType extends Error {
+  constructor() {
+    super("Send the request as JSON.");
+    this.name = "UnsupportedMediaType";
+  }
+}
+
+/**
+ * Reads a JSON body. A non-JSON content type is refused so a form on another site cannot post to a
+ * cookie route, and the read stops at maxBytes. A body that does not parse throws a SyntaxError.
+ */
+export async function readJson(req: Request, maxBytes: number): Promise<unknown> {
+  if (!(req.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
+    throw new UnsupportedMediaType();
+  }
+  return JSON.parse(Buffer.from(await readLimited(req, maxBytes)).toString("utf8"));
+}
+
+/** Like readJson, but a body that is not valid JSON gives null so the caller can answer its own 400. */
+export async function readJsonOrNull(req: Request, maxBytes: number): Promise<unknown> {
+  try {
+    return await readJson(req, maxBytes);
+  } catch (e) {
+    if (e instanceof SyntaxError) return null;
+    throw e;
+  }
+}
+
+/** The status and one-sentence message for a refused body, or null when the error is something else. */
+export function bodyRefusal(e: unknown): { status: number; message: string } | null {
+  if (e instanceof UnsupportedMediaType) return { status: 415, message: "Send the request as JSON." };
+  if (e instanceof BodyTooLarge) return { status: 413, message: "That request is too large." };
+  return null;
+}
+
 /** Reads a request body, giving up as soon as it passes the limit instead of buffering all of it. */
 export async function readLimited(req: Request, maxBytes: number): Promise<Uint8Array> {
   const declared = Number(req.headers.get("content-length"));

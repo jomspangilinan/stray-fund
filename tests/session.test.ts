@@ -228,6 +228,67 @@ describe("demo neighbour", () => {
   });
 });
 
+describe("cookie routes take JSON only and cap the body", () => {
+  it("refuses a form-typed session post with 415 and sets no cookie", async () => {
+    const res = await sessionPost(
+      new Request("http://localhost/api/session", {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: '{"username":"csrf_probe","p":"="}',
+      }),
+    );
+    expect(res.status).toBe(415);
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(await db.select().from(users)).toHaveLength(0);
+  });
+
+  it("refuses a 5 KB session body with 413 and sets no cookie", async () => {
+    const res = await post({ username: "big_probe", pad: "x".repeat(5 * 1024) });
+    expect(res.status).toBe(413);
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("refuses an oversized body that arrives without a content-length", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(JSON.stringify({ username: "big_probe", pad: "x".repeat(5 * 1024) })));
+        c.close();
+      },
+    });
+    const res = await sessionPost(
+      new Request("http://localhost/api/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        duplex: "half",
+      } as RequestInit),
+    );
+    expect(res.status).toBe(413);
+  });
+
+  it("donations refuse text/plain with 415 and nothing reaches PayPal", async () => {
+    keepCookie(await post({ username: "form_donor" }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const res = await donationPost(
+      new Request("http://localhost/api/donations", {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: JSON.stringify({ amount: 10_000, attemptId: crypto.randomUUID() }),
+      }),
+    );
+    expect(res.status).toBe(415);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("donations answer an auth refusal before looking at the content type", async () => {
+    const res = await donationPost(
+      new Request("http://localhost/api/donations", { method: "POST", headers: { "content-type": "text/plain" }, body: "x" }),
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("donation routes", () => {
   it("capture returns 403 for an order that belongs to someone else", async () => {
     const owner = await makeDonor();
@@ -257,7 +318,7 @@ describe("donation routes", () => {
     const session = await getSession();
     for (let i = 0; i < 5; i++) await makePendingOrder(session!.userId);
     const out = await donationPost(
-      new Request("http://localhost/x", { method: "POST", body: JSON.stringify({ amount: 10_000, attemptId: crypto.randomUUID() }) }),
+      new Request("http://localhost/x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ amount: 10_000, attemptId: crypto.randomUUID() }) }),
     );
     expect(out.status).toBe(429);
   });
@@ -266,7 +327,7 @@ describe("donation routes", () => {
     keepCookie(await post({ username: "giver_2" }));
     for (const attemptId of [undefined, "", "not-a-uuid", 7]) {
       const res = await donationPost(
-        new Request("http://localhost/x", { method: "POST", body: JSON.stringify({ amount: 10_000, attemptId }) }),
+        new Request("http://localhost/x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ amount: 10_000, attemptId }) }),
       );
       expect(res.status).toBe(400);
     }
@@ -276,7 +337,7 @@ describe("donation routes", () => {
     keepCookie(await post({ username: "giver_1" }));
     for (const amount of [5_000, 100.5, "100"]) {
       const res = await donationPost(
-        new Request("http://localhost/x", { method: "POST", body: JSON.stringify({ amount }) }),
+        new Request("http://localhost/x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ amount }) }),
       );
       expect(res.status).toBe(400);
     }

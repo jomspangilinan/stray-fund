@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { bodyRefusal, JSON_BODY_MAX, readJson } from "@/server/http";
 import { JudgeOnly } from "@/server/judge";
 import {
   AuthError,
@@ -29,8 +30,10 @@ export async function GET() {
 export async function POST(req: Request) {
   let body: unknown;
   try {
-    body = await req.json();
-  } catch {
+    body = await readJson(req, JSON_BODY_MAX);
+  } catch (e) {
+    const refused = bodyRefusal(e);
+    if (refused) return NextResponse.json({ error: refused.message }, { status: refused.status });
     return NextResponse.json({ error: "Send a JSON body" }, { status: 400 });
   }
   const { username, persona } = (body ?? {}) as { username?: unknown; persona?: unknown };
