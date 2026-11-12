@@ -81,8 +81,8 @@ export function SpotFlow({ username, judge }: { username: string | null; judge: 
   const urlRef = useRef<string | null>(null);
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const detector = useCatDetector(video, phase.kind === "camera" && Boolean(username));
-  // Only the public path cuts the cat out on the phone. Judges take the AI path, which does not use a mask.
-  const phone = usePhoneCut(!judge && phase.kind === "camera" && Boolean(username));
+  // Every path cuts the cat out on the phone: the public path publishes with it at once, the AI path after its check.
+  const phone = usePhoneCut(phase.kind === "camera" && Boolean(username));
   // The shutter reads the latest sighting of the cat, not the one from when the callback was made.
   const latest = useRef(detector);
   useEffect(() => {
@@ -189,24 +189,23 @@ export function SpotFlow({ username, judge }: { username: string | null; judge: 
     keep(blob);
     const startedAt = Date.now();
     // The phone says it is finding the cat only while it really is: when the model is not ready, the photo just goes up.
-    setPhase({ kind: "sending", startedAt, responded: false, step: !judge && phone.ready() ? "cutting" : "sending" });
+    setPhase({ kind: "sending", startedAt, responded: false, step: phone.ready() ? "cutting" : "sending" });
     const form = new FormData();
     form.set("photo", new File([blob], "cat.jpg", { type: "image/jpeg" }));
     if (where.lat !== null && where.lng !== null) {
       form.set("lat", String(where.lat));
       form.set("lng", String(where.lng));
     }
-    // The phone's own cut-out, when it has one in time. Otherwise the photo goes up alone and the server develops it.
+    // The phone's own cut-out, when it has one in time. Otherwise the photo goes up alone: the server develops it, or
+    // on the AI path publishes it with the soft circle.
     let sendBox = box;
-    if (!judge) {
-      const canvas = await blobToCanvas(blob);
-      const cut = canvas ? await phone.cut(canvas) : null;
-      setPhase((p) => (p.kind === "sending" ? { ...p, step: "sending" } : p));
-      const png = cut ? await maskToPng(cut.mask) : null;
-      if (cut && png) {
-        form.set("mask", new File([png], "mask.png", { type: "image/png" }));
-        sendBox = cut.box;
-      }
+    const canvas = await blobToCanvas(blob);
+    const cut = canvas ? await phone.cut(canvas) : null;
+    setPhase((p) => (p.kind === "sending" ? { ...p, step: "sending" } : p));
+    const png = cut ? await maskToPng(cut.mask) : null;
+    if (cut && png) {
+      form.set("mask", new File([png], "mask.png", { type: "image/png" }));
+      sendBox = cut.box;
     }
     if (sendBox) form.set("box", JSON.stringify(sendBox));
     try {
@@ -277,8 +276,11 @@ export function SpotFlow({ username, judge }: { username: string | null; judge: 
 
   const sending = phase.kind === "sending";
   const aiPath = showChecklist(judge);
-  // The one line under the card. Only the phone's own cut-out earns "Finding your cat…", and only while it runs.
-  const sendLabel = phase.kind === "sending" && phase.step === "cutting" ? "Finding your cat…" : "Sending your photo";
+  // The one line under the card. Only the phone's own cut-out earns "Finding your cat…", and only while it runs, on
+  // either path. The AI path then shows its checklist instead of a line.
+  const cutting = phase.kind === "sending" && phase.step === "cutting";
+  const sendLabel = cutting ? "Finding your cat…" : "Sending your photo";
+  const cardLabel = cutting ? sendLabel : aiPath ? null : sendLabel;
   return (
     <>
       <p className="small soft mt-5 max-w-[52ch]">
@@ -293,7 +295,7 @@ export function SpotFlow({ username, judge }: { username: string | null; judge: 
           scanning={false}
           stageNote={
             sending && capturedUrl ? (
-              <CaptureCard photoUrl={capturedUrl} label={aiPath ? null : sendLabel} />
+              <CaptureCard photoUrl={capturedUrl} label={cardLabel} />
             ) : !(sending && capturedUrl) && detector.state !== "off" ? (
               <p className="cam-status" role="status" aria-live="polite">
                 {detector.state === "found" ? "Cat found" : "Looking for a cat"}
