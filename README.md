@@ -4,13 +4,7 @@ A shared fund for one neighbourhood's stray cats. Neighbours spot cats and give 
 
 Built for the PayPal AI Hackathon, on PayPal sandbox money only. Try it at https://stray-fund.onrender.com, or follow the [testing guide](testing-guide.pdf).
 
-<p align="center">
-  <img src="screenshots/yard.jpg" width="190" alt="The yard: every cat in the barangay, the fund, and Donate">
-  <img src="screenshots/swipe-card.jpg" width="190" alt="A caretaker's card: a neighbour's sick report, what Claude read, and Confirm or Dismiss">
-  <img src="screenshots/treasurer.jpg" width="190" alt="The Treasurer page: each decision with its reason and PayPal reference">
-  <img src="screenshots/ledger-row.jpg" width="190" alt="A ledger row opened: a ₱450 vet deposit with its PayPal reference">
-</p>
-<p align="center"><sub>The yard, a caretaker's report card, the treasurer's decisions, and a ledger row with its PayPal reference. Screens from the live sandbox site.</sub></p>
+<p align="center"><img src="screenshots/card-01-hero.jpg" width="820" alt="Stray Fund: neighbours fund spay and neuter for stray cats. An AI treasurer picks the next cat and PayPal pays the vet, with every peso on a public ledger."></p>
 
 ## Why it exists
 
@@ -29,15 +23,16 @@ Strays multiply when people feed them but nobody neuters them. Neighbours would 
 People decide ear-tips, because the AI got them wrong on real photos. Neighbours answer Yes, No or Not sure, two different people saying No queue the cat, and a caretaker settles any disagreement.
 
 <p align="center">
-  <img src="screenshots/spot-new-cat.jpg" width="150" alt="New cat spotted: the new card for the cat in the photo">
-  <img src="screenshots/report-note.jpg" width="150" alt="Reporting the cat as sick, with a note only caretakers see">
-  <img src="screenshots/donate-thanks.jpg" width="150" alt="After a ₱1,600 sandbox donation: the PayPal fee and what reached the fund">
-  <img src="screenshots/approve-payment.jpg" width="150" alt="A ₱450 vet deposit waiting for a caretaker to approve">
-  <img src="screenshots/proof.jpg" width="150" alt="Proof: where every peso went, adding up exactly">
+  <img src="screenshots/card-02-yard.jpg" width="400" alt="The yard: every stray on the street in one place, each with its own card and story">
+  <img src="screenshots/card-08-spot.jpg" width="400" alt="Spotting: a live camera photo, the new cat's card, and a sick report with a note for caretakers">
 </p>
-<p align="center"><sub>Spot, report, donate, approve, prove. The first two show the cat under his first name, Smoke; he's Toothless now.</sub></p>
 
 Four public pages show the money. Priority lists who's next and why, Treasurer lists every AI decision with its reason, Ledger lists every donation and payout with its PayPal reference, and Proof shows the totals adding up exactly. Each cat's page tells its story as one timeline.
+
+<p align="center">
+  <img src="screenshots/card-03-treasurer.jpg" width="400" alt="Who's next, and why, is public: the Priority and Treasurer pages">
+  <img src="screenshots/card-04-ledger.jpg" width="400" alt="Every peso in the open: the Ledger and Proof, with PayPal references">
+</p>
 
 ## The desks
 
@@ -53,6 +48,8 @@ Caretakers and vets work on their own screens, on a green bar, apart from the ne
 
 The AI proposes, rules check, and a person approves.
 
+<p align="center"><img src="screenshots/card-07-money.jpg" width="640" alt="The AI never touches the money: Claude names the cat, code sets the amount and payee, a caretaker approves, and PayPal Payouts pays the vet"></p>
+
 - The treasurer calls a few tools that take cat ids and words ([src/server/agent/tools.ts](src/server/agent/tools.ts)). No tool takes an amount or a PayPal address; code supplies both.
 - Every payout goes through one function, the money gate ([src/server/moneyGate.ts](src/server/moneyGate.ts)). It takes a lock, checks the guardrails ([src/server/guardrails.ts](src/server/guardrails.ts)), writes the action down, and only then calls PayPal. The guardrails cover allow-listed payees, caps per cat and per day, a verified receipt, a confirmed ear-tip and duplicate payouts.
 - A caretaker approves every deposit, and a balance over the approval threshold waits for one too.
@@ -65,6 +62,8 @@ The AI proposes, rules check, and a person approves.
 Checkout (Orders v2) takes donations and records each capture's net amount after fees. Payouts pays the vet a deposit and later a balance, and each payout reuses one `sender_batch_id`, so a retry can't pay twice. Webhooks settle captures and payouts. The treasurer is also offered the PayPal agent toolkit's read-only `get_order`, though it hasn't called it through the app yet. The code is in [src/server/paypal/](src/server/paypal/).
 
 On the live sandbox site on Nov 13, a caretaker's approval sent the first vet deposit: ₱450 for Kislap, PayPal reference `YUZVTFYR5MKWS`, reported succeeded.
+
+<p align="center"><img src="screenshots/card-09-paypal.jpg" width="640" alt="Money in through Checkout, out through Payouts: a ₱1,600 donation and the ₱450 deposit waiting for a caretaker"></p>
 
 ## AI
 
