@@ -2,7 +2,7 @@ import { formatPeso, formatPesoShort } from "@/lib/money";
 import { approvalNotice } from "@/lib/reportNotice";
 import type { CaretakerQueue, PayoutItem, ReceiptItem, ReportItem } from "@/server/caretaker/queue";
 
-/** One action a card can send: the same route and body today's form posts. */
+/** One action a card can send: the same route and body today's form posts. An empty `action` sends nothing: the card is only skipped for now. */
 export type SwipeMove = { label: string; action: string; body: Record<string, string> };
 
 /**
@@ -13,7 +13,7 @@ export type SwipeCard = {
   id: string;
   /** The id of this item's full form in the list below the stack. */
   anchor: string;
-  kind: "report" | "approval" | "receipt" | "eartip" | "ears" | "name";
+  kind: "report" | "approval" | "receipt" | "eartip" | "ears" | "name" | "photo";
   title: string;
   facts: string[];
   /** Whose read this is: "Claude read this", or "Neighbours say" where no AI is involved. */
@@ -171,8 +171,39 @@ function nameCard(n: CaretakerQueue["nameSuggestions"][number]): SwipeCard {
   };
 }
 
+/**
+ * A photo the worker held back for a person. Publishing makes the cat-only copy public (anything else stays blurred).
+ * A right swipe says the caretaker saw no house numbers, signs or plates, so it sends that tick when the photo needs it.
+ */
+function photoCard(h: CaretakerQueue["heldPhotos"][number]): SwipeCard {
+  const who = h.catName ?? "this cat";
+  return {
+    id: h.sightingId,
+    anchor: anchorOf("photo", h.sightingId),
+    kind: "photo",
+    title: `Publish ${h.catName ? `${h.catName}'s` : "this"} photo?`,
+    facts: ["Not shown publicly yet. Only the cat stays sharp; the rest is blurred."],
+    aiLabel: "Claude read this",
+    ai: h.needsTick
+      ? h.hasRegions
+        ? "Claude marked some areas to blur but couldn't rule out everything. Check for house numbers, signs or plates."
+        : "Claude couldn't rule out house numbers, signs or plates. Check before you publish."
+      : `Claude marked what to blur and found nothing else private in the photo of ${who}.`,
+    suggest: h.needsTick ? null : "right",
+    right: {
+      label: h.needsTick ? "Nothing private, publish" : "Publish",
+      action: "photo_publish",
+      body: h.needsTick ? { sightingId: h.sightingId, noSensitive: "on" } : { sightingId: h.sightingId },
+    },
+    left: { label: "Not now", action: "", body: {} },
+    leftLabel: "Not now",
+    photo: `/api/caretaker/images/sighting/${h.sightingId}`,
+    sightingId: h.sightingId,
+  };
+}
+
 type CardQueue = Pick<CaretakerQueue, "reports" | "awaitingApproval" | "receipts" | "earTipConfirmations"> &
-  Partial<Pick<CaretakerQueue, "earTipPending" | "nameSuggestions">>;
+  Partial<Pick<CaretakerQueue, "earTipPending" | "nameSuggestions" | "heldPhotos">>;
 
 /** The swipe stack, in desk order: reports first, then payments waiting for a yes, then evidence, then cat details. */
 export function buildCards(q: CardQueue): SwipeCard[] {
@@ -183,5 +214,6 @@ export function buildCards(q: CardQueue): SwipeCard[] {
     ...q.earTipConfirmations.map(earTipCard),
     ...(q.earTipPending ?? []).map(earsCard),
     ...(q.nameSuggestions ?? []).map(nameCard),
+    ...(q.heldPhotos ?? []).map(photoCard),
   ].filter((c): c is SwipeCard => c !== null);
 }

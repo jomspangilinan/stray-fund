@@ -13,7 +13,7 @@ const SWIPE_SHARE = 0.3;
 type Pending = { card: SwipeCard; move: SwipeMove; timer: ReturnType<typeof setTimeout> };
 type Reply = { ok?: boolean; message?: string; tone?: ReplyTone };
 
-const KIND_LABEL: Record<SwipeCard["kind"], string> = { report: "Report", approval: "Payment", receipt: "Receipt", eartip: "Ear tip after surgery", ears: "Ear tip", name: "Name" };
+const KIND_LABEL: Record<SwipeCard["kind"], string> = { report: "Report", approval: "Payment", receipt: "Receipt", eartip: "Ear tip after surgery", ears: "Ear tip", name: "Name", photo: "Photo" };
 
 function reducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -146,6 +146,12 @@ export function SwipeStack({
     flush();
     setNotice(null);
     const card = top;
+    if (move.action === "") {
+      // "Not now": nothing is sent, so there is nothing to undo. The card is back next time the desk loads.
+      setDx(0);
+      setGone((g) => new Set(g).add(card.id));
+      return;
+    }
     const finish = () => {
       setLeaving(null);
       setDx(0);

@@ -73,7 +73,7 @@ export function HeldPhotos({ items }: { items: CaretakerQueue["heldPhotos"] }) {
   return (
     <Section id="photos" count={items.length}>
       {items.map((p) => (
-        <DeskItem key={p.sightingId} label={p.catName ?? "No cat yet"}>
+        <DeskItem key={p.sightingId} label={p.catName ?? "No cat yet"} anchor={`desk-photo-${p.sightingId}`}>
           <h3 className="text-base font-extrabold">{p.catName ?? "No cat yet"}</h3>
           <p className="small">Taken {niceDate(p.date)}. Not shown publicly.</p>
           <SightingPhoto sightingId={p.sightingId} alt="The original photo" className="max-h-72 w-full rounded-in object-contain" />

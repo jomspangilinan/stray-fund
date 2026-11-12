@@ -142,3 +142,16 @@ describe("swipe desk cards for cat details", () => {
     expect(withPhoto[0]).toMatchObject({ photo: "/api/caretaker/images/sighting/s7", sightingId: "s7" });
   });
 });
+
+describe("swipe desk cards for held-back photos", () => {
+  it("publishes right, sending the no-private-content tick only when the photo needs it, and skips left without sending", () => {
+    const held = (needsTick: boolean) => ({ sightingId: "s9", catId: "c9", catName: "Toothless", state: "matched", hasRegions: true, needsTick, date: "2026-11-12" });
+    const [ticked] = buildCards({ ...empty, heldPhotos: [held(true)] });
+    expect(ticked).toMatchObject({ kind: "photo", id: "s9", anchor: "desk-photo-s9", suggest: null, photo: "/api/caretaker/images/sighting/s9" });
+    expect(ticked.right).toEqual({ label: "Nothing private, publish", action: "photo_publish", body: { sightingId: "s9", noSensitive: "on" } });
+    expect(ticked.left).toEqual({ label: "Not now", action: "", body: {} });
+    const [clear] = buildCards({ ...empty, heldPhotos: [held(false)] });
+    expect(clear.right.body).toEqual({ sightingId: "s9" });
+    expect(clear.suggest).toBe("right");
+  });
+});

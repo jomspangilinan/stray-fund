@@ -45,6 +45,7 @@ async function ToCheck() {
     earTipConfirmations: off(q.earTipConfirmations),
     earTipPending: off(q.earTipPending),
     nameSuggestions: off(q.nameSuggestions),
+    heldPhotos: q.heldPhotos.filter((h) => !onCard.has(h.sightingId)),
   };
   const restCount = deskTotal(rest);
   const forms: Record<string, React.ReactNode> = Object.fromEntries([
@@ -54,6 +55,7 @@ async function ToCheck() {
     ...q.earTipConfirmations.filter((r) => onCard.has(r.id)).map((r) => [r.id, <EarTipPhotos key={r.id} items={[r]} />]),
     ...q.earTipPending.filter((c) => onCard.has(c.id)).map((c) => [c.id, <EarTips key={c.id} items={[c]} />]),
     ...q.nameSuggestions.filter((n) => onCard.has(n.id)).map((n) => [n.id, <NameSuggestions key={n.id} items={[n]} />]),
+    ...q.heldPhotos.filter((h) => onCard.has(h.sightingId)).map((h) => [h.sightingId, <HeldPhotos key={h.sightingId} items={[h]} />]),
   ]);
   return (
     <>
