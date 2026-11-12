@@ -1038,6 +1038,137 @@ input[type="checkbox"] {
   transform: translateX(-50%);
   pointer-events: none;
 }
+/* The wide yard: screens of courtyard sections that the edge arrows walk along, all vector. */
+.yard-strip {
+  position: absolute;
+  inset: 0;
+  transition: transform 450ms var(--ease-out);
+  touch-action: pan-y;
+}
+.yard-screen {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: grid;
+  width: 100%;
+  gap: 2px;
+}
+.yard-section {
+  position: relative;
+  overflow: hidden;
+}
+/* Zoomed out: small cats stand still and drop their tags, so ninety of them stay light. */
+.yard-strip:not([data-zoom="1"]) .yard-link,
+.yard-strip:not([data-zoom="1"]) .avatar,
+.yard-strip:not([data-zoom="1"]) .avatar-tail,
+.yard-strip:not([data-zoom="1"]) .avatar-eyes {
+  animation: none;
+}
+.yard-strip:not([data-zoom="1"]) .yard-name,
+.yard-strip:not([data-zoom="1"]) .yard-yours {
+  display: none;
+}
+.yard-section-open {
+  position: absolute;
+  inset: 0;
+  z-index: 150;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+.yard-section-open:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: -3px;
+}
+/*
+ * Subtle edge arrows: a slim see-through tab flush to each side, centred top to bottom where a thumb expects
+ * it. Still 44px tall to tap; solid only on hover or keyboard focus, so it never sits heavily over a cat.
+ */
+.yard-arrow {
+  position: absolute;
+  top: 50%;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 2.75rem;
+  border: 0;
+  background: rgb(255 255 255 / 0.38);
+  color: rgb(18 53 42 / 0.75);
+  transform: translateY(-50%);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.yard-arrow svg {
+  width: 18px;
+  height: 18px;
+}
+.yard-arrow:hover,
+.yard-arrow:focus-visible {
+  background: rgb(255 255 255 / 0.9);
+  color: var(--ink);
+}
+.yard-arrow-left {
+  left: 0;
+  border-radius: 0 0.75rem 0.75rem 0;
+}
+.yard-arrow-right {
+  right: 0;
+  border-radius: 0.75rem 0 0 0.75rem;
+}
+/* At an end there is nowhere to walk, so that arrow goes rather than sitting over the yard. */
+.yard-arrow:disabled {
+  visibility: hidden;
+}
+.yard-zoom button:disabled {
+  opacity: 0.35;
+}
+.yard-arrow:focus-visible,
+.yard-zoom button:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+.yard-zoom {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 200;
+  display: flex;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgb(18 53 42 / 0.25);
+}
+.yard-zoom button {
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.yard-zoom button + button {
+  border-left: 1px solid var(--pale);
+}
+.yard-where {
+  position: absolute;
+  left: 0.5rem;
+  top: 0.5rem;
+  z-index: 200;
+  padding: 0.125rem 0.625rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.92);
+  color: var(--ink);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .yard-strip {
+    transition: none;
+  }
+}
 .yard-empty {
   position: absolute;
   inset: 0;

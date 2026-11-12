@@ -258,10 +258,13 @@ describe("getYard whitelist", () => {
     expect(anon.cats.every((c) => !c.yours)).toBe(true);
   });
 
-  it("says how many cats there are in total when the yard shows fewer", async () => {
-    await db.insert(cats).values(Array.from({ length: YARD_MAX + 3 }, (_, i) => ({ name: `C${i}`, areaName: "x" })));
+  it("holds every cat, waiting cats first, with the total, so the wide yard can show them all in sections", async () => {
+    await db.insert(cats).values(Array.from({ length: YARD_MAX + 3 }, (_, i) => ({ name: `C${i}`, areaName: "x", status: i % 5 === 0 ? "queued" : "neutered" })));
     const yard = await getYard(null);
-    expect(yard.cats).toHaveLength(YARD_MAX);
+    expect(yard.cats).toHaveLength(YARD_MAX + 3);
     expect(yard.total).toBe(YARD_MAX + 3);
+    expect(new Set(yard.cats.map((c) => c.id)).size).toBe(YARD_MAX + 3);
+    const firstDone = yard.cats.findIndex((c) => c.group !== "waiting");
+    expect(yard.cats.slice(firstDone).every((c) => c.group !== "waiting")).toBe(true);
   });
 });

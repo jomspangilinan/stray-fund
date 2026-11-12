@@ -906,7 +906,8 @@ export async function getYard(viewerId: string | null): Promise<PublicYard> {
     };
   });
   return {
-    cats: pickYard(all, new Set(helped.map((h) => h.cat.id))),
+    // Every cat, in the yard's order (waiting cats first), split into sections of ten by the yard itself.
+    cats: pickYard(all, new Set(helped.map((h) => h.cat.id)), all.length),
     total: all.length,
     stage: yardStage(goal.neutered, goal.goal),
     goal,

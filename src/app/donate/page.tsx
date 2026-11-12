@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { isDemoMode, moneyIsTest } from "@/lib/config";
+import { moneyIsTest } from "@/lib/config";
 import { isJudge } from "@/server/judge";
 import { getSession } from "@/server/session";
 import { DonateForm } from "@/components/DonateForm";
@@ -14,7 +14,7 @@ async function Form() {
   const session = await getSession();
   // The client id is public by design. Read here on the server so no NEXT_PUBLIC variable is needed.
   const clientId = process.env.PAYPAL_CLIENT_ID ?? "";
-  return <DonateForm clientId={clientId} username={session?.username ?? null} demo={isDemoMode()} testMoney={moneyIsTest()} judge={await isJudge()} />;
+  return <DonateForm clientId={clientId} username={session?.username ?? null} testMoney={moneyIsTest()} judge={await isJudge()} />;
 }
 
 export default function DonatePage() {

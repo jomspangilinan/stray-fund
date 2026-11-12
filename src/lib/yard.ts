@@ -130,6 +130,43 @@ export function slotsFor(ids: string[]): Map<string, number> {
   return out;
 }
 
+/*
+ * The wide yard. Past YARD_SECTION cats the yard gets another section of courtyard, so it never crowds. Zooming
+ * out shows more sections at once (2 x 2, then 3 x 3); zooming in goes back to one.
+ */
+
+/** Cats in one section of the yard. */
+export const YARD_SECTION = 10;
+/** Sections across (and down) one screen, from zoomed in to zoomed out. */
+export const ZOOM_LEVELS = [1, 2, 3] as const;
+export type Zoom = (typeof ZOOM_LEVELS)[number];
+
+/** The cats split into sections, in the yard's order, every cat in exactly one. Always at least one section. */
+export function yardSections<T>(cats: readonly T[], size: number = YARD_SECTION): T[][] {
+  const n = Math.max(1, Math.ceil(cats.length / size));
+  return Array.from({ length: n }, (_, i) => cats.slice(i * size, (i + 1) * size));
+}
+
+/** Screens at a zoom: each screen holds zoom x zoom sections. */
+export const screensAt = (sections: number, zoom: Zoom): number => Math.max(1, Math.ceil(sections / (zoom * zoom)));
+
+/** The screen that shows a section at a zoom, so zooming keeps the same cats in view. */
+export const screenOf = (section: number, zoom: Zoom): number => Math.floor(section / (zoom * zoom));
+
+/**
+ * Which screens to draw: the one on show and its neighbours, so a slide has something to slide to. Every
+ * other screen is not in the page at all, however many cats there are.
+ */
+export function screensToDraw(current: number, total: number): number[] {
+  return [current - 1, current, current + 1].filter((s) => s >= 0 && s < total);
+}
+
+/**
+ * One size for every section of a wide yard, set by a full section, so a last section with two cats does not
+ * draw them giant. A yard of one section keeps today's sizes.
+ */
+export const sectionScale = (sections: number, inThisSection: number): number => yardScale(sections > 1 ? YARD_SECTION : inThisSection);
+
 /** 0 bare, 1 first touches, 2 homely, 3 festive. From cats neutered against the goal. */
 export function yardStage(neutered: number, goal: number): 0 | 1 | 2 | 3 {
   if (!Number.isFinite(neutered) || !Number.isFinite(goal) || goal <= 0 || neutered <= 0) return 0;

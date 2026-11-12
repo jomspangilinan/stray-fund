@@ -7,5 +7,3 @@ export const DEMO_ROLES = [
   { key: "vet", label: "Vet", username: "demo_vet", role: "vet" },
 ] as const satisfies readonly { key: string; label: string; username: string; role: Role }[];
 
-/** What "Try it now" signs a visitor in as: an ordinary neighbour with no desk. */
-export const GATE_PERSONA = "neighbour";

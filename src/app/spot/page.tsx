@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { isDemoMode } from "@/lib/config";
 import { isJudge } from "@/server/judge";
 import { getSession } from "@/server/session";
 import { BlockSkeleton } from "@/components/Loading";
@@ -11,7 +10,7 @@ export const metadata: Metadata = { title: "Spot a cat | Stray Fund" };
 
 async function Flow() {
   const session = await getSession();
-  return <SpotFlow username={session?.username ?? null} demo={isDemoMode()} judge={await isJudge()} />;
+  return <SpotFlow username={session?.username ?? null} judge={await isJudge()} />;
 }
 
 export default function SpotPage() {
