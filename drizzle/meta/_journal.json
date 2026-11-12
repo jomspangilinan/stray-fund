@@ -211,6 +211,13 @@
       "when": 1794490030562,
       "tag": "0029_purple_manta",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794498199465,
+      "tag": "0030_sighting_needs_recut",
+      "breakpoints": true
     }
   ]
 }

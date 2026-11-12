@@ -3,7 +3,8 @@ import { parseCatBox } from "@/lib/keepsake";
 import { db } from "./db/client";
 import { cats, sightings } from "./db/schema";
 import { findCat, type Found } from "./catFinder";
-import { publishCatOnly, type KeepArea } from "./photos";
+import { maskUsable, publishCatOnly, type KeepArea } from "./photos";
+import { regionsOf } from "./photoGate";
 import { avatarFromPhoto } from "./photoAvatar";
 import { PHONE_TIER_GRACE_SECONDS } from "./spot";
 import { getStorage, removePublicCopy } from "./storage";
@@ -146,5 +147,72 @@ export async function developNext(): Promise<"developed" | "idle"> {
     // A failure after the publish leaves a copy no sighting points at, so it is deleted.
     await removePublicCopy(key);
     return "idle";
+  }
+}
+
+type RecutClaim = { id: string; originalKey: string; publicKey: string | null; assessment: unknown; photoVersion: number };
+
+/** Takes the next AI-path photo published with the circle, and clears its marker in the same commit: one try only. */
+async function claimRecut(): Promise<RecutClaim | null> {
+  return db.transaction(async (tx) => {
+    const { rows } = await tx.execute(sql`
+      select id from sightings
+      where needs_recut
+      order by created_at asc, id asc
+      for update skip locked
+      limit 1
+    `);
+    const row = rows[0] as { id: string } | undefined;
+    if (!row) return null;
+    const [c] = await tx
+      .update(sightings)
+      .set({ needsRecut: false })
+      .where(eq(sightings.id, row.id))
+      .returning({
+        id: sightings.id,
+        originalKey: sightings.originalKey,
+        publicKey: sightings.publicKey,
+        assessment: sightings.assessment,
+        photoVersion: sightings.photoVersion,
+      });
+    return c;
+  });
+}
+
+/**
+ * The server cut-out for an AI-path photo that went public with the soft circle, because the phone sent no usable
+ * cut-out. The model's mask replaces the circle copy, with the AI's sensitive regions blurred again. No cat found,
+ * the model off, or any failure leaves the circle copy as it is: the marker was cleared at the claim, so there is
+ * no retry. "recut" when a claim was taken, "idle" when there was none.
+ */
+export async function recutNext(): Promise<"recut" | "idle"> {
+  const s = await claimRecut();
+  if (!s) return "idle";
+  if (finderOff() || !s.publicKey) return "recut";
+  const oldKey = s.publicKey;
+  let key: string | null = null;
+  try {
+    const original = await getStorage().getPrivate(s.originalKey);
+    const found = await look(original);
+    if (!found.mask || !found.box || !(await maskUsable(found.mask, found.box))) return "recut";
+    key = (await publishCatOnly(s.originalKey, found, regionsOf(s.assessment))).key;
+    const swapped = await db
+      .update(sightings)
+      .set({ publicKey: key })
+      // Still the copy this claim saw, still public, and the original not turned meanwhile.
+      .where(and(eq(sightings.id, s.id), eq(sightings.publicKey, oldKey), eq(sightings.publicReady, true), eq(sightings.photoVersion, s.photoVersion)))
+      .returning({ id: sightings.id });
+    if (swapped.length === 0) {
+      console.error("[develop] the photo changed during its re-cut; the re-cut copy is deleted");
+      await removePublicCopy(key);
+      return "recut";
+    }
+    // The swap has committed. Only now is the circle copy deleted, and a failed delete never undoes it.
+    await removePublicCopy(oldKey);
+    return "recut";
+  } catch (e) {
+    console.error(`[develop] re-cut failed, the circle copy stays: ${e instanceof Error ? e.name : typeof e}`);
+    await removePublicCopy(key);
+    return "recut";
   }
 }

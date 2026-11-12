@@ -544,7 +544,8 @@ export async function publishPhoto(sightingId: string, originalKey: string, regi
     const { key } = await publishCatOnly(originalKey, { box, mask: keepMask }, regions as Box[]);
     const set = await db
       .update(sightings)
-      .set({ publicKey: key, publicReady: true })
+      // A circle copy is marked for the worker, which cuts the cat out once on the server and swaps the copy.
+      .set({ publicKey: key, publicReady: true, needsRecut: keepMask === null })
       .where(and(eq(sightings.id, sightingId), sql`${sightings.publicKey} is null`, eq(sightings.photoVersion, row.photoVersion)))
       .returning({ id: sightings.id });
     // The sighting already has a public copy, or its original was turned meanwhile: the one just made belongs to nothing, so it goes.

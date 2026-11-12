@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { syncCatForPayout } from "../catTransitions";
 import { backfillAvatars } from "../avatars";
 import { retryPendingSightings } from "../spot";
-import { developNext } from "../develop";
+import { developNext, recutNext } from "../develop";
 import { db, type Tx } from "../db/client";
 import { wakeups } from "../db/schema";
 import { describeError } from "../errors";
@@ -41,6 +41,8 @@ export type WorkerDeps = AgentDeps & {
   retrySightings?: () => Promise<unknown>;
   /** Develops one queued public photo; called while it answers "developed", at most DEVELOP_PER_TICK times a tick. */
   develop?: () => Promise<unknown>;
+  /** Re-cuts one AI-path photo published with the circle; called while it answers "recut", at most DEVELOP_PER_TICK times a tick. */
+  recut?: () => Promise<unknown>;
   retryEvidence?: () => Promise<unknown>;
   backfillAvatars?: () => Promise<unknown>;
   /** Replaces the poll in a test. */
@@ -271,8 +273,8 @@ async function isolated(name: string, job: () => Promise<unknown>): Promise<void
 }
 
 /** Stops at the first answer that is not "developed": the queue is empty, or a photo failed and waits. */
-async function developSome(step: () => Promise<unknown>): Promise<void> {
-  for (let i = 0; i < DEVELOP_PER_TICK; i++) if ((await step()) !== "developed") return;
+async function developSome(step: () => Promise<unknown>, busy = "developed"): Promise<void> {
+  for (let i = 0; i < DEVELOP_PER_TICK; i++) if ((await step()) !== busy) return;
 }
 
 /** Each job is isolated, so one failing never stops the others. */
@@ -283,6 +285,7 @@ export async function runMaintenance(deps: WorkerDeps = {}): Promise<void> {
   await isolated("payout retry", deps.retryUnknown ?? (() => retryUnknownPayouts(gateway)));
   await isolated("sighting retry", deps.retrySightings ?? retryPendingSightings);
   await isolated("photo develop", () => developSome(deps.develop ?? developNext));
+  await isolated("photo re-cut", () => developSome(deps.recut ?? recutNext, "recut"));
   await isolated("evidence retry", deps.retryEvidence ?? retryPendingEvidence);
   await isolated("avatar backfill", deps.backfillAvatars ?? backfillAvatars);
 }

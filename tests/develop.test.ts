@@ -10,10 +10,10 @@ import { cats, sightings, users } from "../src/server/db/schema";
 import { truncateAll } from "./helpers/db";
 import { setAiForTests } from "../src/server/ai/client";
 import { findCat, setCatFinderForTests, type Found } from "../src/server/catFinder";
-import { DEVELOP_MAX_ATTEMPTS, DEVELOP_TIMEOUT_MS, developNext } from "../src/server/develop";
+import { DEVELOP_MAX_ATTEMPTS, DEVELOP_TIMEOUT_MS, developNext, recutNext } from "../src/server/develop";
 import { catOnly, maskUsable, storeOriginal, type Box } from "../src/server/photos";
 import { getStorage, memoryStorage } from "../src/server/storage";
-import { PHONE_TIER_GRACE_SECONDS, processSpot } from "../src/server/spot";
+import { PHONE_TIER_GRACE_SECONDS, processSpot, publishPhoto } from "../src/server/spot";
 
 const GINGER = { r: 0xe8, g: 0xa1, b: 0x5a };
 const CAT_BOX: Box = { x: 0.25, y: 0.25, w: 0.5, h: 0.5 };
@@ -370,6 +370,88 @@ describe("developNext", () => {
     expect(put).toHaveBeenCalledTimes(1);
     expect(() => memoryStorage.readPublic(put.mock.calls[0][0])).toThrow();
     expect(await sightingOf(out.sightingId)).toMatchObject({ publicKey: null, publicReady: false, developedAt: null, developAttempts: 1 });
+  });
+});
+
+describe("recutNext: AI-path photos published with the circle", () => {
+  const REGION: Box = { x: 0.3, y: 0.3, w: 0.1, h: 0.1 };
+  /** An AI-path sighting the request published with the circle on the camera's box, as applyAssessment does with no mask. */
+  async function circlePublished() {
+    const u = await makeUser();
+    const { key } = await storeOriginal(await photo(CAT_BOX));
+    const [cat] = await db.insert(cats).values({ name: `Ai${++seq}`, areaName: "x", fuzzedLat: 10.2, fuzzedLng: 120.6 }).returning();
+    const [s] = await db
+      .insert(sightings)
+      .values({ catId: cat.id, originalKey: key, caughtByUserId: u.id, state: "new_cat", catBox: MIDDLE, assessment: { sensitive_regions: [REGION] } })
+      .returning();
+    await publishPhoto(s.id, key, [REGION]);
+    const row = await sightingOf(s.id);
+    expect(row).toMatchObject({ publicReady: true, needsRecut: true, needsDevelop: false });
+    const orig = await original(s.id);
+    expect((await published(s.id)).equals(await catOnly(orig, { box: MIDDLE, mask: null }, [REGION]))).toBe(true);
+    return { id: s.id, circleKey: row.publicKey!, orig };
+  }
+
+  it("replaces the circle copy with the server's cut-out, keeps the AI's regions blurred, and clears the marker", async () => {
+    const mask = await maskOf(CAT_BOX);
+    finder(() => ({ box: CAT_BOX, mask }));
+    const { id, circleKey, orig } = await circlePublished();
+
+    expect(await recutNext()).toBe("recut");
+
+    const s = await sightingOf(id);
+    expect(s).toMatchObject({ publicReady: true, needsRecut: false, needsDevelop: false });
+    expect(s.publicKey).not.toBe(circleKey);
+    const bytes = await published(id);
+    expect(bytes.equals(await catOnly(orig, { box: CAT_BOX, mask }, [REGION]))).toBe(true);
+    expect(bytes.equals(await catOnly(orig, { box: CAT_BOX, mask }))).toBe(false);
+    // The circle copy is gone once the swap committed.
+    expect(() => memoryStorage.readPublic(circleKey)).toThrow();
+    expect(await recutNext()).toBe("idle");
+    expect(calls).toBe(1);
+  });
+
+  it("with no cat found, the circle copy stays and the marker is cleared, so it is not tried again", async () => {
+    finder(() => ({ box: null, mask: null }));
+    const { id, circleKey } = await circlePublished();
+
+    expect(await recutNext()).toBe("recut");
+
+    expect(await sightingOf(id)).toMatchObject({ publicKey: circleKey, publicReady: true, needsRecut: false });
+    expect(() => memoryStorage.readPublic(circleKey)).not.toThrow();
+    expect(await recutNext()).toBe("idle");
+    expect(calls).toBe(1);
+  });
+
+  it("with CAT_FINDER=off, the circle copy stays, the marker is cleared and the model never runs", async () => {
+    vi.stubEnv("CAT_FINDER", "off");
+    try {
+      finder(() => ({ box: CAT_BOX, mask: null }));
+      const { id, circleKey } = await circlePublished();
+      expect(await recutNext()).toBe("recut");
+      expect(await sightingOf(id)).toMatchObject({ publicKey: circleKey, needsRecut: false });
+      expect(calls).toBe(0);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("a rotation during the re-cut wins: the re-cut copy is deleted and the sighting keeps the copy it has", async () => {
+    const mask = await maskOf(CAT_BOX);
+    const { id, circleKey } = await circlePublished();
+    finder(async () => {
+      await db.update(sightings).set({ photoVersion: 1 }).where(eq(sightings.id, id));
+      return { box: CAT_BOX, mask };
+    });
+    const put = vi.spyOn(getStorage(), "putPublic");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(await recutNext()).toBe("recut");
+
+    expect(await sightingOf(id)).toMatchObject({ publicKey: circleKey, needsRecut: false });
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(() => memoryStorage.readPublic(put.mock.calls[0][0])).toThrow();
+    expect(() => memoryStorage.readPublic(circleKey)).not.toThrow();
   });
 });
 

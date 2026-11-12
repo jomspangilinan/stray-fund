@@ -1,0 +1,1 @@
+ALTER TABLE "sightings" ADD COLUMN "needs_recut" boolean DEFAULT false NOT NULL;

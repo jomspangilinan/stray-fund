@@ -423,9 +423,10 @@ describe("maintenance", () => {
       retryUnknown: job("retryUnknown", true),
       retrySightings: job("sightings", true),
       develop: job("develop", true),
+      recut: job("recut", true),
       retryEvidence: job("evidence"),
     });
-    expect(ran).toEqual(["reconcile", "retryUnknown", "sightings", "develop", "evidence"]);
+    expect(ran).toEqual(["reconcile", "retryUnknown", "sightings", "develop", "recut", "evidence"]);
   });
 
   it("develops photos until the queue is empty, at most DEVELOP_PER_TICK a tick", async () => {

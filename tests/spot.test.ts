@@ -673,6 +673,8 @@ describe("public photo", () => {
     await processSpot({ ai: true, jpeg: photo, lat: 10.2, lng: 120.6, userId: u.id, box, mask });
     const [s] = await sightingRows();
     expect(s.publicReady).toBe(true);
+    // The phone's cut-out is already the cat's shape: nothing for the worker to re-cut.
+    expect(s).toMatchObject({ needsRecut: false, needsDevelop: false });
     const orig = await getStorage().getPrivate(s.originalKey);
     const bytes = (getStorage() as unknown as { readPublic(k: string): Buffer }).readPublic(s.publicKey!);
     expect(bytes.equals(await catOnly(orig, { box, mask }, []))).toBe(true);
@@ -680,7 +682,7 @@ describe("public photo", () => {
     expect(bytes.equals(await catOnly(orig, { box, mask: null }, []))).toBe(false);
   });
 
-  it("AI path with no cut-out, or an unusable one, uses the circle on the box", async () => {
+  it("AI path with no cut-out, or an unusable one, publishes the circle on the box now and marks it for the server re-cut", async () => {
     const box = { x: 0.2, y: 0.2, w: 0.6, h: 0.6 };
     const photo = await sharp(await checkerImage(400, 300, { left: 0, top: 0, width: 400, height: 300 })).jpeg({ quality: 95 }).toBuffer();
     for (const mask of [undefined, await maskOf(null)]) {
@@ -690,6 +692,8 @@ describe("public photo", () => {
       await processSpot({ ai: true, jpeg: photo, lat: 10.2, lng: 120.6, userId: u.id, box, mask });
       const [s] = await sightingRows();
       expect(s.publicReady).toBe(true);
+      // Marked for the worker's server cut-out, but never as a plain public photo.
+      expect(s).toMatchObject({ needsRecut: true, needsDevelop: false });
       const orig = await getStorage().getPrivate(s.originalKey);
       const bytes = (getStorage() as unknown as { readPublic(k: string): Buffer }).readPublic(s.publicKey!);
       expect(bytes.equals(await catOnly(orig, { box, mask: null }, []))).toBe(true);

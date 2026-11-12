@@ -117,6 +117,9 @@ export const sightings = pgTable(
     needsDevelop: boolean("needs_develop").notNull().default(false),
     developedAt: timestamp("developed_at", { withTimezone: true }),
     developAttempts: integer("develop_attempts").notNull().default(0),
+    // AI-path photos only: published with the soft circle because no usable phone cut-out came with it. The worker
+    // cuts the cat out once and swaps the public copy. Never needs_develop, which marks a plain public photo for life.
+    needsRecut: boolean("needs_recut").notNull().default(false),
     // Bumped when a caretaker turns the original, so a develop that began on the old picture cannot publish it.
     photoVersion: integer("photo_version").notNull().default(0),
     createdAt: createdAt(),
