@@ -114,6 +114,18 @@ function toRect(box: unknown, width: number, height: number): Rect | null {
 export const KEEP_MARGIN = 0.15;
 export const FEATHER = 0.2;
 export const NO_BOX_KEEP = 0.6;
+/**
+ * A box from the client covering more than this share of the photo is not trusted to say where the cat is: it would
+ * keep nearly the whole street sharp. It counts as no box, so the middle circle is used and no phone mask (which
+ * needs a box) can widen it.
+ */
+export const MAX_TRUSTED_BOX_AREA = 0.5;
+
+/** The client's box when it is narrow enough to decide what stays sharp, else null. */
+export function trustedCatBox(box: CatBox | null | undefined): CatBox | null {
+  if (!box) return null;
+  return box.w * box.h > MAX_TRUSTED_BOX_AREA ? null : box;
+}
 /** Lives with the pure mask code, which the phone shares. */
 export { MASK_SIDE };
 export const MASK_MAX_BYTES = 8 * 1024;

@@ -10,7 +10,7 @@ import { createTestPool } from "./helpers/db";
 import { CAT_NAMES } from "../src/lib/catNames";
 import { COLONY } from "../src/lib/config";
 import { setAiForTests, type AiTransport } from "../src/server/ai/client";
-import { catOnly, storeOriginal, InvalidPhoto } from "../src/server/photos";
+import { catOnly, maskUsable, storeOriginal, InvalidPhoto } from "../src/server/photos";
 import { getStorage } from "../src/server/storage";
 import { SESSION_COOKIE, signSession } from "../src/server/session";
 
@@ -680,6 +680,27 @@ describe("public photo", () => {
     expect(bytes.equals(await catOnly(orig, { box, mask }, []))).toBe(true);
     // The mask decided what stayed sharp, not the circle on the box.
     expect(bytes.equals(await catOnly(orig, { box, mask: null }, []))).toBe(false);
+  });
+
+  it("AI path with a box over most of the photo and an 80% mask publishes the middle circle, not the mask, and marks it for the re-cut", async () => {
+    const full = { x: 0, y: 0, w: 1, h: 1 };
+    const mask = await maskOf({ x: 0, y: 0, w: 1, h: 0.8 });
+    // On its own, the full box would let this mask through.
+    expect(await maskUsable(mask, full)).toBe(true);
+    const u = await makeUser();
+    const photo = await sharp(await checkerImage(400, 300, { left: 0, top: 0, width: 400, height: 300 })).jpeg({ quality: 95 }).toBuffer();
+    await processSpot({ ai: true, jpeg: photo, lat: 10.2, lng: 120.6, userId: u.id, box: full, mask });
+    const [s] = await sightingRows();
+    expect(s).toMatchObject({ publicReady: true, needsRecut: true });
+    const orig = await getStorage().getPrivate(s.originalKey);
+    const out = (getStorage() as unknown as { readPublic(k: string): Buffer }).readPublic(s.publicKey!);
+    expect(out.equals(await catOnly(orig, { box: null, mask: null }, []))).toBe(true);
+    expect(out.equals(await catOnly(orig, { box: full, mask }, []))).toBe(false);
+    const varAt = async (img: Buffer, left: number, top: number) => variance(await greyRegion(img, { left, top, width: 20, height: 20 }));
+    const sharpVar = await varAt(photo, 20, 100);
+    // Far from the centre, inside the mask's white area, the photo is blurred.
+    expect(await varAt(out, 20, 100)).toBeLessThan(sharpVar * 0.1);
+    expect(await varAt(out, 360, 20)).toBeLessThan(sharpVar * 0.1);
   });
 
   it("AI path with no cut-out, or an unusable one, publishes the circle on the box now and marks it for the server re-cut", async () => {
@@ -1375,6 +1396,13 @@ describe("processSpot: the public path (no AI)", () => {
     expect(cat.avatar).not.toBeNull();
     expect(cat.avatar).not.toEqual(NEUTRAL_AVATAR);
     expect(seen.assess + seen.match).toBe(0);
+  });
+
+  it("phone tier: a box over most of the photo counts as none, so even a usable-looking mask leaves the photo queued", async () => {
+    const u = await makeUser();
+    const out = await plain(u.id, { box: { x: 0, y: 0, w: 1, h: 1 }, mask: await maskOf({ x: 0, y: 0, w: 1, h: 0.8 }) });
+    expect(out.developed).toBe(false);
+    expect((await sightingRows())[0]).toMatchObject({ publicReady: false, developedAt: null, needsDevelop: true });
   });
 
   it("phone tier: an unusable mask leaves the photo queued", async () => {

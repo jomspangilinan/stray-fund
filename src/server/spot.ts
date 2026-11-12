@@ -11,7 +11,7 @@ import { catNamesInUse, uniqueName } from "./catNames";
 import { nameIsSafe, safeBio } from "./placeText";
 import { fuzzLocation } from "./location";
 import { attachReports, filePhotoReports } from "./reports";
-import { maskUsable, publishCatOnly, storeOriginal, type Box } from "./photos";
+import { maskUsable, publishCatOnly, storeOriginal, trustedCatBox, type Box } from "./photos";
 import { avatarFromPhoto } from "./photoAvatar";
 import { getStorage, removePublicCopy } from "./storage";
 
@@ -242,7 +242,9 @@ async function developNow(
   catId: string,
   photoVersion: number,
 ): Promise<boolean> {
-  const { box, mask } = i;
+  // A box over most of the photo counts as none, so the worker develops it with its own model instead.
+  const box = trustedCatBox(i.box);
+  const { mask } = i;
   if (!box || !mask || !(await maskUsable(mask, box))) return false;
   let key: string | null = null;
   try {
@@ -538,7 +540,8 @@ export async function publishPhoto(sightingId: string, originalKey: string, regi
     // The version is read before the original, so a rotation that lands in between makes the update below miss.
     const [row] = await db.select({ box: sightings.catBox, photoVersion: sightings.photoVersion }).from(sightings).where(eq(sightings.id, sightingId));
     if (!row) return;
-    const box = parseCatBox(row.box);
+    // A box over most of the photo counts as none: the middle circle, no phone mask, and the worker re-cuts it.
+    const box = trustedCatBox(parseCatBox(row.box));
     // Masks are not stored, so a republish, or a row finished later by the retry, keeps the soft circle around the stored box.
     const keepMask = mask && (await maskUsable(mask, box)) ? mask : null;
     const { key } = await publishCatOnly(originalKey, { box, mask: keepMask }, regions as Box[]);
