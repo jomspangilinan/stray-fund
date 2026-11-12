@@ -1021,6 +1021,39 @@ describe("photo_rotate", () => {
     expect([meta.width, meta.height]).toEqual([300, 400]);
   });
 
+  it("a rotation during develop leaves the row undeveloped, and the next tick publishes the turned photo", async () => {
+    const { s } = await rotatable({ needsDevelop: true, createdAt: new Date(Date.now() - 3_600_000) });
+    setCatFinderForTests(async () => {
+      expect((await act("photo_rotate", { sightingId: s.id, direction: "right" })).status).toBe(200);
+      return { box: null, mask: null };
+    });
+    try {
+      await developNext();
+      const mid = await sightingRow(s.id);
+      expect(mid).toMatchObject({ publicReady: false, publicKey: null, developedAt: null });
+      expect(mid.developAttempts).toBe(0);
+    } finally {
+      setCatFinderForTests(null);
+    }
+    setCatFinderForTests(async () => ({ box: null, mask: null }));
+    try {
+      expect(await developNext()).toBe("developed");
+    } finally {
+      setCatFinderForTests(null);
+    }
+    const row = await sightingRow(s.id);
+    expect(row.publicReady).toBe(true);
+    const meta = await sharp((getStorage() as unknown as Mem).readPublic(row.publicKey!)).metadata();
+    expect([meta.width, meta.height]).toEqual([300, 400]);
+  });
+
+  it("turns the marked areas with the photo", async () => {
+    const { s } = await rotatable({ assessment: { ...ASSESS, sensitive_regions: [BOX] } });
+    await act("photo_rotate", { sightingId: s.id, direction: "right" });
+    const r = ((await sightingRow(s.id)).assessment as { sensitive_regions: (typeof BOX)[] }).sensitive_regions[0];
+    expect([r.x, r.y, r.w, r.h].map((n) => Math.round(n * 100) / 100)).toEqual([0.4, 0.1, 0.4, 0.3]);
+  });
+
   it("a delete that fails is logged and the rotation still stands", async () => {
     const { s } = await rotatable();
     await act("photo_publish", { sightingId: s.id, noSensitive: true });

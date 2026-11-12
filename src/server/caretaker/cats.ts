@@ -460,7 +460,7 @@ export const photoRotate: Handler = async (caretakerId, body) => {
       const a = s.assessment as { sensitive_regions?: unknown } | null;
       const assessment =
         a && Array.isArray(a.sensitive_regions) ? { ...a, sensitive_regions: (a.sensitive_regions as Box[]).map((r) => rotateBox(r, turn)) } : s.assessment;
-      const patch: Partial<typeof sightings.$inferInsert> = { catBox, assessment: assessment as object | null };
+      const patch: Partial<typeof sightings.$inferInsert> = { catBox, assessment: assessment as object | null, photoVersion: sql`${sightings.photoVersion} + 1` as unknown as number };
       if (s.publicReady) {
         newKey = (await publishCatOnly(s.originalKey, { box: catBox, mask: null }, regionsOf(assessment))).key;
         patch.publicKey = newKey;

@@ -30,7 +30,7 @@ const NO_CAT: KeepArea = { box: null, mask: null };
 /** CAT_FINDER=off switches the model off at runtime: every queued photo is published with the soft circle. */
 const finderOff = () => process.env.CAT_FINDER === "off";
 
-type Claimed = { id: string; originalKey: string; catId: string | null; attempts: number; storedBox: unknown };
+type Claimed = { id: string; originalKey: string; catId: string | null; attempts: number; storedBox: unknown; photoVersion: number };
 
 /**
  * Takes the next photo waiting to be developed and commits one more attempt on it before any work starts,
@@ -59,6 +59,7 @@ async function claim(): Promise<Claimed | null> {
         catId: sightings.catId,
         attempts: sightings.developAttempts,
         storedBox: sightings.catBox,
+        photoVersion: sightings.photoVersion,
       });
     return c;
   });
@@ -116,13 +117,20 @@ export async function developNext(): Promise<"developed" | "idle"> {
         .update(sightings)
         // This claim published, so it is not one of the failed attempts the column counts.
         .set({ publicKey: key, publicReady: true, developedAt: new Date(), developAttempts: sql`${sightings.developAttempts} - 1` })
-        .where(and(eq(sightings.id, s.id), sql`${sightings.developedAt} is null`))
+        .where(and(eq(sightings.id, s.id), sql`${sightings.developedAt} is null`, eq(sightings.photoVersion, s.photoVersion)))
         .returning({ id: sightings.id });
-      if (marked.length === 0) return false;
+      if (marked.length === 0) {
+        // A turned original is not a failed attempt: give the attempt back so the next tick develops it afresh.
+        await tx
+          .update(sightings)
+          .set({ developAttempts: sql`greatest(${sightings.developAttempts} - 1, 0)` })
+          .where(and(eq(sightings.id, s.id), sql`${sightings.developedAt} is null`));
+        return false;
+      }
       if (s.catId) await tx.update(cats).set({ avatar }).where(eq(cats.id, s.catId));
       return true;
     });
-    // Lost to the phone tier (or a caretaker's hold): this copy belongs to no sighting, so it is deleted.
+    // Lost to the phone tier, a caretaker's hold, or a caretaker's rotation of the original: this copy belongs to no sighting, so it is deleted.
     if (!won) {
       console.error("[develop] the photo was developed elsewhere first; this public copy is deleted");
       await removePublicCopy(key);

@@ -117,6 +117,8 @@ export const sightings = pgTable(
     needsDevelop: boolean("needs_develop").notNull().default(false),
     developedAt: timestamp("developed_at", { withTimezone: true }),
     developAttempts: integer("develop_attempts").notNull().default(0),
+    // Bumped when a caretaker turns the original, so a develop that began on the old picture cannot publish it.
+    photoVersion: integer("photo_version").notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [
