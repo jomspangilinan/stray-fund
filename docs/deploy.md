@@ -186,7 +186,7 @@ Before anything else is running up costs, open AWS Billing, Budgets, and create 
 
 1. Push the repo to GitHub, then in Render choose New, Blueprint, and pick the repo.
 2. Render reads `render.yaml` and shows the three resources. It asks for every variable marked `sync: false` (see the table). It asks once per service, so enter the shared ones twice, in web and in worker.
-3. Create. The first deploy builds, runs `npm run db:migrate` as the pre-deploy step on the web service, then starts. The worker deploys on its own and may start before the migration finishes. If it crashes on a missing table, redeploy it once the web service is live.
+3. Create. The first deploy builds, runs `npm run db:migrate` as the pre-deploy step on the web service, then starts. The worker deploys on its own and may start before the migration finishes. If it crashes on a missing table, redeploy it once the web service is live. Until migrations 0028 and 0029 are applied, the worker's photo developing (`developNext`) fails on the missing `sightings` columns; each failure is logged and the next tick tries again, and the errors stop once the web service's migration has run.
 
 Paid tiers are used on purpose: free Postgres expires after 30 days and workers have no free tier.
 
