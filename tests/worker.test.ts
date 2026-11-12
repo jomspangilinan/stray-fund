@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { closePool, db } from "../src/server/db/client";
 import { aiUsage, agentActions, allocations, cats, donations, payouts, reviewRequests, wakeups } from "../src/server/db/schema";
 import {
+  DEVELOP_PER_TICK,
   MAX_WAKEUP_ATTEMPTS,
   claimNextWakeup,
   failStaleWakeups,
@@ -425,6 +426,16 @@ describe("maintenance", () => {
       retryEvidence: job("evidence"),
     });
     expect(ran).toEqual(["reconcile", "retryUnknown", "sightings", "develop", "evidence"]);
+  });
+
+  it("develops photos until the queue is empty, at most DEVELOP_PER_TICK a tick", async () => {
+    const quiet = { gateway: new FakeGateway(), reconcile: async () => {}, retryUnknown: async () => {}, retrySightings: async () => {}, retryEvidence: async () => {} };
+    let calls = 0;
+    await runMaintenance({ ...quiet, develop: async () => (++calls, "developed" as const) });
+    expect(calls).toBe(DEVELOP_PER_TICK);
+    calls = 0;
+    await runMaintenance({ ...quiet, develop: async () => (++calls <= 2 ? "developed" : "idle") });
+    expect(calls).toBe(3);
   });
 });
 

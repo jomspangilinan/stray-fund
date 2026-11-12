@@ -73,4 +73,4 @@ PayPal packages are used under their own open source licences; this does not gra
 
 ## Suggestion: LICENSE
 
-The existing MIT `LICENSE` is fine for this project and for Devpost's open source requirement. If you want a different one, replace the file; do not add a second.
+`LICENSE` is AGPL-3.0, which Devpost's open source requirement accepts. It has to stay AGPL-3.0 while the YOLO11n-seg model is in the repo. If the model is ever removed, the licence can change again; replace the file, do not add a second.

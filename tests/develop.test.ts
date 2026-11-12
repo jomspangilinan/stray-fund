@@ -109,7 +109,8 @@ describe("developNext", () => {
     expect(s.publicReady).toBe(true);
     expect(s.publicKey).toMatch(/^photos\//);
     expect(s.developedAt).not.toBeNull();
-    expect(s.developAttempts).toBe(1);
+    // The claim that publishes is not a failed attempt.
+    expect(s.developAttempts).toBe(0);
     expect((await catOf(out.catId!)).avatar).toEqual({ pattern: "solid", base: "ginger", accent: "ginger" });
 
     const orig = await original(out.sightingId);
@@ -164,31 +165,102 @@ describe("developNext", () => {
     expect((await published(out.sightingId)).equals(await catOnly(orig, { box: null, mask: null }))).toBe(true);
   });
 
-  it("retries a finder that throws, then after the last attempt publishes with the middle circle and no model", async () => {
+  it("publishes with the middle circle on the first claim when the finder throws (R15)", async () => {
     finder(() => {
       throw new Error("model failed to load");
     });
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const out = await queued(await photo(MIDDLE));
 
-    for (let i = 1; i <= DEVELOP_MAX_ATTEMPTS; i++) {
-      expect(await developNext()).toBe("idle");
-      const s = await sightingOf(out.sightingId);
-      expect(s.developAttempts).toBe(i);
-      expect(s.developedAt).toBeNull();
-      expect(s.publicReady).toBe(false);
-    }
-    expect(calls).toBe(DEVELOP_MAX_ATTEMPTS);
-
     expect(await developNext()).toBe("developed");
-    expect(calls).toBe(DEVELOP_MAX_ATTEMPTS);
+    expect(calls).toBe(1);
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("model failed to load"));
     const s = await sightingOf(out.sightingId);
-    expect(s.developAttempts).toBe(DEVELOP_MAX_ATTEMPTS);
+    expect(s.developAttempts).toBe(0);
     expect(s.publicReady).toBe(true);
     expect(s.developedAt).not.toBeNull();
     const orig = await original(out.sightingId);
     expect((await published(out.sightingId)).equals(await catOnly(orig, { box: null, mask: null }))).toBe(true);
     expect((await catOf(out.catId!)).avatar).toEqual({ pattern: "solid", base: "ginger", accent: "ginger" });
+  });
+
+  it("after DEVELOP_MAX_ATTEMPTS failed claims, publishes with the middle circle and no model call", async () => {
+    finder(() => ({ box: CAT_BOX, mask: null }));
+    const out = await queued(await photo(MIDDLE));
+    await db.update(sightings).set({ developAttempts: DEVELOP_MAX_ATTEMPTS }).where(eq(sightings.id, out.sightingId));
+
+    expect(await developNext()).toBe("developed");
+    expect(calls).toBe(0);
+    const s = await sightingOf(out.sightingId);
+    expect(s.developAttempts).toBe(DEVELOP_MAX_ATTEMPTS);
+    expect(s.publicReady).toBe(true);
+    const orig = await original(out.sightingId);
+    expect((await published(out.sightingId)).equals(await catOnly(orig, { box: null, mask: null }))).toBe(true);
+  });
+
+  it("a photo that can never publish sinks behind the healthy ones", async () => {
+    finder(() => ({ box: null, mask: null }));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const broken = await queued(await photo(MIDDLE), 600);
+    const healthy = await queued(await photo(MIDDLE), 120);
+    const brokenKey = (await sightingOf(broken.sightingId)).originalKey;
+    const real = memoryStorage.getPrivate.bind(memoryStorage);
+    vi.spyOn(memoryStorage, "getPrivate").mockImplementation(async (key) => {
+      if (key === brokenKey) throw new Error("storage down");
+      return real(key);
+    });
+
+    const results: string[] = [];
+    for (let i = 0; i < 5 && (await sightingOf(healthy.sightingId)).developedAt === null; i++) results.push(await developNext());
+    expect((await sightingOf(healthy.sightingId)).developedAt).not.toBeNull();
+    expect(results.length).toBeLessThanOrEqual(5);
+    const b = await sightingOf(broken.sightingId);
+    expect(b.developedAt).toBeNull();
+    expect(b.developAttempts).toBe(DEVELOP_MAX_ATTEMPTS + 1);
+    // Only the error's class name is logged for storage errors.
+    expect(logged.mock.calls.flat().join(" ")).not.toContain("storage down");
+
+    // Once past the limit it is still tried, after everything else, and logged loudly.
+    await db.update(sightings).set({ developAttempts: DEVELOP_MAX_ATTEMPTS + 3 }).where(eq(sightings.id, broken.sightingId));
+    expect(await developNext()).toBe("idle");
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining(`sighting ${broken.sightingId} has failed to publish`));
+  });
+
+  describe("with CAT_FINDER=off", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("publishes with no model call, on a circle around the phone's box", async () => {
+      vi.stubEnv("CAT_FINDER", "off");
+      finder(() => ({ box: CAT_BOX, mask: null }));
+      const out = await queued(await photo(CAT_BOX));
+      await db.update(sightings).set({ catBox: CAT_BOX }).where(eq(sightings.id, out.sightingId));
+
+      expect(await developNext()).toBe("developed");
+      expect(calls).toBe(0);
+      const s = await sightingOf(out.sightingId);
+      expect(s.publicReady).toBe(true);
+      const orig = await original(out.sightingId);
+      expect((await published(out.sightingId)).equals(await catOnly(orig, { box: CAT_BOX, mask: null }))).toBe(true);
+    });
+
+    it("publishes on the middle circle when no box is known", async () => {
+      vi.stubEnv("CAT_FINDER", "off");
+      finder(() => ({ box: CAT_BOX, mask: null }));
+      const out = await queued(await photo(MIDDLE));
+
+      expect(await developNext()).toBe("developed");
+      expect(calls).toBe(0);
+      const orig = await original(out.sightingId);
+      expect((await published(out.sightingId)).equals(await catOnly(orig, { box: null, mask: null }))).toBe(true);
+    });
+
+    it("anything but exactly \"off\" leaves the model on", async () => {
+      vi.stubEnv("CAT_FINDER", "OFF");
+      finder(() => ({ box: null, mask: null }));
+      await queued(await photo(MIDDLE));
+      expect(await developNext()).toBe("developed");
+      expect(calls).toBe(1);
+    });
   });
 
   it("never takes a sighting from the AI path", async () => {

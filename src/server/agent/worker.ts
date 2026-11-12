@@ -27,6 +27,8 @@ export const MAX_WAKEUP_ATTEMPTS = 3;
 const STALE_AFTER_MINUTES = 10;
 const POLL_MS = 3_000;
 const MAINTENANCE_MS = 60_000;
+/** Queued public photos developed per maintenance tick at most (R16). */
+export const DEVELOP_PER_TICK = 5;
 /** Before the second and third attempts. */
 const BACKOFF_SECONDS = [30, 120];
 
@@ -37,7 +39,7 @@ export type WorkerDeps = AgentDeps & {
   reconcileDonations?: () => Promise<unknown>;
   retryUnknown?: () => Promise<unknown>;
   retrySightings?: () => Promise<unknown>;
-  /** Develops one queued public photo per tick. */
+  /** Develops one queued public photo; called while it answers "developed", at most DEVELOP_PER_TICK times a tick. */
   develop?: () => Promise<unknown>;
   retryEvidence?: () => Promise<unknown>;
   backfillAvatars?: () => Promise<unknown>;
@@ -268,6 +270,11 @@ async function isolated(name: string, job: () => Promise<unknown>): Promise<void
   }
 }
 
+/** Stops at the first answer that is not "developed": the queue is empty, or a photo failed and waits. */
+async function developSome(step: () => Promise<unknown>): Promise<void> {
+  for (let i = 0; i < DEVELOP_PER_TICK; i++) if ((await step()) !== "developed") return;
+}
+
 /** Each job is isolated, so one failing never stops the others. */
 export async function runMaintenance(deps: WorkerDeps = {}): Promise<void> {
   const gateway = deps.gateway ?? payoutGateway();
@@ -275,7 +282,7 @@ export async function runMaintenance(deps: WorkerDeps = {}): Promise<void> {
   await isolated("donation check", deps.reconcileDonations ?? (() => reconcilePendingDonations()));
   await isolated("payout retry", deps.retryUnknown ?? (() => retryUnknownPayouts(gateway)));
   await isolated("sighting retry", deps.retrySightings ?? retryPendingSightings);
-  await isolated("photo develop", deps.develop ?? developNext);
+  await isolated("photo develop", () => developSome(deps.develop ?? developNext));
   await isolated("evidence retry", deps.retryEvidence ?? retryPendingEvidence);
   await isolated("avatar backfill", deps.backfillAvatars ?? backfillAvatars);
 }
