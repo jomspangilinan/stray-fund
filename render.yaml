@@ -29,10 +29,9 @@ services:
         value: "true"
       - key: AWS_REGION
         value: ap-southeast-1
-      # The web service's own IAM user (stray-fund-web). The worker has a different one. See docs/deploy.md step 2.
-      - key: AWS_ACCESS_KEY_ID
-        sync: false
-      - key: AWS_SECRET_ACCESS_KEY
+      # No AWS keys: Render's OIDC token assumes this IAM role (needs a Pro workspace). Render sets
+      # AWS_WEB_IDENTITY_TOKEN_FILE itself; never set it by hand. See docs/deploy.md step 2.
+      - key: AWS_ROLE_ARN
         sync: false
       # The Bedrock policy in docs/deploy.md names this exact model in three statements. Change all of them with it.
       - key: AI_MODEL
@@ -80,10 +79,9 @@ services:
           property: connectionString
       - key: AWS_REGION
         value: ap-southeast-1
-      # The worker's own IAM user (stray-fund-worker), not the web service's key. See docs/deploy.md step 2.
-      - key: AWS_ACCESS_KEY_ID
-        sync: false
-      - key: AWS_SECRET_ACCESS_KEY
+      # No AWS keys: Render's OIDC token assumes this IAM role (needs a Pro workspace). Render sets
+      # AWS_WEB_IDENTITY_TOKEN_FILE itself; never set it by hand. See docs/deploy.md step 2.
+      - key: AWS_ROLE_ARN
         sync: false
       - key: AI_MODEL
         value: global.anthropic.claude-haiku-4-5-20251001-v1:0

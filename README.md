@@ -96,7 +96,7 @@ PayPal sandbox needs `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and a sandbox bu
 
 ## Deploy
 
-See [docs/deploy.md](docs/deploy.md): S3 buckets, IAM keys, billing alert, Render Blueprint (`render.yaml`), PayPal webhook, first-boot check, live checks and the "Before real money" list. Nothing in it has been run against a real AWS account yet.
+See [docs/deploy.md](docs/deploy.md): S3 buckets, an IAM role through Render's OIDC sign-in (no AWS keys), billing alert, Render Blueprint (`render.yaml`), PayPal webhook, first-boot check, live checks and the "Before real money" list. Nothing in it has been run against a real AWS account yet.
 
 ## Test it
 

@@ -85,17 +85,41 @@ Set `S3_PUBLIC_BASE_URL` to `https://YOUR-PUBLIC-BUCKET.s3.ap-southeast-1.amazon
 
 **CORS.** None is needed. Phones send the photo to the app (`POST /api/spot`), and the app writes to S3 from the server. Photos are shown in plain `<img>` tags (`unoptimized`). Save image draws a canvas, but it never reads the bucket from the browser: the app fetches the public photo itself and serves it from its own address (`/api/cats/<id>/keepsake/photo`), so the canvas is never tainted and the public bucket still needs no CORS rule. The web service does need to reach `S3_PUBLIC_BASE_URL` over https.
 
-## 2. Account safety and IAM keys
+## 2. Account safety and the IAM role
 
 **Root account (Demo ok, but do it first).** Sign in as the root user only to set this up. Turn on MFA for root (AWS requires it for every account type; there is a 14 day grace period) and create no access keys for root (https://docs.aws.amazon.com/IAM/latest/UserGuide/root-user-best-practices.html). Use a strong unique password and an email you control. For the command line on your laptop, `aws login` gives temporary credentials, so no root key is ever stored.
 
-**One IAM user per service (Required before real money).** Make two IAM users with no console access, `stray-fund-web` and `stray-fund-worker`, attach the same policy to both, and create one access key for each. Put the web key on the web service and the worker key on the worker only. Why two keys with the same policy: both services run the same photo and model code, so least privilege does not differ between them today. Separate keys still let you revoke or rotate one without stopping the other, and CloudTrail then shows which service made a call. If their code paths diverge later, narrow each policy. AWS prefers temporary role credentials for workloads, and lists IAM Roles Anywhere and web identity federation for workloads outside AWS (https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html). Whether Render can issue OIDC tokens for an AWS role, and on which plan, was not verified (the page checked returned 404), so long-lived keys with a small scope are the stated compromise for now. For the demo one key is acceptable (**Demo ok**).
+**An IAM role, no access keys (Demo ok, and the standard before real money).** Render signs each service in to AWS with a short-lived OIDC token, so no AWS secret is stored anywhere (https://render.com/docs/oidc). This needs a Render **Pro** workspace or higher. The AWS SDK's default credential chain reads the token by itself (`AWS_ROLE_ARN` plus `AWS_WEB_IDENTITY_TOKEN_FILE`), so the app needs no code for it.
 
-**Rotation (Required before real money).** AWS says to update access keys when needed and to use the "last used" information to remove old ones safely. This project's own rule: rotate every 90 days, and at once if a key may have leaked or someone with access leaves. IAM allows two keys per user, so rotate without downtime: create the second key, set it on the Render service and redeploy, check the old key's "last used" date stops moving, make the old key inactive for a day, then delete it. Put the next rotation date in your calendar when you create a key.
+1. Find the workspace id (starts with `tea-`) in the Render dashboard's workspace Settings URL.
+2. IAM, Identity providers, add an OpenID Connect provider: URL `https://oidc.render.com/<WORKSPACE_ID>`, audience `sts.amazonaws.com`.
+3. Create the role `stray-fund-app` with this trust policy, and attach the permissions policy below to it as an inline policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "Federated": "arn:aws:iam::ACCOUNT_ID:oidc-provider/oidc.render.com/WORKSPACE_ID" },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": { "oidc.render.com/WORKSPACE_ID:aud": "sts.amazonaws.com" },
+        "StringLike": { "oidc.render.com/WORKSPACE_ID:sub": "workspace:WORKSPACE_ID:environment:*:service:*" }
+      }
+    }
+  ]
+}
+```
+
+4. Put the role's ARN in `AWS_ROLE_ARN` on the web service and the worker. Render sets `AWS_WEB_IDENTITY_TOKEN_FILE` itself; never set it by hand.
+5. Once Render shows the two service ids (`srv-...`), narrow the `sub` condition from `service:*` to exactly those two services, so no other service in the workspace can take the role.
+
+Both services share one role because they run the same photo and model code. If their code paths diverge, give each its own role with a narrower policy. Without a Pro workspace, the fallback is one IAM user per service with its own access key, rotated every 90 days; the role removes that chore and the stored secret.
 
 Replace the placeholders in the policy: `YOUR-PRIVATE-BUCKET`, `YOUR-PUBLIC-BUCKET`, `ACCOUNT_ID` (your 12 digit account number) and `REGION` (`ap-southeast-1`). The three `Bedrock...` statements are needed for the photo checks and the treasurer agent, which only ever use Bedrock in production; without them the deployed app cannot call the model.
 
-**First use of Anthropic models on Bedrock (do this once per AWS account, before the first real call).** AWS enables most serverless models on first invoke, but two things must be in place or the first calls return `AccessDeniedException` (https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html). (1) Anthropic requires first-time customers to submit use case details once per account (or once at the organization's management account): open an Anthropic model in the Bedrock console model catalog and fill in the form, which asks for a description of the use and a website URL (a GitHub or project page is accepted for an individual). It can sit in a pending state with calls still denied; AWS emails when it finishes. (2) The identity that makes the first call needs `aws-marketplace:Subscribe`, `aws-marketplace:Unsubscribe` and `aws-marketplace:ViewSubscriptions`, or someone who has them must enable the model once; after that the app's own policy does not need them. These Marketplace actions are not in the policy below on purpose, so use an admin identity for the first call, not the app's key. The account also needs a valid payment method. After the subscription starts, allow up to 15 minutes, and up to 2 minutes after fixing a missing permission.
+**First use of Anthropic models on Bedrock (do this once per AWS account, before the first real call).** AWS enables most serverless models on first invoke, but two things must be in place or the first calls return `AccessDeniedException` (https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html). (1) Anthropic requires first-time customers to submit use case details once per account (or once at the organization's management account): open an Anthropic model in the Bedrock console model catalog and fill in the form, which asks for a description of the use and a website URL (a GitHub or project page is accepted for an individual). It can sit in a pending state with calls still denied; AWS emails when it finishes. (2) The identity that makes the first call needs `aws-marketplace:Subscribe`, `aws-marketplace:Unsubscribe` and `aws-marketplace:ViewSubscriptions`, or someone who has them must enable the model once; after that the app's own policy does not need them. These Marketplace actions are not in the policy below on purpose, so use an admin identity for the first call, not the app's role. The account also needs a valid payment method. After the subscription starts, allow up to 15 minutes, and up to 2 minutes after fixing a missing permission.
 
 ```json
 {
@@ -169,7 +193,7 @@ Paid tiers are used on purpose: free Postgres expires after 30 days and workers 
 ## 5. Secrets
 
 - `SESSION_SECRET` and `FEEDER_TOKEN` are generated by Render. Read `FEEDER_TOKEN` in the web service's Environment tab; the feeder device sends it as `Authorization: Bearer <token>`.
-- Put the web user's key in `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` on the web service, and the worker user's key on the worker (step 2). Each service has its own entry, so the two values differ.
+- There are no AWS keys. Put the role's ARN in `AWS_ROLE_ARN` on both services (step 2). It is not a secret, but it is kept out of the YAML so the repo names no account.
 - Put your PayPal sandbox app's client id and secret in `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` on both services.
 - `PAYPAL_VET_EMAIL` is the sandbox account that receives vet payouts.
 - Never paste any of these into the repo or the YAML.
@@ -213,8 +237,7 @@ After saving the webhook, copy its id from the dashboard into `PAYPAL_WEBHOOK_ID
 | `FEEDER_TOKEN` | web | Generated by Render |
 | `DEMO_MODE` | web | Fixed to `true` in the Blueprint |
 | `AWS_REGION` | web, worker | Fixed to `ap-southeast-1` |
-| `AWS_ACCESS_KEY_ID` | web, worker | That service's own IAM user key, step 2 |
-| `AWS_SECRET_ACCESS_KEY` | web, worker | That service's own IAM user key, step 2 |
+| `AWS_ROLE_ARN` | web, worker | The `stray-fund-app` role, step 2. Render adds `AWS_WEB_IDENTITY_TOKEN_FILE` itself |
 | `AI_MODEL` | web, worker | Fixed Bedrock model id (the code default) |
 | `AI_DAILY_CALL_CAP` | web, worker | Fixed to `500`; change in the dashboard |
 | `S3_PRIVATE_BUCKET` | web, worker | Bucket name, step 1 |
@@ -240,9 +263,10 @@ Prices from render.com/pricing on 2026-11-03.
 | Worker | `0.5c-512mb` | 7 |
 | Postgres | `0.1c-256mb` | 6 |
 | Postgres storage | 1 GB at 0.30 | 0.30 |
-| Render total | | about 20.30 |
+| Pro workspace | flat fee, needed for the OIDC role | 25 |
+| Render total | | about 45.30 |
 
-S3 storage and requests for a demo are cents. Bedrock is pay per call and capped by `AI_DAILY_CALL_CAP`. The Render workspace itself needs the free Hobby plan at least.
+S3 storage and requests for a demo are cents. Bedrock is pay per call and capped by `AI_DAILY_CALL_CAP`. The Render workspace must be on Pro (25 USD a month, flat) for the OIDC role in step 2.
 
 ## Live checks to run after the first deploy
 
@@ -274,7 +298,7 @@ Everything here is **required before real money**. None of it is needed for the 
 
 - Root account has MFA and no access keys (step 2).
 - A billing alert exists, and you accept that the only hard stop is `AI_DAILY_CALL_CAP` (step 3).
-- Separate web and worker IAM keys, a 90 day rotation date in your calendar, and the old key deleted after each rotation (step 2).
+- The role's `sub` condition narrowed to the two service ids, and no IAM user or access key for the app (step 2).
 - The Bedrock policy in step 2 tested with one real call, and a decision on `global.` processing in other regions.
 - TLS-only deny policy on both buckets, and the CloudFront OAC decision made for the public photo bucket (step 1).
 - A separate live PayPal app, its own live webhook id, subscribed to every event in step 6, and `PAYPAL_ENV=production` set by hand. Nothing in `render.yaml` ever sets it.
