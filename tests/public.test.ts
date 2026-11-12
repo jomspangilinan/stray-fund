@@ -383,7 +383,7 @@ describe("rendered public HTML", () => {
     const card = await getCatCard(cat.id);
     const html =
       renderToStaticMarkup(createElement(CatRow, { cat: card!.cat })) +
-      renderToStaticMarkup(createElement(CatDetail, { card: card! }));
+      renderToStaticMarkup(createElement(CatDetail, { card: card!, judge: true }));
     expectClean(html);
     expect(html).toContain("Brgy. San Antonio, near the market");
     expect(html).toMatch(/exact spot kept private/i);

@@ -5,12 +5,15 @@ import { db } from "./db/client";
 import { users } from "./db/schema";
 import { ensureDemoPersonas } from "./demoPersonas";
 import { isDemoMode } from "@/lib/config";
+import { isJudge, JudgeOnly } from "./judge";
 
 export const SESSION_COOKIE = "sf_session";
 const SESSION_DAYS = 14;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Persona accounts. validateUsername keeps real people off this prefix. */
 const DEMO_PREFIX = "demo_";
+/** The caretaker and vet personas are for judges only. The neighbour persona stays open. */
+const STAFF_PERSONAS: ReadonlySet<string> = new Set(["demo_caretaker", "demo_vet"]);
 
 export type Role = "donor" | "caretaker" | "vet" | "foster";
 export type Session = { userId: string; role: Role; username: string };
@@ -56,6 +59,8 @@ export async function readSession(token: string | undefined): Promise<Session | 
     const [row] = await db.select().from(users).where(eq(users.id, sub));
     if (!row) return null;
     if (row.username.startsWith(DEMO_PREFIX) && !isDemoMode()) return null;
+    // A staff persona issued before the judge gate, or to anyone without the judge cookie, reads as signed out.
+    if (STAFF_PERSONAS.has(row.username) && !(await isJudge())) return null;
     return { userId: row.id, role: row.role as Role, username: row.username };
   } catch {
     return null;
@@ -153,6 +158,7 @@ export function isPersonaKey(k: unknown): k is PersonaKey {
 
 export async function switchPersona(key: PersonaKey): Promise<Session> {
   if (!isDemoMode()) throw new AuthError(403, "Persona switching is off");
+  if (STAFF_PERSONAS.has(PERSONAS[key]) && !(await isJudge())) throw new JudgeOnly();
   await ensureDemoPersonas();
   const [row] = await db
     .select()

@@ -132,10 +132,10 @@ describe("I2: 'Test money only' is only said when it is true", () => {
 
   it("the donate form says test money only with test money, and not with live money", () => {
     const draw = (testMoney: boolean) =>
-      renderToStaticMarkup(createElement(DonateForm, { clientId: "x", username: "someone", testMoney }));
+      renderToStaticMarkup(createElement(DonateForm, { clientId: "x", username: "someone", testMoney, judge: true }));
     expect(draw(true)).toContain("Test money only");
     expect(draw(false)).not.toMatch(/test money|sandbox/i);
-    const out = renderToStaticMarkup(createElement(DonateForm, { clientId: "x", username: null, testMoney: false }));
+    const out = renderToStaticMarkup(createElement(DonateForm, { clientId: "x", username: null, testMoney: false, judge: true }));
     expect(out).not.toMatch(/test money|sandbox/i);
     // Signed out: one line about giving, and the username rule only once a name breaks it.
     expect(out).toContain("Give ₱100, ₱500, ₱1,500 or any amount through PayPal.");
@@ -153,7 +153,7 @@ describe("I2: 'Test money only' is only said when it is true", () => {
     expect(testMoneyLine(true)).toMatch(/test money/i);
     expect(testMoneyLine(false)).toBe("");
     // The role strip is the one demo badge; it claims test money only when it is true.
-    const strip = (testMoney: boolean) => renderToStaticMarkup(createElement(PersonaSwitcher, { current: null, testMoney }));
+    const strip = (testMoney: boolean) => renderToStaticMarkup(createElement(PersonaSwitcher, { current: null, testMoney, judge: true }));
     expect(strip(true)).toContain("Test money · Demo roles");
     expect(strip(false)).toContain("Demo roles");
     expect(strip(false)).not.toMatch(/test money/i);

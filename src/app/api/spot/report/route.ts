@@ -6,6 +6,7 @@ import { describeError } from "@/server/errors";
 import { BodyTooLarge, readLimited } from "@/server/http";
 import { isUuid } from "@/server/public";
 import { CLAIMS, fileReport, ReportRefused, type Claim } from "@/server/reports";
+import { JudgeOnly, requireJudge } from "@/server/judge";
 import { AuthError, requireRole } from "@/server/session";
 
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -37,6 +38,7 @@ const WAITING_FOR_CAT = "Thanks. A caretaker sorts the photo first. If that cat 
 export async function POST(req: Request) {
   try {
     const session = await requireRole("donor", "caretaker", "vet", "foster");
+    await requireJudge();
 
     // A JSON content type means a form on another site cannot post here.
     if (!(req.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
@@ -92,6 +94,7 @@ export async function POST(req: Request) {
       return NextResponse.json(s.catId === null ? { ok: true, message: WAITING_FOR_CAT } : { ok: true }, { headers: NO_STORE });
     });
   } catch (e) {
+    if (e instanceof JudgeOnly) return fail(e.message, 403);
     if (e instanceof AuthError) return fail(e.message, e.status);
     console.error("Report failed", describeError(e));
     return fail("Something went wrong on our side and the report was not saved. Try again in a moment.", 500);

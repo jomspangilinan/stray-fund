@@ -12,6 +12,7 @@ import { CatTimeline } from "./CatTimeline";
 import { CatNameEditor } from "./CatNameEditor";
 import { SaveImage } from "./SaveImage";
 import { SexAsk } from "./SexAsk";
+import { JUDGE_ONLY_LINE } from "@/lib/judgeLine";
 
 export function CatDetail({
   card,
@@ -20,6 +21,7 @@ export function CatDetail({
   names,
   askSex = false,
   caretaker = false,
+  judge,
   timeline = [],
 }: {
   card: CatCardData;
@@ -32,6 +34,8 @@ export function CatDetail({
   askSex?: boolean;
   /** True for a caretaker: the pencil sets the name directly instead of suggesting one. */
   caretaker?: boolean;
+  /** The name, sex and ear-tip votes are open to judges only; anyone else signed in sees one line instead. */
+  judge: boolean;
   /** The cat's story: who reported what, what the Treasurer decided and each PayPal payment. */
   timeline?: TimelineEntry[];
 }) {
@@ -57,7 +61,7 @@ export function CatDetail({
             <CatPhoto url={cat.photoUrl} name={cat.name} sizes="(min-width: 576px) 36rem, 100vw" caption />
           </div>
         )}
-        <CatNameEditor catId={cat.id} name={cat.name} names={names} caretaker={caretaker} />
+        <CatNameEditor catId={cat.id} name={cat.name} names={judge ? names : undefined} caretaker={caretaker} />
         <p className="mt-1 soft">
           {cat.sex}, {cat.statusLabel.toLowerCase()}
         </p>
@@ -81,13 +85,15 @@ export function CatDetail({
         {cat.bio && <p className="mt-4 max-w-[52ch]">{cat.bio}</p>}
       </header>
 
-      {askSex && (
+      {!judge && earTip !== undefined && <p className="small soft">{JUDGE_ONLY_LINE}</p>}
+
+      {judge && askSex && (
         <section className="card">
           <SexAsk catId={cat.id} refresh />
         </section>
       )}
 
-      {earTip !== undefined && earTipAskable(cat.status) && (
+      {judge && earTip !== undefined && earTipAskable(cat.status) && (
         <EarTipAsk catId={cat.id} initial={earTip} />
       )}
 

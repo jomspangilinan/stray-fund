@@ -6,6 +6,7 @@ import { useId, useState } from "react";
 import { CURRENCY, MAX_DONATION, MIN_DONATION } from "@/lib/config";
 import { formatPeso, parsePesoInput } from "@/lib/money";
 import { feeNote, testMoneyLine } from "@/lib/moneyCopy";
+import { JUDGE_ONLY_LINE } from "@/lib/judgeLine";
 import { SignInGate } from "./SignInGate";
 
 const PRESETS = [10_000, 50_000, 150_000] as const;
@@ -18,7 +19,7 @@ type Outcome =
   | { kind: "cancelled" }
   | { kind: "error"; message: string };
 
-export function DonateForm({ clientId, username, demo = false, testMoney = true }: { clientId: string; username: string | null; demo?: boolean; testMoney?: boolean }) {
+export function DonateForm({ clientId, username, demo = false, testMoney = true, judge }: { clientId: string; username: string | null; demo?: boolean; testMoney?: boolean; judge: boolean }) {
   const customId = useId();
   const [preset, setPreset] = useState<number | "other">(50_000);
   const [custom, setCustom] = useState("");
@@ -30,6 +31,10 @@ export function DonateForm({ clientId, username, demo = false, testMoney = true 
       ? `Enter an amount from ${formatPeso(MIN_DONATION)} to ${formatPeso(MAX_DONATION)}`
       : null;
   const valid = amount !== null && amount >= MIN_DONATION && amount <= MAX_DONATION;
+
+  if (!judge) {
+    return <p className="note mt-6">{JUDGE_ONLY_LINE}</p>;
+  }
 
   if (!username) {
     return (

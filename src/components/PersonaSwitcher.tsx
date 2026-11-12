@@ -2,11 +2,12 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { DEMO_ROLES } from "@/lib/demoRoles";
+import { JUDGE_ONLY_LINE } from "@/lib/judgeLine";
 import { landingAfterSwitch } from "@/lib/nav";
 import { useState } from "react";
 
 /** The one demo badge (test money is claimed only when moneyIsTest() is true). Demo only, and simulated: it switches to a demo account and is not a real sign-in. The layout renders this only when DEMO_MODE is on; the API checks it again. */
-export function PersonaSwitcher({ current, testMoney }: { current: string | null; testMoney: boolean }) {
+export function PersonaSwitcher({ current, testMoney, judge }: { current: string | null; testMoney: boolean; judge: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +33,7 @@ export function PersonaSwitcher({ current, testMoney }: { current: string | null
       <div className="mx-auto flex max-w-2xl items-center gap-x-2 px-4 py-1 text-[0.8125rem]">
         <span className="font-semibold text-soft">{testMoney ? "Test money · Demo roles" : "Demo roles"}</span>
         <div role="group" aria-label="View the app as" className="flex gap-1">
-          {DEMO_ROLES.map((p) => (
+          {DEMO_ROLES.filter((p) => judge || p.role === "donor").map((p) => (
             <button
               key={p.key}
               type="button"
@@ -44,6 +45,7 @@ export function PersonaSwitcher({ current, testMoney }: { current: string | null
             </button>
           ))}
         </div>
+        {!judge && <span className="small soft">{JUDGE_ONLY_LINE}</span>}
         {error && (
           <span role="alert" className="font-bold text-danger">
             {error}

@@ -4,6 +4,7 @@ import { describeError } from "@/server/errors";
 import { BodyTooLarge, readLimited } from "@/server/http";
 import { isUuid } from "@/server/public";
 import { RateLimited } from "@/server/spot";
+import { JudgeOnly, requireJudge } from "@/server/judge";
 import { AuthError, requireRole } from "@/server/session";
 
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -17,6 +18,7 @@ const fail = (error: string, status: number) => NextResponse.json({ error }, { s
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireRole("donor", "caretaker", "vet", "foster");
+    await requireJudge();
     const { id } = await ctx.params;
     if (!isUuid(id)) return fail("There is no such cat", 404);
 
@@ -41,6 +43,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ sex }, { headers: NO_STORE });
   } catch (e) {
     if (e instanceof RateLimited) return fail("Too many answers in the last minute. Wait a moment and try again.", 429);
+    if (e instanceof JudgeOnly) return fail(e.message, 403);
     if (e instanceof AuthError) return fail(e.message, e.status);
     console.error("Sex answer failed", describeError(e));
     return fail("Could not save that answer", 500);

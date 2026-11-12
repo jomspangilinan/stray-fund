@@ -8,6 +8,7 @@ import { nameControls } from "@/server/catNames";
 import { db } from "@/server/db/client";
 import { ownFlags } from "@/server/earTipFlags";
 import { getCatCard, SEX_LABEL } from "@/server/public";
+import { isJudge } from "@/server/judge";
 import { getSession } from "@/server/session";
 import { catTimeline } from "@/server/timeline";
 import { getCatThanks } from "@/server/thanks";
@@ -23,7 +24,7 @@ async function Card({ params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   const mine = session ? (await ownFlags(db, session.userId, [card.cat.id])).get(card.cat.id) : undefined;
   const names = session ? await nameControls(card.cat.id, session.userId) : undefined;
-  return <CatDetail card={card} thanks={await getCatThanks(card.cat.id)} earTip={session ? (mine ?? "unsure") : undefined} names={names} askSex={session !== null && card.cat.sex === SEX_LABEL.unknown} caretaker={session?.role === "caretaker"} timeline={timeline} />;
+  return <CatDetail card={card} thanks={await getCatThanks(card.cat.id)} earTip={session ? (mine ?? "unsure") : undefined} names={names} askSex={session !== null && card.cat.sex === SEX_LABEL.unknown} caretaker={session?.role === "caretaker"} judge={await isJudge()} timeline={timeline} />;
 }
 
 export default function CatPage({ params }: PageProps<"/cats/[id]">) {

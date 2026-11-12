@@ -4,6 +4,7 @@ import { consoleFor } from "@/lib/nav";
 import { eq } from "drizzle-orm";
 import { db } from "@/server/db/client";
 import { users } from "@/server/db/schema";
+import { isJudge } from "@/server/judge";
 import { getSession } from "@/server/session";
 import { PersonaSwitcher } from "./PersonaSwitcher";
 import { SignIn } from "./SignIn";
@@ -12,7 +13,7 @@ import { SignIn } from "./SignIn";
 export async function DemoBar() {
   if (!isDemoMode()) return null;
   const session = await getSession();
-  return <PersonaSwitcher current={session?.username ?? null} testMoney={moneyIsTest()} />;
+  return <PersonaSwitcher current={session?.username ?? null} testMoney={moneyIsTest()} judge={await isJudge()} />;
 }
 
 export function Brand() {

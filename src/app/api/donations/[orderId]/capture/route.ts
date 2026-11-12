@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { describeError } from "@/server/errors";
+import { JudgeOnly, requireJudge } from "@/server/judge";
 import { AuthError, requireRole } from "@/server/session";
 import {
   captureDonation,
@@ -12,6 +13,7 @@ import { CAPTURED } from "@/server/ledger";
 export async function POST(_req: Request, ctx: { params: Promise<{ orderId: string }> }) {
   try {
     const session = await requireRole("donor", "caretaker", "vet", "foster");
+    await requireJudge();
     const { orderId } = await ctx.params;
     const d = await captureDonation(session.userId, orderId);
     return NextResponse.json({
@@ -20,6 +22,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ orderId: stri
       net: d.net,
     });
   } catch (e) {
+    if (e instanceof JudgeOnly) return NextResponse.json({ error: e.message }, { status: 403 });
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status });
     if (e instanceof ForbiddenOrder) return NextResponse.json({ error: e.message }, { status: 403 });
     if (e instanceof UnknownOrder) return NextResponse.json({ error: "Unknown order" }, { status: 404 });

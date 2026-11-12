@@ -10,6 +10,7 @@ import { ReportCat } from "./ReportCat";
 import { SaveImage } from "./SaveImage";
 import { SexAsk } from "./SexAsk";
 import { revealCopy, type RevealState } from "@/lib/spotCopy";
+import { JUDGE_ONLY_LINE } from "@/lib/judgeLine";
 import type { SpotReveal as Reveal } from "@/server/spotReveal";
 
 /**
@@ -23,6 +24,7 @@ export function SpotReveal({
   reveal,
   capturedUrl,
   locationMissing,
+  judge,
   onAgain,
 }: {
   state: RevealState;
@@ -31,6 +33,7 @@ export function SpotReveal({
   reveal: Reveal;
   capturedUrl: string | null;
   locationMissing: boolean;
+  judge: boolean;
   onAgain: () => void;
 }) {
   // Another name changes the name in place. The rest of the card is what the server sent.
@@ -42,7 +45,7 @@ export function SpotReveal({
   const photo = reveal.photoUrl ?? capturedUrl;
   const tipTag = reveal.yourEarTip === "yes" ? "You said: tipped ear" : reveal.yourEarTip === "no" ? "You said: not tipped" : null;
   const tags = [reveal.coat, tipTag, ...reveal.flags, reveal.probablyFemale ? "Probably female" : null].filter((t): t is string => Boolean(t));
-  const hasMore = Boolean(catId) && (reveal.canRename || reveal.askSex || reveal.askEarTip);
+  const hasMore = Boolean(catId) && judge && (reveal.canRename || reveal.askSex || reveal.askEarTip);
   const card = (
     <div className="reveal-card flex items-stretch">
       <div className="relative w-28 flex-none rounded-l-out bg-pale">
@@ -119,7 +122,7 @@ export function SpotReveal({
           </div>
         </div>
 
-        {sightingId && <ReportCat sightingId={sightingId} photo={capturedUrl ?? reveal.photoUrl} />}
+        {sightingId && (judge ? <ReportCat sightingId={sightingId} photo={capturedUrl ?? reveal.photoUrl} /> : <p className="small soft text-center">{JUDGE_ONLY_LINE}</p>)}
 
         {hasMore && catId && (
           <div className="reveal-more grid gap-4">

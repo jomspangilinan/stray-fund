@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { describeError } from "@/server/errors";
+import { JudgeOnly, requireJudge } from "@/server/judge";
 import { AuthError, requireRole } from "@/server/session";
 import { createDonationOrder, InvalidAmount, InvalidAttempt, TooManyOrders } from "@/server/paypal/orders";
 
@@ -7,10 +8,12 @@ import { createDonationOrder, InvalidAmount, InvalidAttempt, TooManyOrders } fro
 export async function POST(req: Request) {
   try {
     const session = await requireRole("donor", "caretaker", "vet", "foster");
+    await requireJudge();
     const body = (await req.json().catch(() => null)) as { amount?: unknown; attemptId?: unknown } | null;
     const { orderId } = await createDonationOrder(session.userId, body?.amount, body?.attemptId);
     return NextResponse.json({ orderId });
   } catch (e) {
+    if (e instanceof JudgeOnly) return NextResponse.json({ error: e.message }, { status: 403 });
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status });
     if (e instanceof InvalidAmount || e instanceof InvalidAttempt) return NextResponse.json({ error: e.message }, { status: 400 });
     if (e instanceof TooManyOrders) return NextResponse.json({ error: e.message }, { status: 429 });

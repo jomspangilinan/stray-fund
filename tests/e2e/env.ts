@@ -35,5 +35,7 @@ export function appEnv(): Record<string, string> {
     STORAGE_DRIVER: "local",
     STORAGE_LOCAL_DIR: path.join(OUT_DIR, "photos"),
     AI_DAILY_CALL_CAP: "500",
+    // No gate, so the loop is not gated even if .env.local turns it on.
+    JUDGE_GATE: "",
   };
 }

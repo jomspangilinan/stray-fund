@@ -58,6 +58,9 @@ services:
       # The private judge link code (/judge?code=...). Typed into the dashboard by the owner; never in the repo.
       - key: JUDGE_PASSCODE
         sync: false
+      # Set to "true" by the owner when the judge gate should switch on; anything else means no gate.
+      - key: JUDGE_GATE
+        sync: false
 
   # The treasurer: claims wakeups, calls Bedrock, and keeps payouts in step with PayPal.
   - type: worker

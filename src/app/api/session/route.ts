@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { JudgeOnly } from "@/server/judge";
 import {
   AuthError,
   getSession,
@@ -42,6 +43,9 @@ export async function POST(req: Request) {
     }
     return await withCookie(await signInDonor(username));
   } catch (e) {
+    if (e instanceof JudgeOnly) {
+      return NextResponse.json({ error: e.message }, { status: 403 });
+    }
     if (e instanceof AuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
