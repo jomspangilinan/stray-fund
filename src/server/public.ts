@@ -301,6 +301,7 @@ const ACTION_LABEL: Record<string, string> = {
   cat_updated: "Caretaker updated a cat's card",
   photo_published: "Caretaker published a photo",
   photo_held: "Caretaker held back a photo",
+  photo_rotated: "Caretaker rotated a photo",
 };
 
 const ACTION_STATUS_LABEL: Record<string, string> = {

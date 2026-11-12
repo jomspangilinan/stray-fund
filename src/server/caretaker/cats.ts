@@ -11,7 +11,9 @@ import { uniqueName } from "../catNames";
 import { NAME_APPROVED, NAME_DISMISSED, NAME_SET } from "../privateActions";
 import { parseCatName } from "@/lib/catNames";
 import { publishCatOnly, type Box } from "../photos";
-import { removePublicCopy, StoredObjectMissing } from "../storage";
+import { getStorage, removePublicCopy, StoredObjectMissing } from "../storage";
+import sharp from "sharp";
+import { rotateBox, type Turn } from "@/lib/rotation";
 import { attachReports, confirmOpenClaim, dismissCatlessReports, fileStaffReport, HOLD_CLAIMS } from "../reports";
 import { enqueueWakeup } from "../wakeups";
 import { autoPublishable, needsHumanTick, regionsOf } from "../photoGate";
@@ -424,6 +426,63 @@ export const photoHold: Handler = async (caretakerId, body) => {
   // The hold has committed. Only now is the public copy deleted, and a failed delete never undoes the hold.
   await removePublicCopy(droppedKey);
   return "Held back. It no longer shows on any public page.";
+};
+
+/**
+ * Turns the private original a quarter turn in place (same key) and turns the stored cat box and marked areas with it.
+ * A public photo gets a new cat-only copy with the soft circle round the turned box (the stored cut-out is gone) and
+ * the old public copy is deleted after the commit. A photo still waiting for the worker needs nothing more: the
+ * worker develops the turned original. The cat's avatar does not change.
+ */
+export const photoRotate: Handler = async (caretakerId, body) => {
+  const sightingId = reqUuid(body, "sightingId", "The sighting");
+  const direction = body.direction;
+  if (direction !== "left" && direction !== "right") throw new Refusal(400, "The direction must be left or right.");
+  const turn: Turn = direction === "right" ? 90 : 270;
+
+  const result = await withColonyLock(async (tx) => {
+    const [s] = await tx.select().from(sightings).where(eq(sightings.id, sightingId)).for("update");
+    if (!s) throw new Refusal(404, "There is no such sighting.");
+    const storage = getStorage();
+    let original: Buffer;
+    try {
+      original = await storage.getPrivate(s.originalKey);
+    } catch (e) {
+      if (e instanceof StoredObjectMissing) throw new Refusal(409, "The original photo is missing, so it cannot be rotated.");
+      throw e;
+    }
+    const turned = await sharp(original).rotate(turn).jpeg({ quality: 85 }).toBuffer();
+    await storage.putPrivate(s.originalKey, turned, "image/jpeg");
+    let newKey: string | null = null;
+    try {
+      const oldBox = parseCatBox(s.catBox);
+      const catBox = oldBox ? rotateBox(oldBox, turn) : null;
+      const a = s.assessment as { sensitive_regions?: unknown } | null;
+      const assessment =
+        a && Array.isArray(a.sensitive_regions) ? { ...a, sensitive_regions: (a.sensitive_regions as Box[]).map((r) => rotateBox(r, turn)) } : s.assessment;
+      const patch: Partial<typeof sightings.$inferInsert> = { catBox, assessment: assessment as object | null };
+      if (s.publicReady) {
+        newKey = (await publishCatOnly(s.originalKey, { box: catBox, mask: null }, regionsOf(assessment))).key;
+        patch.publicKey = newKey;
+      }
+      await tx.update(sightings).set(patch).where(eq(sightings.id, sightingId));
+      await audit(tx, {
+        action: "photo_rotated",
+        caretakerId,
+        reason: "A caretaker rotated a photo.",
+        inputs: { sightingId, catId: s.catId, direction },
+      });
+    } catch (e) {
+      // The transaction rolls back, so put the original and the public copy back as they were.
+      await storage.putPrivate(s.originalKey, original, "image/jpeg").catch(() => {});
+      await removePublicCopy(newKey);
+      throw e;
+    }
+    return { oldKey: s.publicReady ? s.publicKey : null };
+  });
+  // The rotation has committed. Only now is the old public copy deleted, and a failed delete never undoes it.
+  await removePublicCopy(result.oldKey);
+  return "Rotated.";
 };
 
 // ---------- Wakeups the agent gave up on ----------

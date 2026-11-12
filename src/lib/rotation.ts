@@ -56,3 +56,6 @@ export function turnBox(b: Box, turn: Turn): Box {
       return b;
   }
 }
+
+/** The same clockwise turn, named for a caretaker rotating a stored photo's cat box. */
+export const rotateBox = turnBox;

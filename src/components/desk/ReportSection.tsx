@@ -2,6 +2,7 @@ import { ActionForm } from "../ActionForm";
 import type { ReportItem } from "@/server/caretaker/queue";
 import { DeskItem } from "./DeskItem";
 import { Section, Where } from "./DeskParts";
+import { SightingPhoto } from "../SightingPhoto";
 import { Hidden } from "./Fields";
 
 const CLAIM_TITLE: Record<string, string> = { injured: "Hurt", pregnant: "Pregnant", sick: "Sick", kitten: "A kitten" };
@@ -25,8 +26,7 @@ function Card({ r }: { r: ReportItem }) {
       <h3 className="text-xl font-extrabold">{title}</h3>
       <p className="small">{r.catName ? `About ${r.catName}` : "A cat we don't know yet"}</p>
       {r.sightingId && (
-        // eslint-disable-next-line @next/next/no-img-element -- a private photo behind a signed-in route
-        <img src={`/api/caretaker/images/sighting/${r.sightingId}`} alt="The photo this report is about" className="mt-3 max-h-48 w-full rounded-in object-contain" />
+        <SightingPhoto sightingId={r.sightingId} alt="The photo this report is about" className="max-h-48 w-full rounded-in object-contain" />
       )}
       {r.note && <p className="note mt-2 break-words">{r.note}</p>}
       {r.photoAgrees !== null && <p className="small mt-2 font-bold">{r.photoAgrees ? "The photo seems to show this" : "The photo doesn't clearly show this"}</p>}

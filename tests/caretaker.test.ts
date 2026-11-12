@@ -953,6 +953,97 @@ describe("photos", () => {
   });
 });
 
+// ---------- Rotating a photo ----------
+
+describe("photo_rotate", () => {
+  type Mem = { readPublic: (k: string) => Buffer };
+  const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 };
+  async function rotatable(over: Partial<typeof sightings.$inferInsert> = {}) {
+    const jpeg = await sharp({ create: { width: 400, height: 300, channels: 3, background: { r: 200, g: 120, b: 40 } } }).jpeg().toBuffer();
+    const { key } = await storeOriginal(jpeg);
+    const [cat] = await db.insert(cats).values({ name: "Turn cat", areaName: "x", status: "neutered", earTipped: true }).returning();
+    const [s] = await db.insert(sightings).values({ catId: cat.id, originalKey: key, state: "new_cat", catBox: BOX, assessment: { ...ASSESS }, ...over }).returning();
+    return { cat, s, key };
+  }
+  const size = async (key: string) => {
+    const m = await sharp(await getStorage().getPrivate(key)).metadata();
+    return [m.width, m.height];
+  };
+
+  it("turns the original in place and the stored box with it", async () => {
+    const { s, key } = await rotatable();
+    expect((await act("photo_rotate", { sightingId: s.id, direction: "right" })).status).toBe(200);
+    expect(await size(key)).toEqual([300, 400]);
+    const box = (await sightingRow(s.id)).catBox as typeof BOX;
+    expect(box.x).toBeCloseTo(0.4);
+    expect(box.y).toBeCloseTo(0.1);
+    expect(box.w).toBeCloseTo(0.4);
+    expect(box.h).toBeCloseTo(0.3);
+    expect((await act("photo_rotate", { sightingId: s.id, direction: "left" })).status).toBe(200);
+    expect(await size(key)).toEqual([400, 300]);
+    expect(((await sightingRow(s.id)).catBox as typeof BOX).x).toBeCloseTo(0.1);
+  });
+
+  it("a public photo gets a new public copy and the old address stops working", async () => {
+    const { s } = await rotatable();
+    expect((await act("photo_publish", { sightingId: s.id, noSensitive: true })).status).toBe(200);
+    const old = (await sightingRow(s.id)).publicKey!;
+    expect((await act("photo_rotate", { sightingId: s.id, direction: "right" })).status).toBe(200);
+    const row = await sightingRow(s.id);
+    expect(row.publicReady).toBe(true);
+    expect(row.publicKey).not.toBe(old);
+    const storage = getStorage() as unknown as Mem;
+    expect(() => storage.readPublic(old)).toThrow();
+    const meta = await sharp(storage.readPublic(row.publicKey!)).metadata();
+    expect([meta.width, meta.height]).toEqual([300, 400]);
+  });
+
+  it("a private photo publishes nothing", async () => {
+    const { s } = await rotatable();
+    expect((await act("photo_rotate", { sightingId: s.id, direction: "left" })).status).toBe(200);
+    expect(await sightingRow(s.id)).toMatchObject({ publicReady: false, publicKey: null });
+  });
+
+  it("a photo still waiting for the worker is only turned, and the worker develops the turned original", async () => {
+    const { s, key } = await rotatable({ needsDevelop: true, createdAt: new Date(Date.now() - 3_600_000) });
+    expect((await act("photo_rotate", { sightingId: s.id, direction: "right" })).status).toBe(200);
+    expect(await sightingRow(s.id)).toMatchObject({ publicReady: false, publicKey: null, developedAt: null });
+    expect(await size(key)).toEqual([300, 400]);
+    setCatFinderForTests(async () => ({ box: null, mask: null }));
+    try {
+      expect(await developNext()).toBe("developed");
+    } finally {
+      setCatFinderForTests(null);
+    }
+    const row = await sightingRow(s.id);
+    expect(row.publicReady).toBe(true);
+    const meta = await sharp((getStorage() as unknown as Mem).readPublic(row.publicKey!)).metadata();
+    expect([meta.width, meta.height]).toEqual([300, 400]);
+  });
+
+  it("a delete that fails is logged and the rotation still stands", async () => {
+    const { s } = await rotatable();
+    await act("photo_publish", { sightingId: s.id, noSensitive: true });
+    vi.spyOn(getStorage(), "deletePublic").mockRejectedValueOnce(Object.assign(new Error("denied"), { name: "AccessDenied", statusCode: 403 }));
+    expect((await act("photo_rotate", { sightingId: s.id, direction: "right" })).status).toBe(200);
+    expect(await size((await sightingRow(s.id)).originalKey)).toEqual([300, 400]);
+  });
+
+  it("answers not found for an unknown sighting and 400 for a bad direction", async () => {
+    expect((await act("photo_rotate", { sightingId: "00000000-0000-4000-8000-000000000000", direction: "left" })).status).toBe(404);
+    const { s } = await rotatable();
+    expect((await act("photo_rotate", { sightingId: s.id, direction: "up" })).status).toBe(400);
+  });
+
+  it("is audited with the direction", async () => {
+    const { s } = await rotatable();
+    await act("photo_rotate", { sightingId: s.id, direction: "left" });
+    const rows = await actionsNamed("photo_rotated");
+    expect(rows).toHaveLength(1);
+    expect(JSON.stringify(rows[0].inputs)).toContain('"direction":"left"');
+  });
+});
+
 // ---------- Wakeups ----------
 
 describe("failed wakeups", () => {

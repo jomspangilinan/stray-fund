@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gravityFromMotion, turnBox, turnFromGravity } from "../src/lib/rotation";
+import { gravityFromMotion, rotateBox, turnBox, turnFromGravity } from "../src/lib/rotation";
 
 // W3C sign convention: an upright portrait phone reads y = +9.8.
 describe("turnFromGravity", () => {
@@ -53,5 +53,22 @@ describe("turnBox", () => {
   it("is undone by the opposite turns", () => {
     close(turnBox(turnBox(b, 90), 270), b);
     close(turnBox(turnBox(b, 180), 180), b);
+  });
+});
+
+describe("rotateBox", () => {
+  it("turns a box a quarter clockwise, and four turns return it", () => {
+    const b = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 };
+    const r = rotateBox(b, 90);
+    expect(r.x).toBeCloseTo(0.4);
+    expect(r.y).toBeCloseTo(0.1);
+    expect(r.w).toBeCloseTo(0.4);
+    expect(r.h).toBeCloseTo(0.3);
+    let back = b;
+    for (let i = 0; i < 4; i++) back = rotateBox(back, 90);
+    expect(back.x).toBeCloseTo(b.x);
+    expect(back.y).toBeCloseTo(b.y);
+    expect(back.w).toBeCloseTo(b.w);
+    expect(back.h).toBeCloseTo(b.h);
   });
 });

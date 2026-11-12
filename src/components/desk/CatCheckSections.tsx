@@ -1,4 +1,5 @@
 import { ActionForm } from "../ActionForm";
+import { SightingPhoto } from "../SightingPhoto";
 import type { CaretakerQueue } from "@/server/caretaker/queue";
 import { DeskItem } from "./DeskItem";
 import { Section, Where } from "./DeskParts";
@@ -52,8 +53,7 @@ export function NameSuggestions({ items }: { items: CaretakerQueue["nameSuggesti
       {items.map((n) => (
         <DeskItem key={n.id}>
           {n.photoSightingId && (
-            // eslint-disable-next-line @next/next/no-img-element -- a private photo behind a signed-in route
-            <img src={`/api/caretaker/images/sighting/${n.photoSightingId}`} alt={`${n.catName}`} className="max-h-56 w-full rounded-in object-contain" />
+            <SightingPhoto sightingId={n.photoSightingId} alt={`${n.catName}`} className="max-h-56 w-full rounded-in object-contain" />
           )}
           <p className="small soft mt-3">Now called {n.catName}</p>
           <h3 className="text-base font-extrabold break-words">{n.name}</h3>
@@ -76,8 +76,7 @@ export function HeldPhotos({ items }: { items: CaretakerQueue["heldPhotos"] }) {
         <DeskItem key={p.sightingId} label={p.catName ?? "No cat yet"}>
           <h3 className="text-base font-extrabold">{p.catName ?? "No cat yet"}</h3>
           <p className="small">Taken {niceDate(p.date)}. Not shown publicly.</p>
-          {/* eslint-disable-next-line @next/next/no-img-element -- a private photo behind a signed-in route */}
-          <img src={`/api/caretaker/images/sighting/${p.sightingId}`} alt="The original photo" className="mt-3 max-h-72 w-full rounded-in object-contain" />
+          <SightingPhoto sightingId={p.sightingId} alt="The original photo" className="max-h-72 w-full rounded-in object-contain" />
           <ActionForm action="photo_publish" submitLabel="Publish with areas blurred">
             <Hidden name="sightingId" value={p.sightingId} />
             {p.hasRegions && <p className="small">The AI marked areas to blur. They will be blurred.</p>}

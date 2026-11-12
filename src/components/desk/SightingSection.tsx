@@ -1,4 +1,5 @@
 import { ActionForm } from "../ActionForm";
+import { SightingPhoto } from "../SightingPhoto";
 import type { CaretakerQueue, SightingItem } from "@/server/caretaker/queue";
 import { DeskItem } from "./DeskItem";
 import { Section, Where } from "./DeskParts";
@@ -35,8 +36,7 @@ export function Sightings({ items, cats }: { items: SightingItem[]; cats: Careta
           <p className="small">{(s.reason && SIGHTING_REASON[s.reason]) ?? "A caretaker needs to decide."}</p>
           {s.catName && <p className="small">Linked to: {s.catName}</p>}
           <Where exact={s.exact} area={s.area} exactHidden={s.exactHidden} />
-          {/* eslint-disable-next-line @next/next/no-img-element -- a private photo behind a signed-in route */}
-          <img src={`/api/caretaker/images/sighting/${s.id}`} alt="The original photo" className="mt-3 max-h-72 w-full rounded-in object-contain" />
+          <SightingPhoto sightingId={s.id} alt="The original photo" className="max-h-72 w-full rounded-in object-contain" />
           {s.assessment && <Assessment a={s.assessment} />}
           <ActionForm action="sighting_confirm_new" submitLabel="Confirm as a new cat">
             <Hidden name="sightingId" value={s.id} />
