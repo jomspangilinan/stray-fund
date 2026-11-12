@@ -24,22 +24,29 @@ export class JudgeOnly extends Error {
   }
 }
 
+/** A code pasted into a dashboard or a link often picks up a space or a line break at either end. */
+const clean = (s: string | null | undefined): string => (s ?? "").trim();
+
 export function judgeCookieValue(passcode: string): string {
-  return createHmac("sha256", passcode).update(LABEL).digest("base64url");
+  return createHmac("sha256", clean(passcode)).update(LABEL).digest("base64url");
 }
 
 const digest = (s: string) => createHash("sha256").update(s).digest();
 
-/** Constant-time, exact comparison. An unset or empty code never matches anything. */
+/** Constant-time, exact comparison apart from spaces and line breaks at either end. An unset or empty code never matches. */
 export function codeMatches(given: string | null, passcode: string | undefined): boolean {
-  if (!passcode || !given) return false;
-  return timingSafeEqual(digest(given), digest(passcode));
+  const g = clean(given);
+  const p = clean(passcode);
+  if (!p || !g) return false;
+  // A "+" in a link arrives as a space, so a code with "+" in it also matches with the spaces read back as "+".
+  const plus = g.replace(/ /g, "+");
+  return timingSafeEqual(digest(g), digest(p)) || timingSafeEqual(digest(plus), digest(p));
 }
 
 export function judgeFromCookie(value: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
   // The gate is off unless JUDGE_GATE is exactly "true", whatever the passcode or NODE_ENV.
   if (env.JUDGE_GATE !== "true") return true;
-  const passcode = env.JUDGE_PASSCODE;
+  const passcode = clean(env.JUDGE_PASSCODE);
   if (!passcode || !value) return false;
   return timingSafeEqual(digest(value), digest(judgeCookieValue(passcode)));
 }

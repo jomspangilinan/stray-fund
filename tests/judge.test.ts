@@ -85,13 +85,23 @@ describe("judge cookie", () => {
     }
   });
 
-  it("matches the code exactly", () => {
+  it("matches the code exactly, ignoring only spaces and line breaks around it", () => {
     expect(codeMatches(CODE, CODE)).toBe(true);
-    expect(codeMatches(` ${CODE}`, CODE)).toBe(false);
+    expect(codeMatches(` ${CODE}`, CODE)).toBe(true);
+    expect(codeMatches(CODE, `${CODE}\n`)).toBe(true);
+    expect(codeMatches(CODE, "  ")).toBe(false);
+    expect(codeMatches("  ", CODE)).toBe(false);
+    expect(codeMatches(`${CODE}x`, CODE)).toBe(false);
     expect(codeMatches(CODE.toUpperCase(), CODE)).toBe(false);
     expect(codeMatches(null, CODE)).toBe(false);
     expect(codeMatches("x", undefined)).toBe(false);
     expect(codeMatches("", "")).toBe(false);
+  });
+
+  it("accepts a cookie made from a passcode pasted with a trailing line break", () => {
+    const pasted = { JUDGE_GATE: "true", JUDGE_PASSCODE: `${CODE}\n` } as unknown as NodeJS.ProcessEnv;
+    expect(judgeFromCookie(judgeCookieValue(CODE), pasted)).toBe(true);
+    expect(judgeCookieValue(`${CODE}\n`)).toBe(judgeCookieValue(CODE));
   });
 
   it("refuses with the one line the app shows", () => {
@@ -120,9 +130,21 @@ describe("GET /judge", () => {
     expect(res.headers.get("cache-control")).toContain("no-store");
   });
 
-  it("sets nothing for a wrong, padded or missing code", async () => {
+  it("sets the cookie when the link or the dashboard value has a space or line break at either end", async () => {
+    vi.stubEnv("JUDGE_PASSCODE", `${CODE}\n`);
+    const res = await visit(`?code=%20${CODE}%20`);
+    expect(res.headers.get("set-cookie") ?? "").toContain(`${JUDGE_COOKIE}=${judgeCookieValue(CODE)}`);
+  });
+
+  it("sets the cookie for a code with a plus sign that the link turned into a space", async () => {
+    vi.stubEnv("JUDGE_PASSCODE", "ab+cd");
+    const res = await visit("?code=ab+cd");
+    expect(res.headers.get("set-cookie") ?? "").toContain(`${JUDGE_COOKIE}=${judgeCookieValue("ab+cd")}`);
+  });
+
+  it("sets nothing for a wrong, blank or missing code", async () => {
     vi.stubEnv("JUDGE_PASSCODE", CODE);
-    for (const q of ["?code=wrong", `?code=%20${CODE}`, "", "?code="]) {
+    for (const q of ["?code=wrong", `?code=${CODE}x`, "?code=%20%20", "", "?code="]) {
       const res = await visit(q);
       expect(res.status).toBe(303);
       expect(res.headers.get("location")).toBe("/");
