@@ -141,8 +141,12 @@ export async function processSpot(i: {
   mask?: Buffer | null;
 }): Promise<SpotResult> {
   await assertUnderRateLimit(i.userId);
-  const { key } = await storeOriginal(i.jpeg);
-  if (i.ai === false) return processPlain(i, key);
+  // A refused public upload makes no row, so it is checked before the decode and the private copy: otherwise a
+  // client looping past the limit would cost a full decode and leave an orphaned original each time. The locked
+  // check in processPlain still decides.
+  if (i.ai === false) await assertUnderDailyLimits(db, i.userId);
+  const { key, clean } = await storeOriginal(i.jpeg);
+  if (i.ai === false) return processPlain({ ...i, jpeg: clean }, key);
   const hasPoint = i.lat !== null && i.lng !== null;
 
   // Commit the pending row first so nothing is lost if the AI step fails.
@@ -172,6 +176,19 @@ export async function processSpot(i: {
 const MANILA_DAY = sql`(now() at time zone 'Asia/Manila')::date`;
 const MANILA_DAY_OF = (col: unknown) => sql`((${col}) at time zone 'Asia/Manila')::date`;
 
+/** The public limits for today: this account's photos, and the site's public no-AI photos. Throws DailyPhotoLimit. */
+async function assertUnderDailyLimits(tx: Pick<Tx, "execute">, userId: string): Promise<void> {
+  const { rows } = await tx.execute(sql`
+    select
+      count(*) filter (where caught_by_user_id = ${userId})::int as mine,
+      count(*) filter (where needs_develop)::int as site
+    from sightings where ${MANILA_DAY_OF(sql`created_at`)} = ${MANILA_DAY}
+  `);
+  const n = rows[0] as { mine: number; site: number };
+  if (n.mine >= PUBLIC_PHOTOS_PER_DAY) throw new DailyPhotoLimit("account");
+  if (n.site >= PUBLIC_NEW_CATS_PER_DAY) throw new DailyPhotoLimit("site");
+}
+
 /**
  * The public path. No AI runs. The cat joins the yard at once with the neutral look-alike, and the photo is
  * published now when the phone sent a usable cut-out, otherwise it waits for the worker to develop it.
@@ -186,15 +203,7 @@ async function processPlain(
     // One lock for the whole site, so two accounts cannot both take the last place of the day.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('spot:site-daily'))`);
     if (!(await underRateLimit(tx, i.userId))) throw new RateLimited();
-    const { rows } = await tx.execute(sql`
-      select
-        count(*) filter (where caught_by_user_id = ${i.userId})::int as mine,
-        count(*) filter (where needs_develop)::int as site
-      from sightings where ${MANILA_DAY_OF(sql`created_at`)} = ${MANILA_DAY}
-    `);
-    const n = rows[0] as { mine: number; site: number };
-    if (n.mine >= PUBLIC_PHOTOS_PER_DAY) throw new DailyPhotoLimit("account");
-    if (n.site >= PUBLIC_NEW_CATS_PER_DAY) throw new DailyPhotoLimit("site");
+    await assertUnderDailyLimits(tx, i.userId);
 
     await lockColony(tx);
     const [row] = await tx
@@ -216,33 +225,40 @@ async function processPlain(
     return { sighting: row, catId: cat.id };
   });
 
-  const developed = await developNow(i, originalKey, sighting.id, catId);
+  const developed = await developNow(i, originalKey, sighting.id, catId, sighting.photoVersion);
   return result("new_cat", sighting.id, catId, PLAIN_MESSAGE, { aiChecked: false, developed });
 }
 
-/** The phone tier: a usable cut-out publishes at once. Anything else, or any failure, leaves the photo for the worker. */
+/**
+ * The phone tier: a usable cut-out publishes at once. Anything else, or any failure, leaves the photo for the worker.
+ * `i.jpeg` is the stored original (normalized, upright, bounded), never the raw upload.
+ */
 async function developNow(
   i: { jpeg: Buffer; box?: CatBox | null; mask?: Buffer | null },
   originalKey: string,
   sightingId: string,
   catId: string,
+  photoVersion: number,
 ): Promise<boolean> {
   const { box, mask } = i;
   if (!box || !mask || !(await maskUsable(mask, box))) return false;
+  let key: string | null = null;
   try {
-    const { key } = await publishCatOnly(originalKey, { box, mask });
+    key = (await publishCatOnly(originalKey, { box, mask })).key;
+    const published = key;
     const avatar = await avatarFromPhoto(i.jpeg, box);
     const developed = await db.transaction(async (tx) => {
       const won = await tx
         .update(sightings)
-        .set({ publicKey: key, publicReady: true, developedAt: new Date() })
-        .where(and(eq(sightings.id, sightingId), sql`${sightings.developedAt} is null`))
+        .set({ publicKey: published, publicReady: true, developedAt: new Date() })
+        // A caretaker's rotation bumps photo_version: this copy shows the old orientation, so it must not win.
+        .where(and(eq(sightings.id, sightingId), sql`${sightings.developedAt} is null`, eq(sightings.photoVersion, photoVersion)))
         .returning({ id: sightings.id });
       if (won.length === 0) return false;
       await tx.update(cats).set({ avatar }).where(eq(cats.id, catId));
       return true;
     });
-    // Lost to another publisher (or a caretaker's hold): the copy just made belongs to no sighting, so it is deleted.
+    // Lost to another publisher, a caretaker's hold or rotation, or a removed cat: the copy just made belongs to no sighting, so it is deleted.
     if (!developed) {
       console.error("[spot] phone cut-out lost the develop race; its public copy is deleted");
       await removePublicCopy(key);
@@ -250,6 +266,8 @@ async function developNow(
     return developed;
   } catch (e) {
     console.error(`[spot] phone cut-out not published: ${e instanceof Error ? e.name : typeof e}`);
+    // Anything that failed after the publish leaves a copy no sighting points at, so it is deleted.
+    await removePublicCopy(key);
     return false;
   }
 }
@@ -510,15 +528,17 @@ export async function insertNewCat(tx: Tx, s: SightingRow, a: Assessment | null)
 export async function publishPhoto(sightingId: string, originalKey: string, regions: unknown): Promise<void> {
   if (!Array.isArray(regions)) return;
   try {
-    const [row] = await db.select({ box: sightings.catBox }).from(sightings).where(eq(sightings.id, sightingId));
+    // The version is read before the original, so a rotation that lands in between makes the update below miss.
+    const [row] = await db.select({ box: sightings.catBox, photoVersion: sightings.photoVersion }).from(sightings).where(eq(sightings.id, sightingId));
+    if (!row) return;
     // Masks are not stored, so a republish keeps the soft circle around the stored box.
-    const { key } = await publishCatOnly(originalKey, { box: parseCatBox(row?.box), mask: null }, regions as Box[]);
+    const { key } = await publishCatOnly(originalKey, { box: parseCatBox(row.box), mask: null }, regions as Box[]);
     const set = await db
       .update(sightings)
       .set({ publicKey: key, publicReady: true })
-      .where(and(eq(sightings.id, sightingId), sql`${sightings.publicKey} is null`))
+      .where(and(eq(sightings.id, sightingId), sql`${sightings.publicKey} is null`, eq(sightings.photoVersion, row.photoVersion)))
       .returning({ id: sightings.id });
-    // The sighting already has a public copy: the one just made is a replaced key, so it goes.
+    // The sighting already has a public copy, or its original was turned meanwhile: the one just made belongs to nothing, so it goes.
     if (set.length === 0) await removePublicCopy(key);
   } catch (e) {
     // Class name only: errors from storage can carry keys.

@@ -21,6 +21,19 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
+// Lets a test make the avatar step, which runs after the phone tier's publish, fail.
+const avatarFails = vi.hoisted(() => ({ on: false }));
+vi.mock("../src/server/photoAvatar", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/server/photoAvatar")>();
+  return {
+    ...real,
+    avatarFromPhoto: async (...args: Parameters<typeof real.avatarFromPhoto>) => {
+      if (avatarFails.on) throw new Error("avatar failed");
+      return real.avatarFromPhoto(...args);
+    },
+  };
+});
+
 import {
   applyAssessment,
   DailyPhotoLimit,
@@ -168,6 +181,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  avatarFails.on = false;
   delete process.env.AI_DAILY_CALL_CAP;
 });
 afterAll(async () => {
@@ -646,6 +660,21 @@ describe("public photo", () => {
     const [s] = await sightingRows();
     expect(s).toMatchObject({ publicReady: false, publicKey: null, state: "new_cat" });
     expect(err).toHaveBeenCalled();
+  });
+
+  it("a rotation during the publish wins: the old-orientation copy is deleted and the photo stays held", async () => {
+    const real = getStorage().putPublic.bind(getStorage());
+    const keys: string[] = [];
+    vi.spyOn(getStorage(), "putPublic").mockImplementationOnce(async (key, buf, type) => {
+      keys.push(key);
+      await real(key, buf, type);
+      await db.update(sightings).set({ photoVersion: 1 });
+    });
+    const u = await makeUser();
+    await processSpot({ ai: true, jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect(keys).toHaveLength(1);
+    expect(() => (getStorage() as unknown as { readPublic(k: string): Buffer }).readPublic(keys[0])).toThrow();
+    expect((await sightingRows())[0]).toMatchObject({ publicReady: false, publicKey: null });
   });
 });
 
@@ -1320,6 +1349,44 @@ describe("processSpot: the public path (no AI)", () => {
     expect(s.publicKey).toBeNull();
   });
 
+  it("phone tier: a failure after the publish deletes the copy it made", async () => {
+    const u = await makeUser();
+    const storage = getStorage() as unknown as { readPublic: (k: string) => Buffer };
+    const real = getStorage().putPublic.bind(getStorage());
+    const keys: string[] = [];
+    vi.spyOn(getStorage(), "putPublic").mockImplementationOnce(async (key, buf, type) => {
+      keys.push(key);
+      await real(key, buf, type);
+    });
+    // The look-alike is read after the publish, so its failure leaves a copy behind unless it is cleaned up.
+    avatarFails.on = true;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const out = await plain(u.id, { box: BOX, mask: await maskOf({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }) });
+    expect(out.developed).toBe(false);
+    expect(keys).toHaveLength(1);
+    expect(() => storage.readPublic(keys[0])).toThrow();
+    const [s] = await sightingRows();
+    expect(s).toMatchObject({ needsDevelop: true, developedAt: null, publicReady: false, publicKey: null });
+  });
+
+  it("phone tier: a rotation during the publish wins, and the old-orientation copy is deleted", async () => {
+    const u = await makeUser();
+    const storage = getStorage() as unknown as { readPublic: (k: string) => Buffer };
+    const real = getStorage().putPublic.bind(getStorage());
+    const keys: string[] = [];
+    vi.spyOn(getStorage(), "putPublic").mockImplementationOnce(async (key, buf, type) => {
+      keys.push(key);
+      await real(key, buf, type);
+      await db.update(sightings).set({ photoVersion: 1 });
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const out = await plain(u.id, { box: BOX, mask: await maskOf({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }) });
+    expect(out.developed).toBe(false);
+    expect(() => storage.readPublic(keys[0])).toThrow();
+    const [s] = await sightingRows();
+    expect(s).toMatchObject({ developedAt: null, publicKey: null, photoVersion: 1 });
+  });
+
   it("phone tier: a publish that throws leaves the photo for the worker", async () => {
     const u = await makeUser();
     const storage = getStorage();
@@ -1374,9 +1441,12 @@ describe("processSpot: the public path (no AI)", () => {
       // Spread them out so the per-minute limit stays out of the way.
       await db.execute((await import("drizzle-orm")).sql`update sightings set created_at = created_at - interval '2 minutes' where caught_by_user_id = ${u.id}`);
     }
+    // Refused before the decode: no private original is written for a photo that makes no row.
+    const put = vi.spyOn(getStorage(), "putPrivate");
     const err = await plain(u.id).catch((e) => e);
     expect(err).toBeInstanceOf(DailyPhotoLimit);
     expect(err.message).toBe("That's 5 photos today. Try again tomorrow.");
+    expect(put).not.toHaveBeenCalled();
     expect(await retryPendingSightings()).toMatchObject({ examined: 0 });
     expect(seen.assess + seen.match).toBe(0);
   });

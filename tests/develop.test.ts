@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
+import { PgDatabase } from "drizzle-orm/pg-core";
 import { closePool, db } from "../src/server/db/client";
 import { cats, sightings, users } from "../src/server/db/schema";
 import { truncateAll } from "./helpers/db";
@@ -111,6 +112,8 @@ describe("developNext", () => {
     expect(s.developedAt).not.toBeNull();
     // The claim that publishes is not a failed attempt.
     expect(s.developAttempts).toBe(0);
+    // The phone sent no box, so the model's is kept for a later rotation or republish.
+    expect(s.catBox).toEqual(CAT_BOX);
     expect((await catOf(out.catId!)).avatar).toEqual({ pattern: "solid", base: "ginger", accent: "ginger" });
 
     const orig = await original(out.sightingId);
@@ -349,6 +352,24 @@ describe("developNext", () => {
     const made = put.mock.calls[0][0];
     expect(() => memoryStorage.readPublic(made)).toThrow();
     expect((await sightingOf(out.sightingId)).publicKey).toBeNull();
+  });
+
+  it("deletes the public copy it made when the database fails after the publish, and tries again later", async () => {
+    finder(() => ({ box: CAT_BOX, mask: null }));
+    const out = await queued(await photo(MIDDLE));
+    // The claim is the first transaction; the one that marks the photo developed is the second, and it fails.
+    const realTx = PgDatabase.prototype.transaction;
+    let n = 0;
+    vi.spyOn(PgDatabase.prototype, "transaction").mockImplementation(function (this: PgDatabase<never>, ...args) {
+      if (++n === 2) return Promise.reject(new Error("database down"));
+      return realTx.apply(this, args as Parameters<typeof realTx>) as never;
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const put = vi.spyOn(memoryStorage, "putPublic");
+    expect(await developNext()).toBe("idle");
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(() => memoryStorage.readPublic(put.mock.calls[0][0])).toThrow();
+    expect(await sightingOf(out.sightingId)).toMatchObject({ publicKey: null, publicReady: false, developedAt: null, developAttempts: 1 });
   });
 });
 

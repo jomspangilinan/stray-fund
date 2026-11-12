@@ -78,11 +78,12 @@ async function decode(input: Buffer, maxPixels: number): Promise<Buffer> {
 }
 
 /** Stores a metadata-free private copy. Pass EVIDENCE_MAX_PIXELS for gallery photos; the default is the camera cap.  Exact coordinates live only in database columns. */
-export async function storeOriginal(jpeg: Buffer, maxPixels: number = MAX_PIXELS): Promise<{ key: string }> {
+export async function storeOriginal(jpeg: Buffer, maxPixels: number = MAX_PIXELS): Promise<{ key: string; clean: Buffer }> {
   const clean = await normalize(jpeg, maxPixels);
   const key = newPrivateKey();
   await getStorage().putPrivate(key, clean, "image/jpeg");
-  return { key };
+  // The stored copy: upright, metadata-free and at most MAX_SIDE on a side, so it is cheap to read again.
+  return { key, clean };
 }
 
 type Rect = { left: number; top: number; width: number; height: number };

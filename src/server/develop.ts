@@ -107,16 +107,20 @@ export async function developNext(): Promise<"developed" | "idle"> {
   if (s.attempts > LOUD_AFTER) {
     console.error(`[develop] sighting ${s.id} has failed to publish ${s.attempts - 1} times; a person should check its original and storage`);
   }
+  let key: string | null = null;
   try {
     const original = await getStorage().getPrivate(s.originalKey);
     const keep = await keepFor(s, original);
     const avatar = await avatarFromPhoto(original, keep.box);
-    const { key } = await publishCatOnly(s.originalKey, keep);
+    key = (await publishCatOnly(s.originalKey, keep)).key;
+    const published = key;
+    // The model's box is kept when the phone sent none, so a later rotation or republish has a box to circle.
+    const boxToKeep = keep.box && !parseCatBox(s.storedBox) ? { catBox: keep.box } : {};
     const won = await db.transaction(async (tx) => {
       const marked = await tx
         .update(sightings)
         // This claim published, so it is not one of the failed attempts the column counts.
-        .set({ publicKey: key, publicReady: true, developedAt: new Date(), developAttempts: sql`${sightings.developAttempts} - 1` })
+        .set({ publicKey: published, publicReady: true, developedAt: new Date(), developAttempts: sql`${sightings.developAttempts} - 1`, ...boxToKeep })
         .where(and(eq(sightings.id, s.id), sql`${sightings.developedAt} is null`, eq(sightings.photoVersion, s.photoVersion)))
         .returning({ id: sightings.id });
       if (marked.length === 0) {
@@ -130,7 +134,7 @@ export async function developNext(): Promise<"developed" | "idle"> {
       if (s.catId) await tx.update(cats).set({ avatar }).where(eq(cats.id, s.catId));
       return true;
     });
-    // Lost to the phone tier, a caretaker's hold, or a caretaker's rotation of the original: this copy belongs to no sighting, so it is deleted.
+    // Lost to the phone tier, a caretaker's hold, a caretaker's rotation of the original, or a removed cat: this copy belongs to no sighting, so it is deleted.
     if (!won) {
       console.error("[develop] the photo was developed elsewhere first; this public copy is deleted");
       await removePublicCopy(key);
@@ -139,6 +143,8 @@ export async function developNext(): Promise<"developed" | "idle"> {
   } catch (e) {
     // Class name only: errors from storage can carry keys.
     console.error(`[develop] not developed, will try again: ${e instanceof Error ? e.name : typeof e}`);
+    // A failure after the publish leaves a copy no sighting points at, so it is deleted.
+    await removePublicCopy(key);
     return "idle";
   }
 }
