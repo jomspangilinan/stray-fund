@@ -194,7 +194,7 @@ describe("report_confirm and report_dismiss", () => {
 });
 
 describe("the demo desk", () => {
-  it("hides a real note and a real question, and shows a sample row's", async () => {
+  it("shows a report's note and the treasurer's question on the demo desk, for real rows and samples alike", async () => {
     vi.stubEnv("DEMO_MODE", "true");
     const cat = await makeCat();
     const s = await makeSighting({ catId: cat.id });
@@ -203,10 +203,12 @@ describe("the demo desk", () => {
     const q = await getCaretakerQueue();
     const real = q.reports.find((r) => r.claim === "injured")!;
     const sample = q.reports.find((r) => r.claim === "sick")!;
-    expect(real.note).toBe("Hidden in the demo");
-    expect(real.checkQuestion).toBe("Hidden in the demo");
-    expect(JSON.stringify([real])).not.toMatch(/0917|Rizal|mochi/i);
+    expect(real.note).toBe("call me on 0917 123 4567");
+    expect(real.checkQuestion).toBe("Is it near 12 Rizal Ave, or is mochi limping?");
     expect(sample.note).toBe("sample note");
+    // The exact place stays hidden in the demo.
+    expect(real.exact).toBeNull();
+    expect(real.exactHidden).toBe(true);
   });
 
   it("serves a real report's photo as the plain hidden picture", async () => {

@@ -99,7 +99,7 @@ export type ReportItem = {
   catId: string | null;
   catName: string | null;
   sightingId: string | null;
-  /** A neighbour's free text. In the demo a real row's note is replaced here, not in the page. */
+  /** A neighbour's free text, shown on the desk as written. */
   note: string | null;
   /** Null on a photo report, which has no photo to agree with itself. */
   photoAgrees: boolean | null;
@@ -291,7 +291,6 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     .leftJoin(cats, eq(cats.id, reports.catId))
     .leftJoin(sightings, eq(sightings.id, reports.sightingId))
     .where(eq(reports.status, "open"));
-  const demo = hidePrivateInDemo();
   const reportItems: ReportItem[] = sortReports(openReports.map((x) => ({ ...x, ...x.r, createdAt: x.r.createdAt }))).map((x) => {
     const lat = x.sLat ?? x.catLat;
     const lng = x.sLat !== null ? x.sLng : x.catLng;
@@ -302,11 +301,11 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
       catId: x.r.catId,
       catName: x.catName,
       sightingId: x.r.sightingId,
-      // A visitor's real note can hold a name or a phone number. Seeded samples are ours, so they show.
-      note: x.r.note !== null && demo && !x.r.sample ? HIDDEN_NOTE : x.r.note,
+      // Shown in full on the demo desk while the owner is the one testing it. Before the URL goes out, the staff
+      // screens become read-only with static data; until then a note is the report's whole point.
+      note: x.r.note,
       photoAgrees: x.r.source === "photo" ? null : x.r.photoAgrees,
-      // A question can echo a lowercase name or a place the filters miss, so a real row's is hidden whole, like the note.
-      checkQuestion: x.r.checkQuestion !== null && demo && !x.r.sample ? HIDDEN_NOTE : x.r.checkQuestion,
+      checkQuestion: x.r.checkQuestion,
       ...placeForStaff(exactOf(lat, lng, x.sLat === null ? x.catApprox ?? false : false)),
       area: x.catArea ?? COLONY.area_name,
     };
