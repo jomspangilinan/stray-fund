@@ -7,7 +7,11 @@ import { getStorage, newPrivateKey, newPublicKey } from "./storage";
 export type Box = { x: number; y: number; w: number; h: number };
 
 export const MAX_BYTES = 10 * 1024 * 1024;
-export const MAX_PIXELS = 40_000_000;
+/** Spot photos are camera captures from a canvas, well under this. */
+export const MAX_PIXELS = 16_000_000;
+/** Vet evidence (receipts, ear-tip photos) comes from the phone gallery, often 12 to 50 MP. */
+export const EVIDENCE_MAX_PIXELS = 40_000_000;
+export const MAX_CONCURRENT_DECODES = 2;
 export const MAX_SIDE = 1600;
 const PADDING = 0.1;
 const MIN_SIGMA = 20;
@@ -23,18 +27,44 @@ export class InvalidPhoto extends Error {
 
 const ALLOWED = new Set(["jpeg", "png", "webp"]);
 
+/** True when the bytes start with the JPEG signature FF D8 FF. */
+export function isJpeg(buf: Uint8Array): boolean {
+  return !!buf && buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+}
+
+let running = 0;
+const waiting: Array<() => void> = [];
+
+/** Runs fn once fewer than MAX_CONCURRENT_DECODES others are running in this process. First come, first served. */
+export async function withDecodeSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (running >= MAX_CONCURRENT_DECODES) await new Promise<void>((resolve) => waiting.push(resolve));
+  else running++;
+  try {
+    return await fn();
+  } finally {
+    // Hand the slot straight to the next waiter, so the count stays put and the queue stays in order.
+    const next = waiting.shift();
+    if (next) next();
+    else running--;
+  }
+}
+
 /**
  * Validates, applies EXIF orientation, resizes and re-encodes as JPEG. Sharp drops all metadata
  * (EXIF, GPS, ICC, XMP) unless asked to keep it, and rotate() runs first so orientation survives.
  */
-async function normalize(input: Buffer): Promise<Buffer> {
-  if (!input || input.length === 0) throw new InvalidPhoto("empty");
-  if (input.length > MAX_BYTES) throw new InvalidPhoto("too_large");
-  const opts = { limitInputPixels: MAX_PIXELS, failOn: "error" as const };
+function normalize(input: Buffer, maxPixels: number): Promise<Buffer> {
+  if (!input || input.length === 0) return Promise.reject(new InvalidPhoto("empty"));
+  if (input.length > MAX_BYTES) return Promise.reject(new InvalidPhoto("too_large"));
+  return withDecodeSlot(() => decode(input, maxPixels));
+}
+
+async function decode(input: Buffer, maxPixels: number): Promise<Buffer> {
+  const opts = { limitInputPixels: maxPixels, failOn: "error" as const };
   try {
     const meta = await sharp(input, opts).metadata();
     if (!meta.format || !ALLOWED.has(meta.format)) throw new InvalidPhoto("unsupported");
-    if ((meta.width ?? 0) * (meta.height ?? 0) > MAX_PIXELS) throw new InvalidPhoto("too_many_pixels");
+    if ((meta.width ?? 0) * (meta.height ?? 0) > maxPixels) throw new InvalidPhoto("too_many_pixels");
     return await sharp(input, opts)
       .rotate()
       .resize({ width: MAX_SIDE, height: MAX_SIDE, fit: "inside", withoutEnlargement: true })
@@ -47,9 +77,9 @@ async function normalize(input: Buffer): Promise<Buffer> {
   }
 }
 
-/** Stores a metadata-free private copy. Exact coordinates live only in database columns. */
-export async function storeOriginal(jpeg: Buffer): Promise<{ key: string }> {
-  const clean = await normalize(jpeg);
+/** Stores a metadata-free private copy. Pass EVIDENCE_MAX_PIXELS for gallery photos; the default is the camera cap.  Exact coordinates live only in database columns. */
+export async function storeOriginal(jpeg: Buffer, maxPixels: number = MAX_PIXELS): Promise<{ key: string }> {
+  const clean = await normalize(jpeg, maxPixels);
   const key = newPrivateKey();
   await getStorage().putPrivate(key, clean, "image/jpeg");
   return { key };

@@ -981,19 +981,18 @@ describe("POST /api/spot", () => {
     expect(await sightingRows()).toHaveLength(0);
   });
 
-  it("returns 415 for a content type other than image/jpeg", async () => {
+  it("returns 415 for PNG bytes labelled image/jpeg", async () => {
     await signIn();
-    const png = new Blob([new Uint8Array(await jpeg())], { type: "image/png" });
-    const res = await post(await body({ photo: png }));
+    const pngBytes = await sharp({ create: { width: 20, height: 20, channels: 3, background: "#888" } }).png().toBuffer();
+    const res = await post(await body({ photo: new Blob([new Uint8Array(pngBytes)], { type: "image/jpeg" }) }));
     expect(res.status).toBe(415);
-    expect(((await res.json()) as { error: string }).error).toBe(
-      "That photo type is not supported. Take it again with the camera.",
-    );
+    expect(((await res.json()) as { error: string }).error).toBe("Send a JPEG photo.");
+    expect(await sightingRows()).toHaveLength(0);
   });
 
   it("returns 400 for bytes that are not a real image", async () => {
     await signIn();
-    const junk = new Blob(["hello"], { type: "image/jpeg" });
+    const junk = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0x00, 0x01, 0x02, 0x03])], { type: "image/jpeg" });
     const res = await post(await body({ photo: junk }));
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe(

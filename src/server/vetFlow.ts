@@ -11,7 +11,7 @@ import { allowedPayees, bookings, cats, guardrails, payouts, receipts, reports, 
 import { HOLD_CLAIMS, holdNotices, type HoldNotice } from "./reports";
 import { CONFIRMED_BOOKING } from "./guardrails";
 import { CAPTURED, returnSurplus, toInt, unspentForCat } from "./ledger";
-import { storeOriginal } from "./photos";
+import { EVIDENCE_MAX_PIXELS, storeOriginal } from "./photos";
 import { placeForStaff } from "./demoPrivacy";
 import { isPlainText } from "./plainText";
 import { effectiveSex } from "./agent/rank";
@@ -428,8 +428,8 @@ export async function submitEvidence(i: {
   }
 
   const [{ key: fileKey }, { key: earTipPhotoKey }] = await Promise.all([
-    storeOriginal(i.receipt),
-    storeOriginal(i.earTipPhoto),
+    storeOriginal(i.receipt, EVIDENCE_MAX_PIXELS),
+    storeOriginal(i.earTipPhoto, EVIDENCE_MAX_PIXELS),
   ]);
 
   const receiptId = await withColonyLock(async (tx) => {

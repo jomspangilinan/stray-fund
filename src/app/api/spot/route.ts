@@ -5,7 +5,7 @@ import { BodyTooLarge, parseForm, readLimited } from "@/server/http";
 import { AuthError, requireRole } from "@/server/session";
 import { loadReveal } from "@/server/spotReveal";
 import { assertUnderRateLimit, DailyPhotoLimit, processSpot, RateLimited } from "@/server/spot";
-import { InvalidPhoto, MASK_MAX_BYTES, MAX_BYTES } from "@/server/photos";
+import { InvalidPhoto, isJpeg, MASK_MAX_BYTES, MAX_BYTES } from "@/server/photos";
 import { isJudge } from "@/server/judge";
 
 // Room for the multipart envelope around a photo that is itself at most MAX_BYTES.
@@ -35,7 +35,8 @@ export async function POST(req: Request) {
 
     const photo = form.get("photo");
     if (!(photo instanceof Blob) || photo.size === 0) return fail("No photo was received. Take it again and send it.", 400);
-    if (photo.type !== "image/jpeg") return fail("That photo type is not supported. Take it again with the camera.", 415);
+    const jpeg = Buffer.from(await photo.arrayBuffer());
+    if (!isJpeg(jpeg)) return fail("Send a JPEG photo.", 415);
 
     const lat = coordinate(form.get("lat"), -90, 90);
     const lng = coordinate(form.get("lng"), -180, 180);
@@ -60,7 +61,7 @@ export async function POST(req: Request) {
       rawMask instanceof Blob && rawMask.size > 0 && rawMask.size <= MASK_MAX_BYTES ? Buffer.from(await rawMask.arrayBuffer()) : null;
 
     const out = await processSpot({
-      jpeg: Buffer.from(await photo.arrayBuffer()),
+      jpeg,
       lat,
       lng,
       userId: session.userId,

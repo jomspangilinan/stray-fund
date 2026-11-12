@@ -1,8 +1,11 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import {
+  EVIDENCE_MAX_PIXELS,
   InvalidPhoto,
   KEEP_MARGIN,
+  isJpeg,
+  withDecodeSlot,
   MASK_MAX_BYTES,
   catOnly,
   maskUsable,
@@ -125,6 +128,15 @@ describe("input validation", () => {
       .toBuffer();
     expect(bomb.length).toBeLessThan(10 * 1024 * 1024);
     await expect(storeOriginal(bomb)).rejects.toBeInstanceOf(InvalidPhoto);
+  });
+
+  it("refuses a 4001x4001 PNG (over 16 MP) for a spot photo but accepts it as evidence", async () => {
+    const big = await sharp({ create: { width: 4001, height: 4001, channels: 3, background: "#123" } })
+      .png({ compressionLevel: 9 })
+      .toBuffer();
+    expect(big.length).toBeLessThan(1024 * 1024);
+    await expect(storeOriginal(big)).rejects.toMatchObject({ name: "InvalidPhoto", reason: "too_many_pixels" });
+    await expect(storeOriginal(big, EVIDENCE_MAX_PIXELS)).resolves.toHaveProperty("key");
   });
 
   it("rejects image formats outside jpeg, png and webp", async () => {
@@ -417,5 +429,47 @@ describe("avatarFromPhoto", () => {
     expect(avatarFromPixels(px, 16, 16)).toEqual({ pattern: "solid", base: "grey", accent: "grey" });
     for (let p = 0; p < 256; p++) px[p * 4 + 3] = p < 128 ? 0 : 255;
     expect(avatarFromPixels(px, 16, 16).base).toBe("grey");
+  });
+});
+
+describe("withDecodeSlot", () => {
+  it("never runs more than two at once and keeps arrival order", async () => {
+    let active = 0;
+    let peak = 0;
+    const started: number[] = [];
+    const gates: Array<() => void> = [];
+    const job = (n: number) =>
+      withDecodeSlot(async () => {
+        started.push(n);
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise<void>((r) => gates.push(r));
+        active--;
+        return n;
+      });
+    const all = [job(1), job(2), job(3)];
+    await new Promise((r) => setTimeout(r, 20));
+    expect(started).toEqual([1, 2]);
+    expect(active).toBe(2);
+    gates[0]();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(started).toEqual([1, 2, 3]);
+    gates[1]();
+    gates[2]();
+    expect(await Promise.all(all)).toEqual([1, 2, 3]);
+    expect(peak).toBe(2);
+  });
+
+  it("frees the slot when the work throws", async () => {
+    for (let i = 0; i < 4; i++) await expect(withDecodeSlot(async () => { throw new Error("x"); })).rejects.toThrow("x");
+    await expect(withDecodeSlot(async () => 7)).resolves.toBe(7);
+  });
+});
+
+describe("isJpeg", () => {
+  it("checks the FF D8 FF signature", () => {
+    expect(isJpeg(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe(true);
+    expect(isJpeg(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toBe(false);
+    expect(isJpeg(new Uint8Array([]))).toBe(false);
   });
 });
