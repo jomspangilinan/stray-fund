@@ -55,7 +55,8 @@ export async function POST(req: Request) {
       if (!box) return fail("The photo did not send properly. Take it again.", 400);
     }
 
-    // The phone's cut-out. Too big or missing, the photo simply waits for the worker. maskUsable checks the rest.
+    // The phone's cut-out, on both paths. Too big or missing, the photo gets the soft circle (AI path) or waits for the
+    // worker (public path). maskUsable checks the rest. It is kept in memory for this request only, never stored.
     const rawMask = form.get("mask");
     const mask =
       rawMask instanceof Blob && rawMask.size > 0 && rawMask.size <= MASK_MAX_BYTES ? Buffer.from(await rawMask.arrayBuffer()) : null;

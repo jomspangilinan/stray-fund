@@ -10,7 +10,7 @@ import { createTestPool } from "./helpers/db";
 import { CAT_NAMES } from "../src/lib/catNames";
 import { COLONY } from "../src/lib/config";
 import { setAiForTests, type AiTransport } from "../src/server/ai/client";
-import { storeOriginal, InvalidPhoto } from "../src/server/photos";
+import { catOnly, storeOriginal, InvalidPhoto } from "../src/server/photos";
 import { getStorage } from "../src/server/storage";
 import { SESSION_COOKIE, signSession } from "../src/server/session";
 
@@ -106,6 +106,19 @@ async function answerEarTip(userId: string, catId: string, answer: string) {
   );
 }
 
+
+/** A 64x64 grey PNG, white over `on`, like the phone's cut-out. Null makes an empty mask. */
+async function maskOf(on: { x: number; y: number; w: number; h: number } | null): Promise<Buffer> {
+  const px = Buffer.alloc(64 * 64);
+  for (let y = 0; y < 64; y++) {
+    for (let x = 0; x < 64; x++) {
+      const fx = (x + 0.5) / 64;
+      const fy = (y + 0.5) / 64;
+      if (on && fx >= on.x && fx <= on.x + on.w && fy >= on.y && fy <= on.y + on.h) px[y * 64 + x] = 255;
+    }
+  }
+  return sharp(px, { raw: { width: 64, height: 64, channels: 1 } }).png().toBuffer();
+}
 
 let seq = 0;
 async function makeUser() {
@@ -616,22 +629,71 @@ describe("public photo", () => {
     expect(memory.readPublic(s.publicKey!).length).toBeGreaterThan(0);
   });
 
-  it("holds the photo for a caretaker when the AI does not say nothing sensitive is left, even with no regions", async () => {
+  it("publishes at once even when the AI does not say nothing sensitive is left, with no regions", async () => {
     script.assess = () => assessWith({ no_sensitive_content: false, sensitive_regions: [] });
     const u = await makeUser();
     const out = await processSpot({ ai: true, jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     expect(out.state).toBe("new_cat");
     const [s] = await sightingRows();
-    expect(s).toMatchObject({ publicReady: false, publicKey: null });
+    expect(s.publicReady).toBe(true);
+    expect(s.publicKey).not.toBeNull();
     const [cat] = await catRows();
     expect(cat.id).toBe(out.catId);
   });
 
-  it("holds the photo when regions are listed but the AI is not sure the rest is clear", async () => {
-    script.assess = () => assessWith({ no_sensitive_content: false, sensitive_regions: [{ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }] });
+  it("publishes at once when regions are listed but the AI is not sure the rest is clear, with those regions blurred", async () => {
+    const region = { x: 0.1, y: 0.1, w: 0.3, h: 0.3 };
+    script.assess = () => assessWith({ no_sensitive_content: false, sensitive_regions: [region] });
     const u = await makeUser();
-    await processSpot({ ai: true, jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
-    expect((await sightingRows())[0]).toMatchObject({ publicReady: false, publicKey: null });
+    const box = { x: 0.2, y: 0.2, w: 0.6, h: 0.6 };
+    await processSpot({ ai: true, jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id, box });
+    const [s] = await sightingRows();
+    expect(s.publicReady).toBe(true);
+    const orig = await getStorage().getPrivate(s.originalKey);
+    const bytes = (getStorage() as unknown as { readPublic(k: string): Buffer }).readPublic(s.publicKey!);
+    expect(bytes.equals(await catOnly(orig, { box, mask: null }, [region]))).toBe(true);
+  });
+
+  it("a matched photo publishes on the known cat at once, even when the AI is not sure the rest is clear", async () => {
+    const { cat } = await seedCat({});
+    script.assess = () => assessWith({ no_sensitive_content: false, sensitive_regions: [{ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }] });
+    script.match = () => ({ match_cat_id: cat.id, confidence: 0.99, reason: "same" });
+    const u = await makeUser();
+    const out = await processSpot({ ai: true, jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect(out).toMatchObject({ state: "matched", catId: cat.id });
+    const [s] = await db.select().from(sightings).where(eq(sightings.id, out.sightingId));
+    expect(s.publicReady).toBe(true);
+  });
+
+  it("AI path with a usable phone cut-out publishes the cut-out's shape, not the circle", async () => {
+    const box = { x: 0.2, y: 0.2, w: 0.6, h: 0.6 };
+    const mask = await maskOf({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 });
+    const u = await makeUser();
+    const photo = await sharp(await checkerImage(400, 300, { left: 0, top: 0, width: 400, height: 300 })).jpeg({ quality: 95 }).toBuffer();
+    await processSpot({ ai: true, jpeg: photo, lat: 10.2, lng: 120.6, userId: u.id, box, mask });
+    const [s] = await sightingRows();
+    expect(s.publicReady).toBe(true);
+    const orig = await getStorage().getPrivate(s.originalKey);
+    const bytes = (getStorage() as unknown as { readPublic(k: string): Buffer }).readPublic(s.publicKey!);
+    expect(bytes.equals(await catOnly(orig, { box, mask }, []))).toBe(true);
+    // The mask decided what stayed sharp, not the circle on the box.
+    expect(bytes.equals(await catOnly(orig, { box, mask: null }, []))).toBe(false);
+  });
+
+  it("AI path with no cut-out, or an unusable one, uses the circle on the box", async () => {
+    const box = { x: 0.2, y: 0.2, w: 0.6, h: 0.6 };
+    const photo = await sharp(await checkerImage(400, 300, { left: 0, top: 0, width: 400, height: 300 })).jpeg({ quality: 95 }).toBuffer();
+    for (const mask of [undefined, await maskOf(null)]) {
+      await db.delete(sightings);
+      await db.delete(cats);
+      const u = await makeUser();
+      await processSpot({ ai: true, jpeg: photo, lat: 10.2, lng: 120.6, userId: u.id, box, mask });
+      const [s] = await sightingRows();
+      expect(s.publicReady).toBe(true);
+      const orig = await getStorage().getPrivate(s.originalKey);
+      const bytes = (getStorage() as unknown as { readPublic(k: string): Buffer }).readPublic(s.publicKey!);
+      expect(bytes.equals(await catOnly(orig, { box, mask: null }, []))).toBe(true);
+    }
   });
 
   it("publishes with an empty region list only when the AI says nothing sensitive is left", async () => {
@@ -1267,17 +1329,6 @@ describe("POST /api/spot/report", () => {
 describe("processSpot: the public path (no AI)", () => {
   const BOX = { x: 0.2, y: 0.2, w: 0.6, h: 0.6 };
 
-  async function maskOf(on: { x: number; y: number; w: number; h: number } | null): Promise<Buffer> {
-    const px = Buffer.alloc(64 * 64);
-    for (let y = 0; y < 64; y++) {
-      for (let x = 0; x < 64; x++) {
-        const fx = (x + 0.5) / 64;
-        const fy = (y + 0.5) / 64;
-        if (on && fx >= on.x && fx <= on.x + on.w && fy >= on.y && fy <= on.y + on.h) px[y * 64 + x] = 255;
-      }
-    }
-    return sharp(px, { raw: { width: 64, height: 64, channels: 1 } }).png().toBuffer();
-  }
   const plain = async (userId: string, more: Record<string, unknown> = {}) =>
     processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId, ai: false, ...more });
 

@@ -8,7 +8,6 @@ import { matchCat } from "./ai/match";
 import { db, lockColony, type Tx } from "./db/client";
 import { cats, guardrails, sightings } from "./db/schema";
 import { catNamesInUse, uniqueName } from "./catNames";
-import { autoPublishable } from "./photoGate";
 import { nameIsSafe, safeBio } from "./placeText";
 import { fuzzLocation } from "./location";
 import { attachReports, filePhotoReports } from "./reports";
@@ -137,7 +136,10 @@ export async function processSpot(i: {
   box?: CatBox | null;
   /** True runs the AI on the photo (judges). False is the public path: no AI, and the photo is developed later. Required, so a caller can never reach the AI by leaving it out. */
   ai: boolean;
-  /** The phone's 64x64 cut-out of the cat, checked with maskUsable. Public path only. */
+  /**
+   * The phone's 64x64 cut-out of the cat, checked with maskUsable. The public path publishes with it at once; the AI
+   * path uses it for the publish after a match. It is never stored, so a pending row finished later gets the circle.
+   */
   mask?: Buffer | null;
 }): Promise<SpotResult> {
   await assertUnderRateLimit(i.userId);
@@ -169,7 +171,7 @@ export async function processSpot(i: {
     return row;
   });
 
-  return finishSighting(sighting.id);
+  return finishSighting(sighting.id, i.mask ?? null);
 }
 
 /** Today's date in Manila, the day the public limits count in. */
@@ -296,15 +298,16 @@ export async function getSpotStatus(
   };
 }
 
-export async function finishSighting(sightingId: string): Promise<SpotResult> {
-  return (await runSighting(sightingId)).result;
+/** `mask` is the phone's cut-out from the upload, when this run is the upload's own. */
+export async function finishSighting(sightingId: string, mask: Buffer | null = null): Promise<SpotResult> {
+  return (await runSighting(sightingId, mask)).result;
 }
 
 type Stop = "budget" | "unavailable";
 type Run = { result: SpotResult; stop?: Stop };
 
 /** Runs the AI steps for a pending sighting, with no database transaction open, then applies the outcome. */
-async function runSighting(sightingId: string): Promise<Run> {
+async function runSighting(sightingId: string, mask: Buffer | null = null): Promise<Run> {
   const [s] = await db.select().from(sightings).where(eq(sightings.id, sightingId));
   if (!s) throw new Error(`Sighting not found: ${sightingId}`);
   if (s.state !== "pending") return { result: resultOf(s) };
@@ -332,13 +335,13 @@ async function runSighting(sightingId: string): Promise<Run> {
   }
 
   if (!assessment.is_cat || assessment.cat_visible_quality === "poor") {
-    return { result: await applyAssessment(s.id, assessment, { catId: null, confidence: 0, candidateIds: [] }) };
+    return { result: await applyAssessment(s.id, assessment, { catId: null, confidence: 0, candidateIds: [] }, mask) };
   }
 
   const candidates = await loadCandidates(assessment.coat_pattern);
   const candidateIds = candidates.map((c) => c.catId);
   if (candidates.length === 0) {
-    return { result: await applyAssessment(s.id, assessment, { catId: null, confidence: 0, candidateIds }) };
+    return { result: await applyAssessment(s.id, assessment, { catId: null, confidence: 0, candidateIds }, mask) };
   }
 
   const m = await matchCat(original, candidates);
@@ -349,11 +352,12 @@ async function runSighting(sightingId: string): Promise<Run> {
     return { result: await markReview(s.id, assessment, candidateIds) };
   }
   return {
-    result: await applyAssessment(s.id, assessment, {
-      catId: m.data.match_cat_id,
-      confidence: m.data.confidence,
-      candidateIds,
-    }),
+    result: await applyAssessment(
+      s.id,
+      assessment,
+      { catId: m.data.match_cat_id, confidence: m.data.confidence, candidateIds },
+      mask,
+    ),
   };
 }
 
@@ -425,9 +429,9 @@ function cleanName(raw: string): string {
 
 /**
  * Applies the AI outcome to a pending sighting in one transaction. Conditional on state `pending`, so a
- * second call for the same sighting changes nothing and returns the first outcome.
+ * second call for the same sighting changes nothing and returns the first outcome. `mask` is the phone's cut-out, if any.
  */
-export async function applyAssessment(sightingId: string, a: Assessment, m: MatchOutcome): Promise<SpotResult> {
+export async function applyAssessment(sightingId: string, a: Assessment, m: MatchOutcome, mask: Buffer | null = null): Promise<SpotResult> {
   const outcome = await db.transaction(async (tx) => {
     // Colony lock first, like every other path that changes a cat.
     await lockColony(tx);
@@ -486,9 +490,9 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
     return { done: true as const, result: result("new_cat", s.id, cat.id), sighting: s, catId: cat.id };
   });
 
-  // Only a photo the model vouches for goes public by itself. Otherwise it waits in the caretaker's held photos.
-  if (outcome.done && outcome.catId && autoPublishable(a)) {
-    await publishPhoto(outcome.sighting.id, outcome.sighting.originalKey, a.sensitive_regions);
+  // A photo with a cat goes public at once. Everything but the cat is blurred, and the model's regions are blurred again.
+  if (outcome.done && outcome.catId) {
+    await publishPhoto(outcome.sighting.id, outcome.sighting.originalKey, a.sensitive_regions, mask);
   }
   return outcome.result;
 }
@@ -524,15 +528,20 @@ export async function insertNewCat(tx: Tx, s: SightingRow, a: Assessment | null)
   return cat;
 }
 
-/** Only an assessment that listed its sensitive regions (even none) makes a photo public. Never fails the spot. */
-export async function publishPhoto(sightingId: string, originalKey: string, regions: unknown): Promise<void> {
+/**
+ * Only an assessment that listed its sensitive regions (even none) makes a photo public. Never fails the spot.
+ * `mask` is the phone's cut-out from the upload: used when it passes maskUsable against the stored box, else the circle.
+ */
+export async function publishPhoto(sightingId: string, originalKey: string, regions: unknown, mask: Buffer | null = null): Promise<void> {
   if (!Array.isArray(regions)) return;
   try {
     // The version is read before the original, so a rotation that lands in between makes the update below miss.
     const [row] = await db.select({ box: sightings.catBox, photoVersion: sightings.photoVersion }).from(sightings).where(eq(sightings.id, sightingId));
     if (!row) return;
-    // Masks are not stored, so a republish keeps the soft circle around the stored box.
-    const { key } = await publishCatOnly(originalKey, { box: parseCatBox(row.box), mask: null }, regions as Box[]);
+    const box = parseCatBox(row.box);
+    // Masks are not stored, so a republish, or a row finished later by the retry, keeps the soft circle around the stored box.
+    const keepMask = mask && (await maskUsable(mask, box)) ? mask : null;
+    const { key } = await publishCatOnly(originalKey, { box, mask: keepMask }, regions as Box[]);
     const set = await db
       .update(sightings)
       .set({ publicKey: key, publicReady: true })

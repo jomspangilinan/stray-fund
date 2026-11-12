@@ -120,7 +120,7 @@ Read this before you trust it with anything real.
 - **Sandbox money only.** The app refuses to start with demo roles and live PayPal together, and the "test money" wording only shows when PayPal is not live.
 - **Demo caretakers see seeded places.** In demo mode the desks hide real coordinates, original photos and the vet's email. A public demo should still never use a real feeding spot.
 - **A vet and a caretaker could collude, and a photo could be forged.** The checks make that harder and leave a record; they don't make it impossible. We chose not to build a volunteer audit flow.
-- **On the judges' AI path, photo blurring is the AI's word.** A photo is published automatically when the AI lists regions to blur and says `no_sensitive_content` is true. If the AI lists no regions and says that, nothing is blurred and no person looks. A caretaker can hold any photo.
+- **On the judges' AI path, a photo with a cat goes public with no person looking.** Everything but the cat is blurred: the phone's cut-out when it ran, otherwise a soft circle around the camera's box. The regions the AI lists are blurred again, even inside that area, but anything the AI missed inside it stays sharp. A caretaker can hold any photo.
 - **The demo caretaker's tick on a held photo is blind.** In demo mode the caretaker can't see the original, so ticking "nothing sensitive" is a guess.
 - **Donors are named by default.** A switch hides your name in thanks and on the ledger. The default is shown.
 - **The live camera rule is enforced in the app only.** A custom client could send any photo to the API.

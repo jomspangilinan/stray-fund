@@ -1,10 +1,11 @@
 import type { Box } from "./photos";
 
 /*
- * When a photo may go public without a person looking. An empty list of regions does not mean safe: it can
- * mean the model missed something. The model must also say, in its own field, that once the listed regions are
- * blurred nothing else is left (no readable text, sign, plate, house number or face). Anything else waits for a
- * caretaker. A row saved before the field existed has no answer and is never published by the machine.
+ * A fresh photo the AI matched or started a cat with publishes at once: everything but the cat is blurred, and the
+ * listed regions are blurred again. These rules are for the caretaker's own steps. An empty list of regions does not
+ * mean safe: it can mean the model missed something. The model must also say, in its own field, that once the listed
+ * regions are blurred nothing else is left (no readable text, sign, plate, house number or face). A row saved before
+ * the field existed has no answer.
  */
 
 type Stored = { sensitive_regions?: unknown; no_sensitive_content?: unknown } | null | undefined;
@@ -14,7 +15,7 @@ export function regionsOf(assessment: unknown): Box[] {
   return Array.isArray(r) ? (r as Box[]) : [];
 }
 
-/** True only when the model listed its regions and said nothing else sensitive is left. */
+/** True only when the model listed its regions and said nothing else sensitive is left. Confirming a sighting from review publishes only then. */
 export function autoPublishable(assessment: unknown): boolean {
   const a = assessment as Stored;
   return Array.isArray(a?.sensitive_regions) && a?.no_sensitive_content === true;
