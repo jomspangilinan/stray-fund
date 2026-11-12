@@ -11,6 +11,7 @@ import { ScanChecklist } from "./ScanChecklist";
 import { SignInGate } from "./SignInGate";
 import { SpotReveal } from "./SpotReveal";
 import { useCatDetector } from "./useCatDetector";
+import { blobToCanvas, maskToPng, usePhoneCut } from "./usePhoneCut";
 
 type Done = {
   state: "new_cat" | "matched" | "needs_review" | "rejected" | "queued_for_ai";
@@ -54,6 +55,8 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
   const urlRef = useRef<string | null>(null);
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const detector = useCatDetector(video, phase.kind === "camera" && Boolean(username));
+  // Only the public path cuts the cat out on the phone. Judges take the AI path, which does not use a mask.
+  const phone = usePhoneCut(!judge && phase.kind === "camera" && Boolean(username));
   // The shutter reads the latest sighting of the cat, not the one from when the callback was made.
   const latest = useRef(detector);
   useEffect(() => {
@@ -134,7 +137,18 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
       form.set("lat", String(where.lat));
       form.set("lng", String(where.lng));
     }
-    if (box) form.set("box", JSON.stringify(box));
+    // The phone's own cut-out, when it has one in time. Otherwise the photo goes up alone and the server develops it.
+    let sendBox = box;
+    if (!judge) {
+      const canvas = await blobToCanvas(blob);
+      const cut = canvas ? await phone.cut(canvas) : null;
+      const png = cut ? await maskToPng(cut.mask) : null;
+      if (cut && png) {
+        form.set("mask", new File([png], "mask.png", { type: "image/png" }));
+        sendBox = cut.box;
+      }
+    }
+    if (sendBox) form.set("box", JSON.stringify(sendBox));
     try {
       const res = await fetch("/api/spot", { method: "POST", body: form });
       const body = (await res.json().catch(() => ({}))) as Partial<Done> & { error?: string };

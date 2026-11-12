@@ -16,3 +16,6 @@ next-env.d.ts
 
 # Vision eval inputs (cat photos and synthetic receipts)
 tests/fixtures/vision/
+
+# onnxruntime-web runtime, copied by scripts/copy-ort.mjs after npm install
+public/ort/

@@ -1,3 +1,5 @@
+import { MIN_FPS, skipDetector } from "./catDetect";
+
 /*
  * The cat's cut-out as a small grey picture over the whole frame. Pure: no sharp, no DOM, so the phone
  * and the worker share it. 255 is the cat, 0 everything else.
@@ -50,4 +52,19 @@ export function frameMask(
     }
   }
   return out;
+}
+
+/** After the shutter the phone gets this long to cut the cat out. Then the photo goes up alone for the server tier. */
+export const PHONE_CUT_TIMEOUT_MS = 2500;
+
+/**
+ * Whether this phone should cut the cat out itself: not on data saver or a slow connection, the model loaded in time
+ * and the live view ran at the minimum rate. Any doubt means no, and the photo goes to the server tier.
+ */
+export function phoneCutAllowed(i: {
+  connection: { saveData?: boolean; effectiveType?: string } | null;
+  loadedWithinLimit: boolean;
+  fps: number;
+}): boolean {
+  return !skipDetector(i.connection) && i.loadedWithinLimit && i.fps >= MIN_FPS;
 }
