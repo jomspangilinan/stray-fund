@@ -180,7 +180,7 @@ The code only calls `PutObject` and `GetObject` on S3, so the policy grants noth
 
 ## 3. Billing alert
 
-Before anything else is running up costs, open AWS Billing, Budgets, and create a monthly cost budget (for example 20 USD) with an email alert at 80 percent of actual spend. Also turn on "Receive Billing Alerts" in Billing preferences. Bedrock is the line most likely to surprise you. `AI_DAILY_CALL_CAP` (500 by default) is the app-side limit and the only hard stop: AWS updates budget data up to three times a day, so an alert can arrive hours late and does not stop spending. **Required before real money.**
+Before anything else is running up costs, open AWS Billing, Budgets, and create a monthly cost budget (for example 20 USD) with an email alert at 80 percent of actual spend. Also turn on "Receive Billing Alerts" in Billing preferences. Bedrock is the line most likely to surprise you. `AI_DAILY_CALL_CAP` (100 in the Blueprint; the code default is 500) is the app-side limit and the only hard stop (pending photos older than 24 hours also go to a person and get no more AI calls): AWS updates budget data up to three times a day, so an alert can arrive hours late and does not stop spending. **Required before real money.**
 
 ## 4. Render Blueprint
 
@@ -239,7 +239,7 @@ After saving the webhook, copy its id from the dashboard into `PAYPAL_WEBHOOK_ID
 | `AWS_REGION` | web, worker | Fixed to `ap-southeast-1` |
 | `AWS_ROLE_ARN` | web, worker | The `stray-fund-app` role, step 2. Render adds `AWS_WEB_IDENTITY_TOKEN_FILE` itself |
 | `AI_MODEL` | web, worker | Fixed Bedrock model id (the code default) |
-| `AI_DAILY_CALL_CAP` | web, worker | Fixed to `500`; change in the dashboard |
+| `AI_DAILY_CALL_CAP` | web, worker | Fixed to `100`; change in the dashboard |
 | `S3_PRIVATE_BUCKET` | web, worker | Bucket name, step 1 |
 | `S3_PUBLIC_BUCKET` | web, worker | Bucket name, step 1 |
 | `S3_PUBLIC_BASE_URL` | web, worker | Public bucket URL, step 1 |

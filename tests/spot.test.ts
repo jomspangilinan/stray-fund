@@ -27,6 +27,7 @@ import {
   getSpotStatus,
   processSpot,
   PUBLIC_NEW_CATS_PER_DAY,
+  PENDING_MAX_AGE_HOURS,
   PUBLIC_PHOTOS_PER_DAY,
   RateLimited,
   retryPendingSightings,
@@ -764,6 +765,18 @@ describe("retryPendingSightings", () => {
     await pendingSighting(30);
     expect(await retryPendingSightings()).toMatchObject({ examined: 0, completed: 0 });
     expect(seen.assess).toBe(0);
+  });
+
+  it("sends pending sightings older than a day to review with no AI call, and still retries a fresh one", async () => {
+    const stale = await pendingSighting(PENDING_MAX_AGE_HOURS * 3600 + 3600);
+    const fresh = await pendingSighting(120);
+    script.assess = () => assessWith({ is_cat: false });
+    const res = await retryPendingSightings();
+    const rows = await sightingRows();
+    expect(rows.find((r) => r.id === stale.id)?.state).toBe("needs_review");
+    expect(rows.find((r) => r.id === fresh.id)?.state).not.toBe("pending");
+    expect(res.examined).toBe(1);
+    expect(seen.assess).toBe(1);
   });
 
   it("stops the run when AI is unavailable", async () => {

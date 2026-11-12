@@ -40,7 +40,7 @@ services:
       - key: AI_MODEL
         value: global.anthropic.claude-haiku-4-5-20251001-v1:0
       - key: AI_DAILY_CALL_CAP
-        value: "500"
+        value: "100"
       - key: S3_PRIVATE_BUCKET
         sync: false
       - key: S3_PUBLIC_BUCKET
@@ -100,7 +100,7 @@ services:
       - key: AI_MODEL
         value: global.anthropic.claude-haiku-4-5-20251001-v1:0
       - key: AI_DAILY_CALL_CAP
-        value: "500"
+        value: "100"
       - key: S3_PRIVATE_BUCKET
         sync: false
       - key: S3_PUBLIC_BUCKET

@@ -32,6 +32,8 @@ export type SpotResult = {
 export const RATE_LIMIT_PER_MINUTE = 10;
 export const RETRY_AFTER_SECONDS = 60;
 export const RETRY_BATCH = 10;
+/** A pending sighting this old stops retrying and goes to a person. */
+export const PENDING_MAX_AGE_HOURS = 24;
 export const PUBLIC_PHOTOS_PER_DAY = 5;
 export const PUBLIC_NEW_CATS_PER_DAY = 50;
 /**
@@ -524,10 +526,22 @@ export async function publishPhoto(sightingId: string, originalKey: string, regi
 export type RetrySummary = { examined: number; completed: number; stopped?: Stop };
 
 /**
- * Finishes pending sightings older than a minute, oldest first, up to ten. One failure does not stop the
+ * Sends pending sightings older than a day to review, then finishes those older than a minute, oldest first, up to ten. One failure does not stop the
  * rest, but a budget or outage report ends the run so the worker does not hammer the AI.
  */
 export async function retryPendingSightings(): Promise<RetrySummary> {
+  // Photos the AI could not finish within a day go to a person instead of using more of the daily cap.
+  const stale = await db
+    .select({ id: sightings.id })
+    .from(sightings)
+    .where(and(eq(sightings.state, "pending"), lt(sightings.createdAt, sql`now() - make_interval(hours => ${PENDING_MAX_AGE_HOURS})`)));
+  for (const { id } of stale) {
+    try {
+      await markReview(id, null, []);
+    } catch (e) {
+      console.error(`[spot] could not expire pending sighting: ${e instanceof Error ? e.name : typeof e}`);
+    }
+  }
   const rows = await db
     .select({ id: sightings.id })
     .from(sightings)
