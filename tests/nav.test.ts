@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DESK_TABS, deskSwitchFor, isActiveTab, isOnDesk, TABS, tabsFor } from "../src/lib/nav";
+import { DESK_TABS, deskOf, deskSwitchFor, isActiveTab, isOnDesk, landingAfterSwitch, TABS, tabsFor, VET_TABS } from "../src/lib/nav";
 
 describe("desk navigation", () => {
   it("shows the desk tabs on every desk page and never the neighbour tabs there", () => {
@@ -7,17 +7,14 @@ describe("desk navigation", () => {
   });
 
   it("shows the neighbour tabs everywhere else", () => {
-    for (const p of ["/", "/spot", "/cats/12", "/vet", "/caretakers", "/caretaker-x"]) expect(tabsFor(p)).toBe(TABS);
+    for (const p of ["/", "/spot", "/cats/12", "/caretakers", "/caretaker-x", "/vets", "/veterinary"]) expect(tabsFor(p)).toBe(TABS);
   });
 
   it("gives anyone on the desk a way out, and only a caretaker a way back", () => {
     for (const r of [null, undefined, "donor", "vet", "foster", "caretaker"] as const) {
       expect(deskSwitchFor(r, "/caretaker")).toEqual({ href: "/", label: "Neighbour view" });
     }
-    for (const r of [null, undefined, "donor", "vet", "foster"] as const) {
-      expect(deskSwitchFor(r, "/")).toBeNull();
-      expect(deskSwitchFor(r, "/vet")).toBeNull();
-    }
+    for (const r of [null, undefined, "donor", "foster"] as const) expect(deskSwitchFor(r, "/")).toBeNull();
   });
 
   it("names the three desk tabs in order", () => {
@@ -48,6 +45,24 @@ describe("desk navigation", () => {
     expect(isOnDesk("/caretaker/cats")).toBe(true);
     expect(isOnDesk("/caretakers")).toBe(false);
     expect(isOnDesk("/caretaker-x")).toBe(false);
-    expect(isOnDesk("/vet")).toBe(false);
+    expect(isOnDesk("/vet")).toBe(true);
+    expect(deskOf("/vet/bookings/abc")).toBe("vet");
+    expect(deskOf("/vets")).toBeNull();
+  });
+
+  it("gives the vet desk its own tabs, lit one per page, and a way back for a vet", () => {
+    for (const p of ["/vet", "/vet/bookings", "/vet/bookings/abc"]) expect(tabsFor(p)).toBe(VET_TABS);
+    expect(VET_TABS.map((t) => [t.label, t.href])).toEqual([
+      ["To do", "/vet"],
+      ["Bookings", "/vet/bookings"],
+    ]);
+    const [todo, bookings] = VET_TABS;
+    expect(isActiveTab(todo, "/vet")).toBe(true);
+    expect(isActiveTab(todo, "/vet/bookings")).toBe(false);
+    expect(isActiveTab(bookings, "/vet/bookings/abc")).toBe(true);
+    expect(deskSwitchFor("vet", "/vet/bookings")).toEqual({ href: "/", label: "Neighbour view" });
+    expect(deskSwitchFor("vet", "/priority")).toEqual({ href: "/vet", label: "Back to desk" });
+    expect(landingAfterSwitch("vet", "/cats")).toBe("/vet");
+    expect(landingAfterSwitch("donor", "/vet/bookings/abc")).toBe("/");
   });
 });

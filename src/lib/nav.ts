@@ -17,7 +17,7 @@ export const HELPED_PAGES: readonly PageLink[] = [
 ];
 
 export type Tab = {
-  key: "yard" | "cats" | "spot" | "helped" | "fund" | "check" | "deskCats" | "rules";
+  key: "yard" | "cats" | "spot" | "helped" | "fund" | "check" | "deskCats" | "rules" | "todo" | "bookings";
   href: string;
   label: string;
   pages: readonly string[];
@@ -25,7 +25,7 @@ export type Tab = {
   exact?: boolean;
 };
 
-/** The neighbour tabs, for everyone except a caretaker on the desk. */
+/** The neighbour tabs, for every page that is not a desk. */
 export const TABS: readonly Tab[] = [
   { key: "yard", href: "/", label: "Yard", pages: ["/"] },
   { key: "cats", href: "/cats", label: "Cats", pages: ["/cats"] },
@@ -41,32 +41,39 @@ export const DESK_TABS: readonly Tab[] = [
   { key: "rules", href: "/caretaker/rules", label: "Rules", pages: ["/caretaker/rules"] },
 ];
 
+/** A vet's tabs while on the desk. To do sits at /vet, so it lights only there; Bookings stays lit on a booking. */
+export const VET_TABS: readonly Tab[] = [
+  { key: "todo", href: "/vet", label: "To do", pages: ["/vet"], exact: true },
+  { key: "bookings", href: "/vet/bookings", label: "Bookings", pages: ["/vet/bookings"] },
+];
+
+export type Desk = "caretaker" | "vet";
+const DESK_HOME: Record<Desk, string> = { caretaker: "/caretaker", vet: "/vet" };
+export const DESK_NAME: Record<Desk, string> = { caretaker: "Caretaker desk", vet: "Vet desk" };
+
 function under(pathname: string, root: string): boolean {
   return pathname === root || pathname.startsWith(`${root}/`);
 }
 
-/** /caretaker and the pages under it; /caretakers is not. */
-export function isOnDesk(pathname: string): boolean {
-  return under(pathname, "/caretaker");
+/** Which desk a page belongs to: /caretaker and /vet and the pages under them. /caretakers and /vets are not desks. */
+export function deskOf(pathname: string): Desk | null {
+  if (under(pathname, "/caretaker")) return "caretaker";
+  if (under(pathname, "/vet")) return "vet";
+  return null;
 }
 
-/** The URL picks the mode: every desk page shows the desk tabs, whoever is looking. DeskGate tells a non-caretaker the page is for caretakers. */
+export const isOnDesk = (pathname: string): boolean => deskOf(pathname) !== null;
+
+/** The URL picks the mode: every desk page shows that desk's tabs, whoever is looking. The page tells a visitor without the role who it is for. */
 export function tabsFor(pathname: string): readonly Tab[] {
-  return isOnDesk(pathname) ? DESK_TABS : TABS;
+  const desk = deskOf(pathname);
+  return desk === "caretaker" ? DESK_TABS : desk === "vet" ? VET_TABS : TABS;
 }
 
-/** The header link, in the same spot on every page: out to the neighbour view from the desk (for anyone, so nobody is stuck there), and back to the desk from anywhere else (for a caretaker only). */
+/** The header link, in the same spot on every page: out to the neighbour view from any desk (for anyone, so nobody is stuck there), and back to their own desk from anywhere else (for a caretaker or a vet). */
 export function deskSwitchFor(role: Role | null | undefined, pathname: string): PageLink | null {
   if (isOnDesk(pathname)) return { href: "/", label: "Neighbour view" };
-  return role === "caretaker" ? { href: "/caretaker", label: "Back to desk" } : null;
-}
-
-export type ConsoleLink = { href: string; label: string };
-
-/** The console a role opens from the account menu: the vet's only. A caretaker's desk link is in the header (deskSwitchFor). The pages and APIs check the role again. */
-export function consoleFor(role: Role | null | undefined): ConsoleLink | null {
-  if (role === "vet") return { href: "/vet", label: "Vet desk" };
-  return null;
+  return role === "caretaker" || role === "vet" ? { href: DESK_HOME[role], label: "Back to desk" } : null;
 }
 
 /** Whether a tab is the current page. Yard and an exact tab match only their own page; a grouped tab matches each of its pages and what sits under them. */
@@ -76,7 +83,6 @@ export function isActiveTab(tab: Tab, pathname: string): boolean {
 
 /** Where the demo role strip takes you. A desk role lands on its desk; any other role keeps the page unless it is a desk page, then the yard. */
 export function landingAfterSwitch(role: Role, pathname: string): string {
-  if (role === "caretaker") return "/caretaker";
-  if (role === "vet") return "/vet";
-  return isOnDesk(pathname) || under(pathname, "/vet") ? "/" : pathname;
+  if (role === "caretaker" || role === "vet") return DESK_HOME[role];
+  return isOnDesk(pathname) ? "/" : pathname;
 }

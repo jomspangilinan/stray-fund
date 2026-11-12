@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closePool, db } from "../src/server/db/client";
 import { agentActions, cats, donations } from "../src/server/db/schema";
-import { consoleFor, FUND_PAGES, HELPED_PAGES, isActiveTab, TABS } from "../src/lib/nav";
+import { FUND_PAGES, HELPED_PAGES, isActiveTab, TABS } from "../src/lib/nav";
 import { fundLine } from "../src/lib/fundLine";
 import { getHomeData } from "../src/server/public";
 import { truncateAll } from "./helpers/db";
@@ -76,13 +76,6 @@ describe("tabs and consoles", () => {
     expect(isActiveTab(TABS[1], "/")).toBe(false);
   });
 
-  it("hands an account-menu console link only to vets; a caretaker's way to the desk sits in the header", () => {
-    expect(consoleFor("caretaker")).toBeNull();
-    expect(consoleFor("vet")?.href).toBe("/vet");
-    expect(consoleFor("donor")).toBeNull();
-    expect(consoleFor("foster")).toBeNull();
-    expect(consoleFor(null)).toBeNull();
-  });
 });
 
 describe("renamed routes", () => {

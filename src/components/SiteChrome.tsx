@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { APP_NAME, isDemoMode, moneyIsTest } from "@/lib/config";
-import { consoleFor } from "@/lib/nav";
 import { eq } from "drizzle-orm";
 import { db } from "@/server/db/client";
 import { users } from "@/server/db/schema";
@@ -24,11 +23,11 @@ export function Brand() {
   );
 }
 
-/** Reads the session cookie, so render it inside Suspense. Only caretakers and vets are handed a console link. */
+/** Reads the session cookie, so render it inside Suspense. A caretaker's or vet's desk link is in the header, not the menu. */
 export async function HeaderSession() {
   const session = await getSession();
   const [me] = session
     ? await db.select({ show: users.showNameInThanks }).from(users).where(eq(users.id, session.userId))
     : [];
-  return <SignIn username={session?.username ?? null} console={consoleFor(session?.role)} showName={me?.show ?? true} />;
+  return <SignIn username={session?.username ?? null} showName={me?.show ?? true} />;
 }
