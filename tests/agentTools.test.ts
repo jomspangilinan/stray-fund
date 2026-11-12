@@ -258,6 +258,7 @@ describe("fund_next_cat", () => {
     await addPool(400000);
     await makeCat({ name: "Mimi", sex: "female" });
     const tom = await makeCat({ name: "Tom", flags: ["injured"] });
+    await db.insert(reports).values({ catId: tom.id, claim: "kitten", source: "neighbour", status: "confirmed", decidedAt: new Date(), reportedOn: "2026-11-01" });
 
     const ok = await call("fund_next_cat", {
       cat_id: tom.id,

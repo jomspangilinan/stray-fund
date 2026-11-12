@@ -16,7 +16,7 @@ import { manilaDate } from "../public";
 import { isPlainText } from "../plainText";
 import { fileReview } from "./review";
 import { HOLD_CLAIMS, heldCatIds } from "../reports";
-import { CLEARED_SHOWN_DAYS, checkedCats, fundingOrder, placeCat } from "./priority";
+import { CLEARED_SHOWN_DAYS, checkedCats, fundingOrder, placeCat, uncoveredPairs } from "./priority";
 import { effectiveSex } from "./rank";
 
 export const FUND_ACTION = "fund_cat";
@@ -150,6 +150,17 @@ async function fundCat(catId: string, why: string, now: Date): Promise<Outcome> 
         );
       }
 
+      // Passing over a cat needs a report a person checked on one cat of each pair, as set_cat_place requires. A donor's
+      // note can never steer money, so naming the cats is not enough.
+      if (passedOver.length > 0 && uncoveredPairs(ranked, catId, await checkedCats(tx)).length > 0) {
+        throw new Refused(
+          fail(
+            "OVERRIDE_NEEDS_CHECKED_REPORT",
+            "Cats ahead in the funding order are waiting, and no report a person checked covers passing them over. Only a report a caretaker confirmed or a vet cleared can do that. Fund the top cat, or call ask_for_check.",
+            { topPick: { catId: top.cat.id, name: top.cat.name, tier: top.tier } },
+          ),
+        );
+      }
       await transitionCat(tx, catId, "funded");
       await tx.insert(agentActions).values({
         action: FUND_ACTION,
@@ -470,7 +481,7 @@ export function createAgentTools(deps: AgentToolDeps = {}) {
     ),
     defineTool(
       "fund_next_cat",
-      "Set aside one care package from the pool for a waiting cat. Fund the top ranked cat unless you have a strong reason, in which case the reason must name every higher ranked cat you pass over. The amount is fixed by code.",
+      "Set aside one care package from the pool for a waiting cat. Fund the top ranked cat. To fund another cat first, a report a person checked (confirmed by a caretaker or cleared by a vet) must cover each cat you pass over, and the reason must name every higher ranked cat you pass over. The amount is fixed by code.",
       FundInput,
       (input) => fundCat(input.cat_id, input.reason, now()),
       { recordsAction: true },

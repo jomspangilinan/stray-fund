@@ -94,6 +94,19 @@ async function liveMoves(tx: Tx | typeof db): Promise<Move[]> {
     .map((r) => ({ catId: r.catId, beforeCatId: r.beforeCatId, reportId: r.reportId, passedCatIds: r.passedCatIds, updatedAt: r.updatedAt }));
 }
 
+/** A pair is covered when a person has checked a report on either cat of it. */
+const pairCovered = (checked: Set<string>, a: string, b: string) => checked.has(a) || checked.has(b);
+
+/**
+ * The pairs that funding `pickedId` out of `order` turns against that order: each cat ahead of it, paired with it
+ * (upper first), where neither cat has a checked report. Empty when the pick is first or every pair is covered.
+ */
+export function uncoveredPairs(order: RankedCat[], pickedId: string, checked: Set<string>): [string, string][] {
+  const at = order.findIndex((r) => r.cat.id === pickedId);
+  if (at < 0) return [];
+  return order.slice(0, at).flatMap((r): [string, string][] => (pairCovered(checked, r.cat.id, pickedId) ? [] : [[r.cat.id, pickedId]]));
+}
+
 type Attempt = { order: RankedCat[]; against: string[] } | { skipped: "absent" } | { skipped: "unchecked"; unchecked: [string, string][] };
 
 /**
@@ -121,7 +134,7 @@ function tryMove(order: RankedCat[], move: Move, checked: Set<string>, rankIndex
     // Only a pair that now disagrees with rank.ts needs a reason.
     if (rankIndex.get(upper)! <= rankIndex.get(lower)!) return;
     against.push(r.cat.id);
-    const covered = (checked.has(upper) || checked.has(lower)) && (passed === null || passed.has(r.cat.id));
+    const covered = pairCovered(checked, upper, lower) && (passed === null || passed.has(r.cat.id));
     if (!covered) unchecked.push([upper, lower]);
   });
   return unchecked.length > 0 ? { skipped: "unchecked", unchecked } : { order: next, against };
