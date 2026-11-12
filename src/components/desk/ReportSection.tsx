@@ -26,7 +26,7 @@ function Card({ r }: { r: ReportItem }) {
       <h3 className="text-xl font-extrabold">{title}</h3>
       <p className="small">{r.catName ? `About ${r.catName}` : "A cat we don't know yet"}</p>
       {r.sightingId && (
-        <SightingPhoto sightingId={r.sightingId} alt="The photo this report is about" className="max-h-48 w-full rounded-in object-contain" />
+        <SightingPhoto sightingId={r.sightingId} hidden={r.photoHidden} alt="The photo this report is about" className="max-h-48 w-full rounded-in object-contain" />
       )}
       {r.note && <p className="note mt-2 break-words">{r.note}</p>}
       {r.photoAgrees !== null && <p className="small mt-2 font-bold">{r.photoAgrees ? "The photo seems to show this" : "The photo doesn't clearly show this"}</p>}

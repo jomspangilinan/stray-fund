@@ -4,7 +4,7 @@ import { db } from "../db/client";
 import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reports, reviewRequests, sightings, users, wakeups } from "../db/schema";
 import { COLONY } from "@/lib/config";
 import { holdNotices, type HoldNotice } from "../reports";
-import { demoSafeText, hidePrivateInDemo, isSampleReceipt, isSampleSightingKey, maskEmail, placeForStaff } from "../demoPrivacy";
+import { demoSafeText, hidePrivateInDemo, isSampleReceipt, isSampleSightingKey, maskEmail, placeForStaff, sightingPhotoHidden } from "../demoPrivacy";
 import { bioIsSafe, nameIsSafe, safeBio } from "../placeText";
 import { needsHumanTick, regionsOf } from "../photoGate";
 import { canRuleNotPaid, lateSuccessChoices, newTryRefusal } from "../moneyGate";
@@ -99,6 +99,8 @@ export type ReportItem = {
   catId: string | null;
   catName: string | null;
   sightingId: string | null;
+  /** The desk shows "Hidden in the demo" instead of the photo, so there is nothing to rotate. */
+  photoHidden: boolean;
   /** A neighbour's free text, shown on the desk as written. */
   note: string | null;
   /** Null on a photo report, which has no photo to agree with itself. */
@@ -148,13 +150,33 @@ export type CaretakerQueue = {
   earTipConfirmations: ReceiptItem[];
   reviews: { id: string; subject: string; reason: string; date: string }[];
   failedWakeups: { id: string; kind: string; attempts: number; date: string }[];
-  heldPhotos: { sightingId: string; catId: string | null; catName: string | null; state: string; hasRegions: boolean; needsTick: boolean; date: string }[];
+  heldPhotos: {
+    sightingId: string;
+    catId: string | null;
+    catName: string | null;
+    state: string;
+    hasRegions: boolean;
+    needsTick: boolean;
+    /** The desk shows "Hidden in the demo" instead of the photo, so there is nothing to rotate. */
+    photoHidden: boolean;
+    date: string;
+  }[];
   /** Spotted cats whose ears the flags have not settled yet, with how many people said each. */
   earTipPending: { id: string; name: string; yes: number; no: number; exact: ExactSpot; area: string; exactHidden: boolean }[];
   /** Cats marked neutered with no vet record, no money and no payout, so a caretaker can put a wrong call back. */
   neuteredWithoutRecord: { id: string; name: string }[];
   /** Ideas for a cat's real name, oldest first. Who sent each is not kept here. */
-  nameSuggestions: { id: string; catId: string; catName: string; name: string; /** The newest sighting of the cat, for its photo. */ photoSightingId: string | null; date: string }[];
+  nameSuggestions: {
+    id: string;
+    catId: string;
+    catName: string;
+    name: string;
+    /** The newest sighting of the cat, for its photo. */
+    photoSightingId: string | null;
+    /** That photo shows as "Hidden in the demo", so there is nothing to rotate. */
+    photoHidden: boolean;
+    date: string;
+  }[];
   /** For the merge menu. */
   catChoices: { id: string; name: string; status: string; sex: string; sexUnconfirmed: boolean; flags: string[]; plainOnly: boolean }[];
 };
@@ -286,7 +308,19 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
   });
 
   const openReports = await db
-    .select({ r: reports, catName: cats.name, catArea: cats.areaName, catLat: cats.exactLat, catLng: cats.exactLng, catApprox: cats.locationApproximate, sLat: sightings.exactLat, sLng: sightings.exactLng })
+    .select({
+      r: reports,
+      catName: cats.name,
+      catArea: cats.areaName,
+      catLat: cats.exactLat,
+      catLng: cats.exactLng,
+      catApprox: cats.locationApproximate,
+      sLat: sightings.exactLat,
+      sLng: sightings.exactLng,
+      sKey: sightings.originalKey,
+      sPublicKey: sightings.publicKey,
+      sPublicReady: sightings.publicReady,
+    })
     .from(reports)
     .leftJoin(cats, eq(cats.id, reports.catId))
     .leftJoin(sightings, eq(sightings.id, reports.sightingId))
@@ -301,6 +335,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
       catId: x.r.catId,
       catName: x.catName,
       sightingId: x.r.sightingId,
+      photoHidden: x.sKey !== null && sightingPhotoHidden({ originalKey: x.sKey, publicKey: x.sPublicKey, publicReady: x.sPublicReady ?? false }),
       // Shown in full on the demo desk while the owner is the one testing it. Before the URL goes out, the staff
       // screens become read-only with static data; until then a note is the report's whole point.
       note: x.r.note,
@@ -406,6 +441,15 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     .innerJoin(cats, eq(cats.id, nameSuggestions.catId))
     .where(eq(nameSuggestions.status, "pending"))
     .orderBy(asc(nameSuggestions.createdAt), asc(nameSuggestions.id));
+  const suggestedPhotoIds = [...new Set(suggested.flatMap((n) => (n.photoSightingId ? [n.photoSightingId] : [])))];
+  const suggestedPhotos =
+    suggestedPhotoIds.length === 0
+      ? []
+      : await db
+          .select({ id: sightings.id, originalKey: sightings.originalKey, publicKey: sightings.publicKey, publicReady: sightings.publicReady })
+          .from(sightings)
+          .where(inArray(sightings.id, suggestedPhotoIds));
+  const hiddenPhotoIds = new Set(suggestedPhotos.filter((p) => sightingPhotoHidden(p)).map((p) => p.id));
 
   return {
     reports: reportItems,
@@ -425,11 +469,12 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
       state: s.state,
       hasRegions: regionsOf(s.assessment).length > 0,
       needsTick: needsHumanTick(s.assessment),
+      photoHidden: sightingPhotoHidden(s),
       date: manilaDate(s.createdAt),
     })),
     earTipPending: undecided.map((c) => ({ id: c.id, name: c.name, yes: countOf(c.id, "yes"), no: countOf(c.id, "no"), ...placeForStaff(exactOf(c.lat, c.lng, c.approx)), area: c.area })),
     neuteredWithoutRecord: noRecord,
-    nameSuggestions: suggested.map((n) => ({ id: n.id, catId: n.catId, catName: n.catName, name: n.name, photoSightingId: n.photoSightingId, date: manilaDate(n.createdAt) })),
+    nameSuggestions: suggested.map((n) => ({ id: n.id, catId: n.catId, catName: n.catName, name: n.name, photoSightingId: n.photoSightingId, photoHidden: n.photoSightingId !== null && hiddenPhotoIds.has(n.photoSightingId), date: manilaDate(n.createdAt) })),
     catChoices: allCats,
   };
 }

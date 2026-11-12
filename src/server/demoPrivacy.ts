@@ -44,6 +44,14 @@ export const isSampleReceipt = (sha256: string): boolean => /^0{63}[0-9a-f]$/.te
  */
 export const isSampleSightingKey = (key: string): boolean => /^originals\/0{8}-0000-4000-8000-0{10}[0-9a-f]{2}\.jpg$/.test(key);
 
+/**
+ * Whether a caretaker sees the "Hidden in the demo" picture instead of this sighting's photo: in the open demo, a
+ * visitor's original with no public copy to show instead. The images route and the desk both read it from here.
+ */
+export function sightingPhotoHidden(s: { originalKey: string; publicKey: string | null; publicReady: boolean }): boolean {
+  return hidePrivateInDemo() && !isSampleSightingKey(s.originalKey) && !(s.publicReady && s.publicKey);
+}
+
 /** The plain "Hidden in the demo" picture as a response. */
 export function hiddenInDemoResponse(): Response {
   return new Response(HIDDEN_IN_DEMO_SVG, {

@@ -55,8 +55,11 @@ export function RotateButtons({ sightingId, onTurned }: { sightingId: string; on
   );
 }
 
-/** A sighting's private photo with Rotate left and Rotate right, for a photo that came out sideways. */
-export function SightingPhoto({ sightingId, alt, className }: { sightingId: string; alt: string; className: string }) {
+/**
+ * A sighting's private photo with Rotate left and Rotate right, for a photo that came out sideways. `hidden` (from the
+ * server, sightingPhotoHidden) means the caretaker sees the "Hidden in the demo" picture: there is nothing to turn.
+ */
+export function SightingPhoto({ sightingId, alt, className, hidden = false }: { sightingId: string; alt: string; className: string; hidden?: boolean }) {
   const [version, setVersion] = useState(0);
   return (
     <div className="mt-3">
@@ -67,7 +70,7 @@ export function SightingPhoto({ sightingId, alt, className }: { sightingId: stri
         draggable={false}
         className={className}
       />
-      <RotateButtons sightingId={sightingId} onTurned={() => setVersion((v) => v + 1)} />
+      {!hidden && <RotateButtons sightingId={sightingId} onTurned={() => setVersion((v) => v + 1)} />}
     </div>
   );
 }

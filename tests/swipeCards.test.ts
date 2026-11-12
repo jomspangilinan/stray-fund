@@ -9,6 +9,7 @@ const report = (over: Partial<ReportItem> = {}): ReportItem => ({
   catId: "c1",
   catName: "Hapon",
   sightingId: "s1",
+  photoHidden: false,
   note: "Limping on the back left leg",
   photoAgrees: true,
   checkQuestion: null,
@@ -128,7 +129,7 @@ describe("swipe desk cards for cat details", () => {
       receipts: [],
       earTipConfirmations: [],
       earTipPending: [{ id: "c9", name: "Oliver", yes: 2, no: 0, exact: null, area: "Brgy. San Antonio", exactHidden: false }],
-      nameSuggestions: [{ id: "n1", catId: "c9", catName: "Oliver", name: "Mochi", photoSightingId: null, date: "2026-11-12" }],
+      nameSuggestions: [{ id: "n1", catId: "c9", catName: "Oliver", name: "Mochi", photoSightingId: null, photoHidden: false, date: "2026-11-12" }],
     });
     expect(cards.map((c) => c.kind)).toEqual(["approval", "ears", "name"]);
     const [, ears, name] = cards;
@@ -138,14 +139,14 @@ describe("swipe desk cards for cat details", () => {
     expect(name.right).toEqual({ label: "Use the name", action: "name_approve", body: { suggestionId: "n1" } });
     expect(name.left).toEqual({ label: "Dismiss", action: "name_dismiss", body: { suggestionId: "n1" } });
     expect([ears.sightingId, name.sightingId]).toEqual([null, null]);
-    const withPhoto = buildCards({ ...empty, nameSuggestions: [{ id: "n2", catId: "c9", catName: "Oliver", name: "Mochi", photoSightingId: "s7", date: "2026-11-12" }] });
+    const withPhoto = buildCards({ ...empty, nameSuggestions: [{ id: "n2", catId: "c9", catName: "Oliver", name: "Mochi", photoSightingId: "s7", photoHidden: false, date: "2026-11-12" }] });
     expect(withPhoto[0]).toMatchObject({ photo: "/api/caretaker/images/sighting/s7", sightingId: "s7" });
   });
 });
 
 describe("swipe desk cards for held-back photos", () => {
   it("publishes right, sending the no-private-content tick only when the photo needs it, and skips left without sending", () => {
-    const held = (needsTick: boolean) => ({ sightingId: "s9", catId: "c9", catName: "Toothless", state: "matched", hasRegions: true, needsTick, date: "2026-11-12" });
+    const held = (needsTick: boolean) => ({ sightingId: "s9", catId: "c9", catName: "Toothless", state: "matched", hasRegions: true, needsTick, photoHidden: false, date: "2026-11-12" });
     const [ticked] = buildCards({ ...empty, heldPhotos: [held(true)] });
     expect(ticked).toMatchObject({ kind: "photo", id: "s9", anchor: "desk-photo-s9", suggest: null, photo: "/api/caretaker/images/sighting/s9" });
     expect(ticked.right).toEqual({ label: "Nothing private, publish", action: "photo_publish", body: { sightingId: "s9", noSensitive: "on" } });
@@ -153,5 +154,19 @@ describe("swipe desk cards for held-back photos", () => {
     const [clear] = buildCards({ ...empty, heldPhotos: [held(false)] });
     expect(clear.right.body).toEqual({ sightingId: "s9" });
     expect(clear.suggest).toBe("right");
+  });
+});
+
+describe("swipe desk cards for a photo hidden in the demo", () => {
+  it("shows the picture but offers no Rotate: the card carries no sightingId", () => {
+    const [r] = buildCards({ ...empty, reports: [report({ photoHidden: true })] });
+    expect(r).toMatchObject({ photo: "/api/caretaker/images/sighting/s1", sightingId: null });
+    const [n] = buildCards({ ...empty, nameSuggestions: [{ id: "n3", catId: "c9", catName: "Oliver", name: "Mochi", photoSightingId: "s7", photoHidden: true, date: "2026-11-12" }] });
+    expect(n).toMatchObject({ photo: "/api/caretaker/images/sighting/s7", sightingId: null });
+    const [h] = buildCards({
+      ...empty,
+      heldPhotos: [{ sightingId: "s9", catId: "c9", catName: "Toothless", state: "matched", hasRegions: false, needsTick: false, photoHidden: true, date: "2026-11-12" }],
+    });
+    expect(h).toMatchObject({ photo: "/api/caretaker/images/sighting/s9", sightingId: null });
   });
 });

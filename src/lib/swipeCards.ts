@@ -26,7 +26,7 @@ export type SwipeCard = {
   left: SwipeMove | null;
   leftLabel: string;
   photo: string | null;
-  /** The sighting behind `photo`, when it is one: the card then offers Rotate left and Rotate right. */
+  /** The sighting behind `photo`, when it is one: the card then offers Rotate left and Rotate right. Null when the photo shows as "Hidden in the demo". */
   sightingId: string | null;
 };
 
@@ -64,7 +64,7 @@ function reportCard(r: ReportItem): SwipeCard | null {
     left: { label: "Dismiss", action: "report_dismiss", body: { reportId: r.id } },
     leftLabel: "Dismiss",
     photo: r.sightingId ? `/api/caretaker/images/sighting/${r.sightingId}` : null,
-    sightingId: r.sightingId,
+    sightingId: r.photoHidden ? null : r.sightingId,
   };
 }
 
@@ -167,7 +167,7 @@ function nameCard(n: CaretakerQueue["nameSuggestions"][number]): SwipeCard {
     left: { label: "Dismiss", action: "name_dismiss", body: { suggestionId: n.id } },
     leftLabel: "Dismiss",
     photo: n.photoSightingId ? `/api/caretaker/images/sighting/${n.photoSightingId}` : null,
-    sightingId: n.photoSightingId,
+    sightingId: n.photoHidden ? null : n.photoSightingId,
   };
 }
 
@@ -198,7 +198,7 @@ function photoCard(h: CaretakerQueue["heldPhotos"][number]): SwipeCard {
     left: { label: "Not now", action: "", body: {} },
     leftLabel: "Not now",
     photo: `/api/caretaker/images/sighting/${h.sightingId}`,
-    sightingId: h.sightingId,
+    sightingId: h.photoHidden ? null : h.sightingId,
   };
 }
 

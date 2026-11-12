@@ -53,7 +53,7 @@ export function NameSuggestions({ items }: { items: CaretakerQueue["nameSuggesti
       {items.map((n) => (
         <DeskItem key={n.id} anchor={`desk-name-${n.id}`}>
           {n.photoSightingId && (
-            <SightingPhoto sightingId={n.photoSightingId} alt={`${n.catName}`} className="max-h-56 w-full rounded-in object-contain" />
+            <SightingPhoto sightingId={n.photoSightingId} hidden={n.photoHidden} alt={`${n.catName}`} className="max-h-56 w-full rounded-in object-contain" />
           )}
           <p className="small soft mt-3">Now called {n.catName}</p>
           <h3 className="text-base font-extrabold break-words">{n.name}</h3>
@@ -76,7 +76,7 @@ export function HeldPhotos({ items }: { items: CaretakerQueue["heldPhotos"] }) {
         <DeskItem key={p.sightingId} label={p.catName ?? "No cat yet"} anchor={`desk-photo-${p.sightingId}`}>
           <h3 className="text-base font-extrabold">{p.catName ?? "No cat yet"}</h3>
           <p className="small">Taken {niceDate(p.date)}. Not shown publicly.</p>
-          <SightingPhoto sightingId={p.sightingId} alt="The original photo" className="max-h-72 w-full rounded-in object-contain" />
+          <SightingPhoto sightingId={p.sightingId} hidden={p.photoHidden} alt="The original photo" className="max-h-72 w-full rounded-in object-contain" />
           <ActionForm action="photo_publish" submitLabel="Publish (only the cat stays sharp)">
             <Hidden name="sightingId" value={p.sightingId} />
             {p.hasRegions && <p className="small">The AI also marked areas to blur; they stay blurred.</p>}
