@@ -40,7 +40,15 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <HeaderSession />
             </Suspense>
           </header>
-          <div className="mx-auto w-full max-w-2xl flex-1 px-4 pb-32 md:pb-16">{children}</div>
+          <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pb-32 md:pb-16">
+            <div className="flex-1">{children}</div>
+            {/* AGPL-3.0 section 13: everyone who uses the app over the network can get its source. */}
+            <footer className="small soft mt-12">
+              <a href="https://github.com/jomspangilinan/stray-fund" className="link">
+                Source (AGPL-3.0)
+              </a>
+            </footer>
+          </div>
         </div>
       </body>
     </html>

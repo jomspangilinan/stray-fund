@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { boxToView, clampBox } from "@/lib/catDetect";
 import { toCatBox, type CatBox } from "@/lib/keepsake";
@@ -32,7 +32,9 @@ type Phase =
   | { kind: "camera" }
   | { kind: "sending"; startedAt: number; responded: boolean; state?: Done["state"]; step: "cutting" | "sending" }
   | { kind: "done"; done: Done }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  /** Close was tapped: the camera is gone at once and the yard is on its way. */
+  | { kind: "closing" };
 
 const HEADINGS: Record<Done["state"], string> = {
   new_cat: "A new card",
@@ -53,8 +55,27 @@ function padded(b: { x: number; y: number; w: number; h: number }) {
 
 const AREA = COLONY.area_name.split(",")[0];
 
+/** Shown in place of the camera while the yard loads, so Close answers at once. Focus moves here from the gone button. */
+function Closing() {
+  const line = useRef<HTMLParagraphElement>(null);
+  useEffect(() => line.current?.focus(), []);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-surface px-4">
+      <p ref={line} tabIndex={-1} role="status" className="font-bold outline-none">
+        Back to the yard…
+      </p>
+    </div>
+  );
+}
+
 export function SpotFlow({ username, judge }: { username: string | null; judge: boolean }) {
-  const [phase, setPhase] = useState<Phase>({ kind: "camera" });
+  const router = useRouter();
+  const [phase, setPhaseNow] = useState<Phase>({ kind: "camera" });
+  // Once Close is tapped nothing brings the camera back, not even an upload that answers late.
+  const closed = useRef(false);
+  const setPhase: typeof setPhaseNow = (next) => {
+    if (!closed.current) setPhaseNow(next);
+  };
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const urlRef = useRef<string | null>(null);
@@ -88,7 +109,22 @@ export function SpotFlow({ username, judge }: { username: string | null; judge: 
   const stillDeveloping = publicNew && done?.developed === false;
   const poll = useDevelopPoll(done?.sightingId ?? null, stillDeveloping);
 
-  const fullscreen = phase.kind !== "done" && Boolean(username);
+  const fullscreen = phase.kind !== "done" && phase.kind !== "closing" && Boolean(username);
+
+  // Warm the yard once the camera opens, so Close lands quickly.
+  const prefetched = useRef(false);
+  useEffect(() => {
+    if (!fullscreen || prefetched.current) return;
+    prefetched.current = true;
+    router.prefetch("/");
+  }, [fullscreen, router]);
+
+  function close() {
+    closed.current = true;
+    // Unmounting LiveCamera stops the camera tracks in its cleanup.
+    setPhaseNow({ kind: "closing" });
+    router.push("/");
+  }
   const covering = Boolean(username) && (phase.kind !== "done" || phase.done.reveal !== null);
 
   useEffect(() => {
@@ -190,6 +226,8 @@ export function SpotFlow({ username, judge }: { username: string | null; judge: 
     }
   }
 
+  if (phase.kind === "closing") return <Closing />;
+
   if (phase.kind === "done") {
     const { done } = phase;
     if (done.reveal && (done.state === "new_cat" || done.state === "matched" || done.state === "needs_review")) {
@@ -256,9 +294,9 @@ export function SpotFlow({ username, judge }: { username: string | null; judge: 
           disabled={sending}
           topBar={
             <>
-              <Link href="/" className="cam-chip">
+              <button type="button" className="cam-chip" onClick={close}>
                 Close
-              </Link>
+              </button>
               <span className="cam-chip">{AREA}</span>
             </>
           }

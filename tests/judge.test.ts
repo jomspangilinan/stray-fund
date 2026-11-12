@@ -30,6 +30,7 @@ import {
   judgeFromCookie,
 } from "../src/server/judge";
 import { GET } from "../src/app/judge/route";
+import { judgeGateWarning } from "../src/server/judgeGate";
 import { eq } from "drizzle-orm";
 
 // A throwaway value for tests only. The real code lives in the environment and never in the repo.
@@ -69,6 +70,18 @@ describe("judge cookie", () => {
   it("treats anything but exactly \"true\" as gate off", () => {
     for (const JUDGE_GATE of ["TRUE", "1", "True", " true", "yes"]) {
       expect(judgeFromCookie(undefined, { JUDGE_GATE, JUDGE_PASSCODE: CODE } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    }
+  });
+
+  it("warns at boot about a JUDGE_GATE that is set but not exactly true, without ever printing the passcode", () => {
+    for (const JUDGE_GATE of [undefined, "", "true"]) expect(judgeGateWarning({ JUDGE_GATE, JUDGE_PASSCODE: CODE })).toBeNull();
+    expect(judgeGateWarning({ JUDGE_GATE: "True", JUDGE_PASSCODE: CODE })).toBe(
+      'JUDGE_GATE is set to "True"; only the exact value true turns the judge gate on.',
+    );
+    for (const JUDGE_GATE of [CODE, `${CODE} `]) {
+      const line = judgeGateWarning({ JUDGE_GATE, JUDGE_PASSCODE: CODE })!;
+      expect(line).toContain("only the exact value true");
+      expect(line).not.toContain(CODE);
     }
   });
 
