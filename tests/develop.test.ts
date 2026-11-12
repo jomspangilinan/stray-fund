@@ -373,6 +373,25 @@ describe("developNext", () => {
   });
 });
 
+describe("developNext and a cat with other photos", () => {
+  it("a waiting photo moved into a known cat publishes but leaves that cat's look-alike alone", async () => {
+    finder(() => ({ box: CAT_BOX, mask: null }));
+    const out = await queued(await photo(CAT_BOX));
+    const known = { pattern: "tabby", base: "grey", accent: "black" };
+    const [real] = await db.insert(cats).values({ name: `Known${++seq}`, areaName: "x", fuzzedLat: 10.2, fuzzedLng: 120.6, avatar: known }).returning();
+    const { key } = await storeOriginal(await photo(CAT_BOX));
+    await db.insert(sightings).values({ catId: real.id, originalKey: key, state: "new_cat" });
+    // What cat_merge does with the duplicate's photo.
+    await db.update(sightings).set({ catId: real.id, state: "matched" }).where(eq(sightings.id, out.sightingId));
+    await db.delete(cats).where(eq(cats.id, out.catId!));
+
+    expect(await developNext()).toBe("developed");
+
+    expect((await sightingOf(out.sightingId)).publicReady).toBe(true);
+    expect((await catOf(real.id)).avatar).toEqual(known);
+  });
+});
+
 describe("recutNext: AI-path photos published with the circle", () => {
   const REGION: Box = { x: 0.3, y: 0.3, w: 0.1, h: 0.1 };
   /** An AI-path sighting the request published with the circle on the camera's box, as applyAssessment does with no mask. */
@@ -434,6 +453,24 @@ describe("recutNext: AI-path photos published with the circle", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("a hold during the re-cut wins: the photo stays held and the re-cut copy is deleted", async () => {
+    const mask = await maskOf(CAT_BOX);
+    const { id } = await circlePublished();
+    finder(async () => {
+      // What photo_hold does: the photo leaves the public pages.
+      await db.update(sightings).set({ publicReady: false, publicKey: null, needsRecut: false }).where(eq(sightings.id, id));
+      return { box: CAT_BOX, mask };
+    });
+    const put = vi.spyOn(getStorage(), "putPublic");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(await recutNext()).toBe("recut");
+
+    expect(await sightingOf(id)).toMatchObject({ publicReady: false, publicKey: null, needsRecut: false });
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(() => memoryStorage.readPublic(put.mock.calls[0][0])).toThrow();
   });
 
   it("a rotation during the re-cut wins: the re-cut copy is deleted and the sighting keeps the copy it has", async () => {

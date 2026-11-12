@@ -66,8 +66,11 @@ async function claim(): Promise<Claimed | null> {
   });
 }
 
-/** What the model found. No cat when it fails or runs past DEVELOP_TIMEOUT_MS: the photo still publishes. */
-async function look(jpeg: Buffer): Promise<KeepArea> {
+/**
+ * What the model found. No cat when it fails or runs past DEVELOP_TIMEOUT_MS. `fallback` says, for the log, what
+ * happens then: a develop publishes with the middle circle, a re-cut keeps the copy it has.
+ */
+async function look(jpeg: Buffer, fallback = "publishing with the middle circle"): Promise<KeepArea> {
   const stop = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<null>((resolve) => {
@@ -78,11 +81,11 @@ async function look(jpeg: Buffer): Promise<KeepArea> {
   });
   try {
     const found: Found | null = await Promise.race([findCat(jpeg, stop.signal), timedOut]);
-    if (!found) console.error("[develop] the cat finder ran out of time; publishing with the middle circle");
+    if (!found) console.error(`[develop] the cat finder ran out of time; ${fallback}`);
     return found ?? NO_CAT;
   } catch (e) {
     // Model and runtime errors carry no storage keys, so the message is safe to log.
-    console.error(`[develop] the cat finder failed; publishing with the middle circle: ${e instanceof Error ? e.message : typeof e}`);
+    console.error(`[develop] the cat finder failed; ${fallback}: ${e instanceof Error ? e.message : typeof e}`);
     return NO_CAT;
   } finally {
     clearTimeout(timer);
@@ -132,7 +135,13 @@ export async function developNext(): Promise<"developed" | "idle"> {
           .where(and(eq(sightings.id, s.id), sql`${sightings.developedAt} is null`));
         return false;
       }
-      if (s.catId) await tx.update(cats).set({ avatar }).where(eq(cats.id, s.catId));
+      // Only the photo that started the cat paints its look-alike: one merged into a known cat leaves that cat's alone.
+      if (s.catId) {
+        await tx
+          .update(cats)
+          .set({ avatar })
+          .where(and(eq(cats.id, s.catId), sql`not exists (select 1 from sightings o where o.cat_id = ${s.catId} and o.id <> ${s.id})`));
+      }
       return true;
     });
     // Lost to the phone tier, a caretaker's hold, a caretaker's rotation of the original, or a removed cat: this copy belongs to no sighting, so it is deleted.
@@ -193,7 +202,7 @@ export async function recutNext(): Promise<"recut" | "idle"> {
   let key: string | null = null;
   try {
     const original = await getStorage().getPrivate(s.originalKey);
-    const found = await look(original);
+    const found = await look(original, "the circle copy stays");
     if (!found.mask || !found.box || !(await maskUsable(found.mask, found.box))) return "recut";
     key = (await publishCatOnly(s.originalKey, found, regionsOf(s.assessment))).key;
     const swapped = await db
