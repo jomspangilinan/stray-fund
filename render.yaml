@@ -122,3 +122,6 @@ databases:
     # Photos live in S3, so the database only holds rows. 1 GB is the smallest size.
     diskSizeGB: 1
     databaseName: strayfund
+    # No connections from outside Render. The web service and worker reach it over Render's private network.
+    # To connect from a laptop, add your own IP for a moment in the dashboard (Networking), then remove it.
+    ipAllowList: []
