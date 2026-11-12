@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 import sharp from "sharp";
 import { catAvatar } from "@/lib/avatar";
@@ -22,7 +24,8 @@ import { DEMO_CLINIC_NAME, ensureDemoPersonas } from "./demoPersonas";
 import { assertE2eFakesSafe, paypalIsLive } from "./e2e/guard";
 import { SAMPLE_REASON } from "./demoPrivacy";
 import { fuzzLocation } from "./location";
-import { getStorage } from "./storage";
+import { storeOriginal } from "./photos";
+import { getStorage, newPublicKey } from "./storage";
 
 /*
  * Sample data for a demo. It resets the database it is pointed at, so it refuses to run unless SEED_CONFIRM=yes,
@@ -30,9 +33,12 @@ import { getStorage } from "./storage";
  *
  * Everything here is invented. Coordinates are near the colony's placeholder centre. Money rows are sample data and
  * say so: every PayPal id starts with SAMPLE-, and every sentence the treasurer "wrote" starts with "Sample data."
- * No id here was ever issued by PayPal. No cat has a public photo, because there is no licensed photo to use, so every
- * card shows its look-alike. The three reports below each come with a drawn stand-in for the photo a neighbour took, shown
- * on the caretaker's desk only. The totals add up: the Proof page balances on the seeded rows alone.
+ * No id here was ever issued by PayPal. Seven cats are real strays, photographed by the project's owner, with their photos
+ * in scripts/seed-photos (cropped to the cat, metadata stripped). Each is only "spotted", the one thing true of all of them,
+ * except Kislap, who plays the waiting girl in the sample story. The other cats are invented and show a drawn look-alike,
+ * because their histories (bookings, surgery, adoption) are invented too and a real cat's face would make them claims.
+ * The one report below comes with a drawn stand-in for the photo a neighbour took, shown on the caretaker's desk only.
+ * The totals add up: the Proof page balances on the seeded rows alone.
  */
 
 export const SAMPLE_PREFIX = "SAMPLE-";
@@ -111,20 +117,27 @@ type SeedCat = {
   earTipped?: boolean | null;
   neuteredUnconfirmed?: boolean;
   queued?: boolean;
+  /** A real cat's photo in scripts/seed-photos, published as its card photo. */
+  photo?: string;
 };
 
 const SEED_CATS: SeedCat[] = [
-  { key: "tala", name: "Tala", sex: "unknown", status: "spotted", pattern: "tabby", colors: ["grey"], markings: "Grey tabby with a ringed tail.", bio: "Shy at first, then a loud purrer by the bakery wall.", ageDays: 1, at: [2, -3] },
-  { key: "mingming", name: "Mingming", sex: "female", status: "queued", pattern: "calico", colors: ["white", "ginger", "black"], markings: "Calico with a ginger patch over one eye.", bio: "Waits at the same step every morning.", ageDays: 12, at: [-4, 1], earTipped: false, queued: true },
+  // Real: the kitten who sleeps in the owner's garage. Her waiting days are part of the sample story.
+  { key: "mingming", name: "Kislap", sex: "female", status: "queued", pattern: "tabby", colors: ["grey", "white"], markings: "Grey tabby kitten with a white chest.", bio: "Sleeps in a garage and is fed there every day.", ageDays: 12, at: [-4, 1], earTipped: false, queued: true, photo: "kislap.jpg" },
   { key: "kiko", name: "Kiko", sex: "male", status: "funded", pattern: "bicolor", colors: ["black", "white"], markings: "Black with a white bib and socks.", bio: "Easy to pick out by his white socks.", ageDays: 20, at: [5, 4], earTipped: false },
   { key: "bagwis", name: "Bagwis", sex: "female", status: "booked", pattern: "tabby", colors: ["ginger"], markings: "Ginger tabby, thin stripes.", bio: "Climbs the fence to greet the feeder.", flags: ["pregnant"], ageDays: 26, at: [-2, -6], earTipped: false },
   { key: "luna", name: "Luna", sex: "female", status: "in_care", pattern: "tuxedo", colors: ["black", "white"], markings: "Tuxedo with a white blaze.", bio: "Calm, and always the last to leave the food.", ageDays: 34, at: [7, -1], earTipped: false },
   { key: "puso", name: "Puso", sex: "male", status: "neutered", pattern: "solid", colors: ["grey"], markings: "Solid grey with a flat-cut left ear.", bio: "Neighbours say his ear is already tipped.", ageDays: 15, at: [-6, 5], earTipped: true, neuteredUnconfirmed: true },
   { key: "tisay", name: "Tisay", sex: "female", status: "adoptable", pattern: "colorpoint", colors: ["cream", "brown"], markings: "Cream coat with brown points.", bio: "Already neutered when found. A caretaker confirmed her tipped ear.", ageDays: 48, at: [3, 7], earTipped: true },
   { key: "hapon", name: "Hapon", sex: "male", status: "queued", pattern: "tabby", colors: ["brown"], markings: "Brown tabby with a short tail.", bio: "Keeps to the wall and watches the road.", ageDays: 9, at: [4, -5], earTipped: false, queued: true },
-  { key: "bituin", name: "Bituin", sex: "male", status: "queued", pattern: "bicolor", colors: ["black", "white"], markings: "Black with a white star on the chest.", bio: "Calm with people, wary of other cats.", flags: ["injured"], ageDays: 15, at: [-5, -4], earTipped: false, queued: true },
-  { key: "dilaw", name: "Dilaw", sex: "male", status: "queued", pattern: "solid", colors: ["ginger"], markings: "Plain ginger with a pale chin.", bio: "Follows the feeder around the corner.", ageDays: 6, at: [6, 6], earTipped: false, queued: true },
   { key: "biscoy", name: "Biscoy", sex: "male", status: "adopted", pattern: "solid", colors: ["ginger"], markings: "Plain ginger coat.", bio: "Neutered through the fund, then taken in by a family.", ageDays: 70, at: [-8, -2], earTipped: true },
+  // Real strays, only spotted. Sex unknown: nobody has checked.
+  { key: "milo", name: "Milo", sex: "unknown", status: "spotted", pattern: "bicolor", colors: ["ginger", "white"], markings: "Mostly ginger, with a white chest and legs.", bio: "Sleeps stretched out on warm concrete.", ageDays: 3, at: [1, -7], photo: "milo.jpg" },
+  { key: "leo", name: "Leo", sex: "unknown", status: "spotted", pattern: "tabby", colors: ["ginger"], markings: "Ginger tabby kitten with white paws.", bio: "Crouches on a step and watches people walk by.", ageDays: 2, at: [-3, 3], photo: "leo.jpg" },
+  { key: "oliver", name: "Oliver", sex: "unknown", status: "spotted", pattern: "tabby", colors: ["ginger"], markings: "Pale ginger tabby kitten.", bio: "Climbs onto anything warm, laptops included.", ageDays: 5, at: [2, 5], photo: "oliver.jpg" },
+  { key: "lily", name: "Lily", sex: "unknown", status: "spotted", pattern: "tabby", colors: ["grey", "white"], markings: "Grey tabby with a white chest and legs.", bio: "Sits beside Oreo and watches.", ageDays: 4, at: [-1, 6], photo: "lily.jpg" },
+  { key: "oreo", name: "Oreo", sex: "unknown", status: "spotted", pattern: "tuxedo", colors: ["black", "white"], markings: "Black kitten with white paws and a white chin.", bio: "Stays close to Lily.", ageDays: 4, at: [-2, 7], photo: "oreo.jpg" },
+  { key: "teddy", name: "Teddy", sex: "unknown", status: "spotted", pattern: "bicolor", colors: ["black", "white"], markings: "Mostly black kitten with a white face, chest and paws.", bio: "Looks straight up at whoever stops.", ageDays: 2, at: [5, -2], photo: "teddy.jpg" },
 ];
 
 /**
@@ -195,6 +208,25 @@ export async function seed(env: Env = process.env): Promise<{ cats: number; dono
         })
         .returning();
       cat[c.key] = row;
+      if (c.photo) {
+        // The real photo, private as the original and public as the card's photo, from a first sighting.
+        const jpeg = await readFile(path.join(process.cwd(), "scripts", "seed-photos", c.photo));
+        const { key: originalKey } = await storeOriginal(jpeg);
+        const publicKey = newPublicKey();
+        await getStorage().putPublic(publicKey, jpeg, "image/jpeg");
+        await tx.insert(sightings).values({
+          catId: row.id,
+          originalKey,
+          publicKey,
+          publicReady: true,
+          takenAt: day(c.ageDays),
+          caughtByUserId: neighbour.id,
+          exactLat: exact.lat,
+          exactLng: exact.lng,
+          state: "new_cat",
+          createdAt: day(c.ageDays),
+        });
+      }
     }
 
     // Neighbours' answers behind the two ear-tip stories. Private, like all of them.
@@ -240,10 +272,6 @@ export async function seed(env: Env = process.env): Promise<{ cats: number; dono
     };
     // Open: a neighbour says Hapon is hurt, so he is held and tops the desk.
     await reportAbout(1, "hapon", neighbour, "injured", "Limping on the back left leg since this morning and will not put weight on it.", 0.1, {});
-    // Confirmed by a caretaker, so Bituin waits on a vet to clear him.
-    await reportAbout(2, "bituin", donor.demo_kuya_ben, "injured", "A cut on the front paw. He walks on three legs.", 3, { status: "confirmed", decidedBy: caretaker.id, decidedAt: day(2) });
-    // Dismissed: Dilaw was checked and is fine, so he is back among the waiting cats.
-    await reportAbout(3, "dilaw", donor.demo_ate_lorna, "sick", "Sneezing a lot and one eye looks watery.", 4, { status: "dismissed", decidedBy: caretaker.id, decidedAt: day(3) });
 
     // ---------------- sample donations. Net = gross - fee.
     const gifts = [
