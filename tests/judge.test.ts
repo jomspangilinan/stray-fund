@@ -34,7 +34,7 @@ import { eq } from "drizzle-orm";
 
 // A throwaway value for tests only. The real code lives in the environment and never in the repo.
 const CODE = "test-judge-code-0000";
-const prod = { NODE_ENV: "production", JUDGE_GATE: "true", JUDGE_PASSCODE: CODE } as NodeJS.ProcessEnv;
+const prod = { NODE_ENV: "production", JUDGE_GATE: "true", JUDGE_PASSCODE: CODE } as unknown as NodeJS.ProcessEnv;
 
 const visit = (query: string) => GET(new Request(`http://localhost/judge${query}`));
 
@@ -58,7 +58,7 @@ describe("judge cookie", () => {
   });
 
   it("with the gate on, passes only a cookie made with the code, and nobody when no code is set", () => {
-    const on = { JUDGE_GATE: "true", JUDGE_PASSCODE: CODE } as NodeJS.ProcessEnv;
+    const on = { JUDGE_GATE: "true", JUDGE_PASSCODE: CODE } as unknown as NodeJS.ProcessEnv;
     expect(judgeFromCookie(judgeCookieValue(CODE), on)).toBe(true);
     expect(judgeFromCookie(undefined, on)).toBe(false);
     expect(judgeFromCookie(judgeCookieValue("other-code"), on)).toBe(false);
