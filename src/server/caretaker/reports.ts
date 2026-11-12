@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { withColonyLock, type Tx } from "../db/client";
 import { reports } from "../db/schema";
-import { confirmReport, dismissReport } from "../reports";
+import { confirmReport, dismissReport, reopenReport } from "../reports";
 import { reqUuid, requireCaretaker, Refusal, type Handler, type Outcome } from "./shared";
 
 const DECIDED = "Someone has already decided this report.";
@@ -37,3 +37,16 @@ export const reportDismiss: Handler = (caretakerId, body) =>
     (tx, id) => dismissReport(tx, id, caretakerId),
     () => "Dismissed.",
   );
+
+/** Undo for a caretaker who got a report wrong: it goes back on the desk, open, and the cat is held again. */
+export const reportReopen: Handler = async (caretakerId, body) => {
+  const reportId = reqUuid(body, "reportId", "The report");
+  return withColonyLock(async (tx): Promise<Outcome> => {
+    await requireCaretaker(tx, caretakerId);
+    const out = await reopenReport(tx, reportId, caretakerId);
+    if (out.ok) return "Reopened. It's back on To check, and the cat is held until it's decided.";
+    if (out.reason === "not_found") throw new Refusal(404, "There is no such report.");
+    if (out.reason === "already_open") return { tone: "warn", message: "This report is already open." };
+    throw new Refusal(409, "A vet has already cleared this cat, so this report stays closed.");
+  });
+};

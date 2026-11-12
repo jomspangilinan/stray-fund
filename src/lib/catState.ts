@@ -17,6 +17,8 @@ export type CatStatus = (typeof CAT_STATUSES)[number];
  * set aside or paid for the cat (see markAlreadyNeutered in server/caretaker/cats.ts).
  * A caretaker can take a wrong already-neutered call back with neutered -> queued, under the
  * same no-money rule (see catUndoNeutered in server/caretaker/cats.ts).
+ * After surgery a caretaker can also take a home step back (adopted -> adoptable -> neutered).
+ * No money hangs off those stages, so a wrong tap there is safe to undo.
  */
 const ALLOWED: Record<CatStatus, readonly CatStatus[]> = {
   spotted: ["queued", "neutered"],
@@ -25,8 +27,8 @@ const ALLOWED: Record<CatStatus, readonly CatStatus[]> = {
   booked: ["in_care"],
   in_care: ["neutered"],
   neutered: ["adoptable", "queued"],
-  adoptable: ["adopted"],
-  adopted: [],
+  adoptable: ["adopted", "neutered"],
+  adopted: ["adoptable"],
 };
 
 export function canTransition(from: CatStatus, to: CatStatus): boolean {

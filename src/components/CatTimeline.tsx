@@ -13,7 +13,8 @@ const MARK = {
   paypal: { text: "₱", cls: "bg-pop text-ink" },
 } as const;
 
-export function CatTimeline({ entries }: { entries: TimelineEntry[] }) {
+/** `onDesk` keeps a caretaker on the desk: a money step says it is on the Ledger without linking out to the public page. */
+export function CatTimeline({ entries, onDesk = false }: { entries: TimelineEntry[]; onDesk?: boolean }) {
   return (
     <ol className="grid gap-0">
       {entries.map((e, i) => {
@@ -50,11 +51,14 @@ export function CatTimeline({ entries }: { entries: TimelineEntry[] }) {
                 ) : (
                   <p className="small soft">{e.detail}</p>
                 ))}
-              {e.ledger && (
-                <Link href="/ledger" className="link small -mt-1">
-                  See it on the Ledger
-                </Link>
-              )}
+              {e.ledger &&
+                (onDesk ? (
+                  <p className="small soft">On the public Ledger</p>
+                ) : (
+                  <Link href="/ledger" className="link small -mt-1">
+                    See it on the Ledger
+                  </Link>
+                ))}
             </div>
           </li>
         );

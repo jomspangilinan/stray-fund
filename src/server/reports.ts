@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Tx } from "./db/client";
 import { agentActions, cats, reports, sightings, wakeups } from "./db/schema";
-import { REPORT_CLEARED, REPORT_CONFIRMED, REPORT_DISMISSED, REPORT_FILED } from "./privateActions";
+import { REPORT_CLEARED, REPORT_CONFIRMED, REPORT_DISMISSED, REPORT_FILED, REPORT_REOPENED } from "./privateActions";
 import { enqueueWakeup } from "./wakeups";
 
 /*
@@ -276,6 +276,22 @@ export const confirmReport = (tx: Tx, id: string, caretakerId: string) => decide
 
 /** Dismisses an open report and ends its hold. The flags are untouched. */
 export const dismissReport = (tx: Tx, id: string, caretakerId: string) => decide(tx, id, caretakerId, "dismissed");
+
+/**
+ * Takes a caretaker's confirm or dismiss back, for when they got it wrong. The report is open again, so it is back on
+ * the desk and the cat is held until someone decides it. A vet's clearance is final, so a cleared report stays closed.
+ * The flags are untouched, as with a dismiss.
+ */
+export async function reopenReport(tx: Tx, id: string, by: string): Promise<{ ok: true } | { ok: false; reason: "not_found" | "already_open" | "cleared" }> {
+  const [r] = await tx.select().from(reports).where(eq(reports.id, id)).for("update");
+  if (!r) return { ok: false, reason: "not_found" };
+  if (r.status === "open") return { ok: false, reason: "already_open" };
+  if (r.status !== "confirmed" && r.status !== "dismissed") return { ok: false, reason: "cleared" };
+  await tx.update(reports).set({ status: "open", decidedBy: null, decidedAt: null }).where(eq(reports.id, id));
+  await audit(tx, REPORT_REOPENED, "A caretaker reopened a report.", { reportId: id, catId: r.catId, claim: r.claim, from: r.status }, by);
+  if (r.catId) await enqueueWakeup(tx, REPORT_WAKEUP, { catId: r.catId });
+  return { ok: true };
+}
 
 /** A registered vet clears a cat for surgery: its confirmed hold reports end. The flags stay. Returns how many ended. */
 export async function clearCatForSurgery(tx: Tx, catId: string, vetId: string): Promise<number> {

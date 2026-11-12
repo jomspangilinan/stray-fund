@@ -4,6 +4,7 @@ import { Gabarito } from "next/font/google";
 import "./globals.css";
 import { APP_NAME } from "@/lib/config";
 import { Brand, DemoBar, HeaderSession } from "@/components/SiteChrome";
+import { DeskSwitchSlot } from "@/components/DeskChrome";
 import { TabBar } from "@/components/TabBar";
 
 const gabarito = Gabarito({
@@ -36,9 +37,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </Suspense>
           <header className="mx-auto flex w-full max-w-2xl items-center justify-between gap-4 px-4 pb-2 pt-4">
             <Brand />
-            <Suspense fallback={<div className="skeleton h-11 w-11" aria-hidden="true" />}>
-              <HeaderSession />
-            </Suspense>
+            <div className="flex items-center gap-2">
+              <Suspense fallback={null}>
+                <DeskSwitchSlot />
+              </Suspense>
+              <Suspense fallback={<div className="skeleton h-11 w-11" aria-hidden="true" />}>
+                <HeaderSession />
+              </Suspense>
+            </div>
           </header>
           <div className="mx-auto w-full max-w-2xl flex-1 px-4 pb-32 md:pb-16">{children}</div>
         </div>

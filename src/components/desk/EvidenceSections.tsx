@@ -34,7 +34,7 @@ export function Receipts({ items }: { items: ReceiptItem[] }) {
       {items.map((r) => {
         const prefill = r.parsed?.total_centavos != null && r.parsed.total_centavos > 0 ? String(Math.round(r.parsed.total_centavos / 100)) : "";
         return (
-          <DeskItem key={r.id} label={r.catName}>
+          <DeskItem key={r.id} label={r.catName} anchor={`desk-receipt-${r.id}`}>
             <h3 className="text-base font-extrabold">{r.catName}</h3>
             <p className="small">
               Vet {r.vetName}, clinic on account: {r.clinicName ?? "none"}. Sent {niceDate(r.date)}.
@@ -86,7 +86,7 @@ export function EarTipPhotos({ items }: { items: ReceiptItem[] }) {
   return (
     <Section id="eartip-photos" count={items.length}>
       {items.map((r) => (
-        <DeskItem key={r.id} label={r.catName}>
+        <DeskItem key={r.id} label={r.catName} anchor={`desk-eartip-${r.id}`}>
           <h3 className="text-base font-extrabold">{r.catName}</h3>
           <p className="small">
             Vet {r.vetName}. Sent {niceDate(r.date)}. The receipt passed every check. Package {formatPeso(r.packagePrice)}, deposit paid {formatPeso(r.depositPaid)}.

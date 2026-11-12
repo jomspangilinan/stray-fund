@@ -4,7 +4,6 @@ import { Suspense } from "react";
 import { ListSkeleton } from "@/components/Loading";
 import { PageHead } from "@/components/PageHead";
 import { DeskGate } from "@/components/desk/DeskGate";
-import { DeskNav } from "@/components/desk/DeskNav";
 import { Rules } from "@/components/desk/RulesView";
 import { getRulesView } from "@/server/caretaker/queue";
 
@@ -19,7 +18,6 @@ export default function CaretakerRulesPage() {
   return (
     <main>
       <PageHead title="Rules" />
-      <DeskNav current="/caretaker/rules" />
       <Suspense fallback={<ListSkeleton rows={3} label="Loading" />}>
         <DeskGate>
           <RulesBody />

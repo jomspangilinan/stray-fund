@@ -9,7 +9,7 @@ export function EarTips({ items }: { items: CaretakerQueue["earTipPending"] }) {
   return (
     <Section id="ears" count={items.length}>
       {items.map((c) => (
-        <DeskItem key={c.id} label={c.name}>
+        <DeskItem key={c.id} label={c.name} anchor={`desk-ears-${c.id}`}>
           <h3 className="text-base font-extrabold">{c.name}</h3>
           <p className="small">
             Neighbours so far: {c.yes} said ear-tipped, {c.no} said not.
@@ -50,7 +50,7 @@ export function NameSuggestions({ items }: { items: CaretakerQueue["nameSuggesti
   return (
     <Section id="names" count={items.length}>
       {items.map((n) => (
-        <DeskItem key={n.id}>
+        <DeskItem key={n.id} anchor={`desk-name-${n.id}`}>
           {n.photoSightingId && (
             // eslint-disable-next-line @next/next/no-img-element -- a private photo behind a signed-in route
             <img src={`/api/caretaker/images/sighting/${n.photoSightingId}`} alt={`${n.catName}`} className="max-h-56 w-full rounded-in object-contain" />

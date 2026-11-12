@@ -285,6 +285,11 @@ export const catSetEarTip: Handler = async (caretakerId, body) => {
       await endReviews();
       return "Already marked as not ear-tipped.";
     }
+    if (status === "neutered" || status === "adoptable" || status === "adopted") {
+      // A vet may neuter without tipping the ear. The record changes; the cat stays neutered.
+      await tx.update(cats).set({ earTipped: false }).where(eq(cats.id, catId));
+      return note("Marked as not ear-tipped. The cat stays neutered.", "ear_tip_only");
+    }
     if (status !== "spotted") throw new Refusal(409, IN_FLOW);
     await tx.update(cats).set({ earTipped: false, queuedAt: new Date() }).where(eq(cats.id, catId));
     await transitionCat(tx, catId, "queued");
@@ -326,7 +331,7 @@ export const catUndoNeutered: Handler = async (caretakerId, body) => {
   });
 };
 
-function lifecycle(to: "adoptable" | "adopted", from: CatStatus, refusal: string, done: string): Handler {
+function lifecycle(to: "adoptable" | "adopted" | "neutered", from: CatStatus, refusal: string, done: string): Handler {
   return async (caretakerId, body) => {
     const catId = reqUuid(body, "catId", "The cat");
     return withColonyLock(async (tx) => {
@@ -354,6 +359,9 @@ function lifecycle(to: "adoptable" | "adopted", from: CatStatus, refusal: string
 
 export const catAdoptable = lifecycle("adoptable", "neutered", "Only a neutered cat can be marked ready for a home.", "Marked ready for a home.");
 export const catAdopted = lifecycle("adopted", "adoptable", "Only a cat that is ready for a home can be marked adopted.", "Marked adopted.");
+/** Undo for a wrong home step. No money hangs off these stages. */
+export const catNotAdopted = lifecycle("adoptable", "adopted", "Only an adopted cat can go back to ready for a home.", "Back to ready for a home.");
+export const catNotAdoptable = lifecycle("neutered", "adoptable", "Only a cat that is ready for a home can go back to neutered.", "Back to neutered, not ready for a home yet.");
 
 // ---------- Photos ----------
 

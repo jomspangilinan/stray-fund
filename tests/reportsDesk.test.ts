@@ -379,3 +379,33 @@ describe("the vet's line on the yard", () => {
     expect(both).toContain("1 to send");
   });
 });
+
+describe("reopening a report a caretaker got wrong", () => {
+  it("puts a confirmed or dismissed report back on the desk, holds the cat again and wakes the treasurer; a vet's clearance is final", async () => {
+    const care = await makeUser("caretaker");
+    const cat = await makeCat();
+    const confirmed = await makeReport({ catId: cat.id });
+    expect((await runAction("report_confirm", care.id, { reportId: confirmed.id })).ok).toBe(true);
+    await db.delete(wakeups);
+
+    const reopened = await runAction("report_reopen", care.id, { reportId: confirmed.id });
+    expect(reopened).toMatchObject({ ok: true, tone: "ok" });
+    expect(await reportRow(confirmed.id)).toMatchObject({ status: "open", decidedBy: null, decidedAt: null });
+    expect((await getCaretakerQueue()).reports.map((r) => r.id)).toContain(confirmed.id);
+    expect([...(await heldCatIds(db))]).toContain(cat.id);
+    expect((await db.select().from(wakeups)).map((w) => w.kind)).toContain("report_changed");
+    expect(await runAction("report_reopen", care.id, { reportId: confirmed.id })).toMatchObject({ ok: true, tone: "warn" });
+
+    const dismissed = await makeReport({ catId: cat.id, claim: "sick" });
+    await runAction("report_dismiss", care.id, { reportId: dismissed.id });
+    expect((await runAction("report_reopen", care.id, { reportId: dismissed.id })).ok).toBe(true);
+    expect((await reportRow(dismissed.id)).status).toBe("open");
+
+    const cleared = await makeReport({ catId: cat.id, claim: "pregnant", status: "cleared" });
+    expect(await runAction("report_reopen", care.id, { reportId: cleared.id })).toMatchObject({ status: 409, ok: false });
+    expect((await reportRow(cleared.id)).status).toBe("cleared");
+
+    const neighbour = await makeUser("donor");
+    expect((await runAction("report_reopen", neighbour.id, { reportId: dismissed.id })).ok).toBe(false);
+  });
+});
