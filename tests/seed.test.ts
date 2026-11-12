@@ -1,12 +1,14 @@
 import { execFile } from "node:child_process";
+import { readdir } from "node:fs/promises";
+import path from "node:path";
+import sharp from "sharp";
 import { promisify } from "node:util";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { conservation } from "../src/lib/impact";
 import { COLONY } from "../src/lib/config";
-import { CAT_STATUSES } from "../src/lib/catState";
 import { closePool, db } from "../src/server/db/client";
-import { agentActions, cats, donations, payouts, reports, sightings, treatments, users } from "../src/server/db/schema";
+import { agentActions, bookings, cats, donations, payouts, reports, sightings, treatments, users } from "../src/server/db/schema";
 import { FakesInProduction } from "../src/server/e2e/guard";
 import { getImpact, getLedger } from "../src/server/impact";
 import { getPoolStatus } from "../src/server/ledger";
@@ -86,41 +88,44 @@ describe("the seed refuses to run by accident", () => {
 });
 
 describe("the seed will not wipe a real ledger", () => {
-  /** Seeds a sample story, then makes one row look like it came from PayPal. */
-  const withRealOrder = async (id: string) => {
-    await seed({});
-    const [d] = await db.select().from(donations).limit(1);
-    await db.update(donations).set({ paypalOrderId: id }).where(eq(donations.id, d.id));
+  // The seed writes no money, so each test adds the rows it needs.
+  const addDonation = async (orderId: string) => {
+    const [u] = await db.select().from(users).where(eq(users.username, "demo_neighbour"));
+    await db.insert(donations).values({ userId: u.id, gross: 50_000, paypalFee: 2_950, net: 47_050, currency: "PHP", paypalOrderId: orderId, paypalCaptureId: `${orderId}-C`, status: "captured" });
   };
-  const withRealBatch = async (id: string) => {
-    await seed({});
-    const [p] = await db.select().from(payouts).limit(1);
-    await db.update(payouts).set({ paypalPayoutBatchId: id }).where(eq(payouts.id, p.id));
+  const addPayout = async (batch: string | null, reason = `${SAMPLE_REASON}The vet visit was confirmed, so the deposit went out.`) => {
+    // One open booking per cat, so each payout takes a cat without one.
+    const booked = new Set((await db.select({ id: bookings.catId }).from(bookings)).map((r) => r.id));
+    const c = (await db.select().from(cats)).find((x) => !booked.has(x.id))!;
+    const [vet] = await db.select().from(users).where(eq(users.username, "demo_vet"));
+    const [b] = await db.insert(bookings).values({ catId: c.id, vetId: vet.id, packagePrice: 150_000, status: "confirmed", scheduledFor: new Date() }).returning();
+    const [a] = await db.insert(agentActions).values({ action: "payout_deposit", reason, amount: 45_000, status: "succeeded", paypalRef: batch, inputs: { sample: true } }).returning();
+    const [p] = await db
+      .insert(payouts)
+      .values({ catId: c.id, bookingId: b.id, payeeUserId: vet.id, amount: 45_000, fee: 900, kind: "deposit", paypalPayoutBatchId: batch, actionId: a.id, status: "succeeded", attempts: 1 })
+      .returning();
+    return p;
   };
 
   it("passes on an empty database, and on sample rows and E2E- rows", async () => {
     await expect(assertNoRealLedger({})).resolves.toBeUndefined();
     await seed({});
     await expect(assertNoRealLedger({})).resolves.toBeUndefined();
-    const [d] = await db.select().from(donations).limit(1);
-    await db.update(donations).set({ paypalOrderId: "E2E-ORDER-1500-abcd1234" }).where(eq(donations.id, d.id));
-    const [p] = await db.select().from(payouts).limit(1);
-    await db.update(payouts).set({ paypalPayoutBatchId: "E2E-BATCH-450-x" }).where(eq(payouts.id, p.id));
+    await addDonation(`${SAMPLE_PREFIX}ORDER-1`);
+    await addDonation("E2E-ORDER-1500-abcd1234");
+    await addPayout(`${SAMPLE_PREFIX}BATCH-1`);
+    await addPayout("E2E-BATCH-450-x");
     await expect(assertNoRealLedger({})).resolves.toBeUndefined();
-    await expect(seed({})).resolves.toMatchObject({ cats: 11 });
+    await expect(seed({})).resolves.toMatchObject({ cats: 7 });
   });
 
   it("counts a payout with no batch id as real, unless its action is marked as sample", async () => {
     await seed({});
-    const [p] = await db.select().from(payouts).limit(1);
-    await db.update(payouts).set({ paypalPayoutBatchId: null }).where(eq(payouts.id, p.id));
+    await addPayout(null);
     await expect(assertNoRealLedger({})).resolves.toBeUndefined();
-    await expect(seed({})).resolves.toMatchObject({ cats: 11 });
+    await expect(seed({})).resolves.toMatchObject({ cats: 7 });
 
-    await seed({});
-    const [q] = await db.select().from(payouts).limit(1);
-    await db.update(payouts).set({ paypalPayoutBatchId: null }).where(eq(payouts.id, q.id));
-    await db.update(agentActions).set({ reason: "Caretaker approved the balance for a vet." }).where(eq(agentActions.id, q.actionId));
+    const q = await addPayout(null, "Caretaker approved the balance for a vet.");
     const before = (await db.select().from(payouts)).length;
     await expect(assertNoRealLedger({})).rejects.toThrow(SeedRefused);
     await expect(seed({})).rejects.toThrow(SeedRefused);
@@ -129,26 +134,29 @@ describe("the seed will not wipe a real ledger", () => {
   });
 
   it("refuses when a donation order id is not SAMPLE- or E2E-, and leaves the data alone", async () => {
-    await withRealOrder("5O190127TN364715T");
+    await seed({});
+    await addDonation("5O190127TN364715T");
     await expect(assertNoRealLedger({})).rejects.toThrow(SeedRefused);
     await expect(seed({})).rejects.toThrow(/SEED_WIPE_REAL=yes/);
-    expect(await db.select().from(donations)).toHaveLength(5);
-    expect((await db.select().from(cats)).length).toBe(11);
+    expect(await db.select().from(donations)).toHaveLength(1);
+    expect((await db.select().from(cats)).length).toBe(7);
   });
 
   it("refuses when a payout batch id is not SAMPLE- or E2E-", async () => {
-    await withRealBatch("PAYOUT-REAL-BATCH");
+    await seed({});
+    await addPayout("PAYOUT-REAL-BATCH");
     await expect(assertNoRealLedger({})).rejects.toThrow(SeedRefused);
     await expect(seed({})).rejects.toThrow(SeedRefused);
     expect((await db.select().from(payouts)).some((p) => p.paypalPayoutBatchId === "PAYOUT-REAL-BATCH")).toBe(true);
   });
 
   it("treats lowercase sample- as real, and only SEED_WIPE_REAL=yes overrides", async () => {
-    await withRealOrder("sample-1");
+    await seed({});
+    await addDonation("sample-1");
     for (const v of [undefined, "", "true", "1", "YES"]) await expect(assertNoRealLedger({ SEED_WIPE_REAL: v })).rejects.toThrow(SeedRefused);
     await expect(assertNoRealLedger({ SEED_WIPE_REAL: "yes" })).resolves.toBeUndefined();
-    await expect(seed({ SEED_WIPE_REAL: "yes" })).resolves.toMatchObject({ cats: 11 });
-    expect((await db.select().from(donations)).every((d) => d.paypalOrderId.startsWith(SAMPLE_PREFIX))).toBe(true);
+    await expect(seed({ SEED_WIPE_REAL: "yes" })).resolves.toMatchObject({ cats: 7 });
+    expect(await db.select().from(donations)).toHaveLength(0);
   });
 });
 
@@ -157,11 +165,11 @@ describe("the seeded story", () => {
     await seed();
   });
 
-  it("has 6 to 12 cats covering every status, and 3 to 4 donors beside the demo personas", async () => {
+  it("has only the seven real cats, two waiting and the rest spotted, and 3 to 4 donors beside the demo personas", async () => {
     const all = await db.select().from(cats);
-    expect(all.length).toBeGreaterThanOrEqual(6);
-    expect(all.length).toBeLessThanOrEqual(12);
-    expect(new Set(all.map((c) => c.status))).toEqual(new Set(CAT_STATUSES));
+    expect(all.map((c) => c.name).sort()).toEqual(["Kislap", "Leo", "Lily", "Milo", "Oliver", "Oreo", "Teddy"]);
+    expect(all.filter((c) => c.status === "queued").map((c) => c.name).sort()).toEqual(["Kislap", "Milo"]);
+    expect(all.filter((c) => c.status !== "queued").every((c) => c.status === "spotted")).toBe(true);
     const people = await db.select({ username: users.username, role: users.role }).from(users);
     const donors = people.filter((p) => p.role === "donor" && p.username !== "demo_neighbour");
     expect(donors.length).toBeGreaterThanOrEqual(3);
@@ -169,31 +177,13 @@ describe("the seeded story", () => {
     expect(people.map((p) => p.username)).toEqual(expect.arrayContaining(["demo_neighbour", "demo_caretaker", "demo_vet"]));
   });
 
-  it("has one cat only neighbours call neutered, and one a caretaker confirmed", async () => {
+  it("calls no real cat neutered, ear-tipped or treated, since none of that happened", async () => {
     const all = await db.select().from(cats);
-    const say = all.filter((c) => c.neuteredUnconfirmed);
-    expect(say.map((c) => [c.name, c.status, c.earTipped])).toEqual([["Puso", "neutered", true]]);
-    const caretakerConfirmed = all.filter((c) => c.earTipped === true && !c.neuteredUnconfirmed && c.name === "Tisay");
-    expect(caretakerConfirmed).toHaveLength(1);
-    expect(caretakerConfirmed[0].status).toBe("adoptable");
-  });
-
-  it("does not mark any cat the fund neutered, or any past neutered, as unconfirmed by mistake", async () => {
-    const treated = await db.select({ catId: treatments.catId }).from(treatments);
-    const paid = await db.select({ catId: payouts.catId }).from(payouts);
-    const withRecord = new Set([...treated, ...paid].map((r) => r.catId));
-    const all = await db.select().from(cats);
-    for (const c of all) {
-      if (withRecord.has(c.id)) expect(c.neuteredUnconfirmed, c.name).toBe(false);
-      if (c.neuteredUnconfirmed) expect(withRecord.has(c.id), c.name).toBe(false);
-    }
-    // Only a cat at status neutered can wait on a caretaker.
-    expect(all.filter((c) => c.neuteredUnconfirmed && c.status !== "neutered")).toEqual([]);
-    // The public list agrees: the unconfirmed cat reads as neighbours say, the rest by their status.
+    for (const c of all) expect([c.name, c.neuteredUnconfirmed, c.earTipped === true]).toEqual([c.name, false, false]);
+    expect(await db.select().from(treatments)).toHaveLength(0);
+    expect(await db.select().from(bookings)).toHaveLength(0);
     const labels = Object.fromEntries((await listCats()).map((c) => [c.name, c.statusLabel]));
-    expect(labels.Puso).toBe("Neighbours say already neutered");
-    expect(labels.Biscoy).toBe("Adopted");
-    expect(labels.Tisay).toBe("Ready for a home");
+    expect(labels.Leo).toBe("Spotted");
   });
 
   it("uses invented coordinates near the placeholder centre, and keeps them off the public view", async () => {
@@ -207,55 +197,41 @@ describe("the seeded story", () => {
     }
   });
 
-  it("has no public photos, since none is licensed to use: every card shows its look-alike", async () => {
-    // The only sightings are the drawn stand-ins behind the three reports, and none is public.
+  it("publishes a photo only for the seven real cats, from files that carry no metadata", async () => {
+    const REAL = ["Kislap", "Leo", "Lily", "Milo", "Oliver", "Oreo", "Teddy"];
     const all = await db.select().from(sightings);
-    expect(all).toHaveLength(3);
-    for (const s of all) expect([s.publicReady, s.publicKey]).toEqual([false, null]);
-    for (const c of await listCats()) expect(c.photoUrl).toBeNull();
+    // One drawn stand-in behind the one report, private; one real photo per real cat, public.
+    expect(all).toHaveLength(1 + REAL.length);
+    const drawn = all.filter((s) => isSampleSightingKey(s.originalKey));
+    expect(drawn).toHaveLength(1);
+    for (const s of drawn) expect([s.publicReady, s.publicKey]).toEqual([false, null]);
+    for (const s of all.filter((x) => !isSampleSightingKey(x.originalKey))) expect([s.publicReady, s.publicKey !== null]).toEqual([true, true]);
+    const shown = (await listCats()).filter((c) => c.photoUrl).map((c) => c.name).sort();
+    expect(shown).toEqual(REAL);
     for (const c of await db.select().from(cats)) expect(c.avatar).not.toBeNull();
-  });
-
-  it("labels all sample money as sample, and shows no PayPal id that looks real", async () => {
-    const rows = await getLedger();
-    expect(rows.length).toBeGreaterThan(0);
-    for (const r of rows) {
-      expect(r.paypalId, JSON.stringify(r)).toMatch(new RegExp(`^${SAMPLE_PREFIX}`));
-      if (r.reason) expect(r.reason).toMatch(new RegExp(`^${SAMPLE_REASON}`));
+    for (const f of await readdir(path.join(process.cwd(), "scripts", "seed-photos"))) {
+      const meta = await sharp(path.join(process.cwd(), "scripts", "seed-photos", f)).metadata();
+      expect([f, meta.exif, meta.xmp, meta.iptc]).toEqual([f, undefined, undefined, undefined]);
     }
-    const everyId = [
-      ...(await db.select({ id: donations.paypalOrderId, c: donations.paypalCaptureId }).from(donations)).flatMap((d) => [d.id, d.c]),
-      ...(await db.select({ b: payouts.paypalPayoutBatchId, i: payouts.paypalItemId }).from(payouts)).flatMap((p) => [p.b, p.i]),
-      ...(await db.select({ r: agentActions.paypalRef }).from(agentActions)).map((a) => a.r),
-    ].filter((v): v is string => v !== null);
-    expect(everyId.length).toBeGreaterThan(0);
-    for (const id of everyId) expect(id.startsWith(SAMPLE_PREFIX), id).toBe(true);
-    for (const a of await db.select().from(agentActions)) expect(a.reason.startsWith(SAMPLE_REASON), a.action).toBe(true);
   });
 
-  it("adds up to the centavo on the seeded rows alone, and the ledger agrees with the pool", async () => {
+  it("writes no money, so every ledger row will be a real sandbox transaction", async () => {
+    expect(await getLedger()).toHaveLength(0);
+    expect(await db.select().from(donations)).toHaveLength(0);
+    expect(await db.select().from(payouts)).toHaveLength(0);
+    for (const a of await db.select().from(agentActions)) expect(a.paypalRef, a.action).toBeNull();
     const pool = await db.transaction((tx) => getPoolStatus(tx));
     expect(conservation(pool).balanced).toBe(true);
-    expect(pool).toMatchObject({ grossIn: 750_000, paypalFees: 29_250, vetPaid: 165_000, payoutFees: 3_300, reservedPayouts: 0, heldForCats: 405_000, available: 147_450 });
-    // Below one care package (150_000) on purpose: the first donation made on camera is what lets the Treasurer fund a cat.
-    expect(pool.available).toBeLessThan(150_000);
-    const impact = await getImpact();
-    expect(impact).toMatchObject({ catsNeutered: 2, catsNeuteredByFund: 1, catsVaccinated: 1, catsDewormed: 1, catsAdopted: 1, alreadyNeutered: 1 });
-    const { rows } = await db.execute(sql`select count(*)::int as n from allocations where cat_id is not null`);
-    expect((rows[0] as { n: number }).n).toBeGreaterThan(0);
-  });
-
-  it("leaves the demo accounts a story: the neighbour has given, and the vet can be paid", async () => {
-    const [neighbour] = await db.select().from(users).where(eq(users.username, "demo_neighbour"));
-    expect(await db.select().from(donations).where(eq(donations.userId, neighbour.id))).toHaveLength(1);
+    expect(pool).toMatchObject({ grossIn: 0, paypalFees: 0, vetPaid: 0, heldForCats: 0, available: 0 });
+    expect(await getImpact()).toMatchObject({ catsNeutered: 0, catsAdopted: 0 });
     const [vet] = await db.select().from(users).where(eq(users.username, "demo_vet"));
     expect(vet.clinicName).not.toBeNull();
   });
 
   it("can be run again: it resets, it does not pile up", async () => {
     await seed();
-    expect((await db.select().from(cats)).length).toBe(11);
-    expect((await db.select().from(donations)).length).toBe(5);
+    expect((await db.select().from(cats)).length).toBe(7);
+    expect((await db.select().from(donations)).length).toBe(0);
   });
 });
 
@@ -267,27 +243,22 @@ describe("the seeded report story", () => {
 
   const byName = async () => Object.fromEntries((await db.select().from(cats)).map((c) => [c.name, c]));
 
-  it("has an open hurt report, a confirmed one waiting on the vet, a dismissed one, and a plain waiting list", async () => {
+  it("has one open hurt report and a plain waiting list", async () => {
     const c = await byName();
     const rows = await db.select().from(reports);
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(1);
     expect(rows.every((r) => r.sample && r.source === "neighbour" && r.reporterId && r.sightingId)).toBe(true);
     const of = (name: string) => rows.find((r) => r.catId === c[name].id)!;
-    expect(of("Hapon")).toMatchObject({ claim: "injured", status: "open", decidedBy: null });
-    expect(of("Bituin")).toMatchObject({ claim: "injured", status: "confirmed" });
-    expect(of("Bituin").decidedBy).not.toBeNull();
-    expect(of("Dilaw")).toMatchObject({ claim: "sick", status: "dismissed" });
+    expect(of("Milo")).toMatchObject({ claim: "injured", status: "open", decidedBy: null });
 
     // A neighbour's claim is not a fact: only the caretaker-confirmed one is a flag.
-    expect(c.Hapon.flags).toEqual([]);
-    expect(c.Bituin.flags).toEqual(["injured"]);
-    expect(c.Dilaw.flags).toEqual([]);
+    expect(c.Milo.flags).toEqual([]);
     const held = await db.transaction((tx) => heldCatIds(tx));
-    expect([...held].sort()).toEqual([c.Hapon.id, c.Bituin.id].sort());
+    expect([...held]).toEqual([c.Milo.id]);
 
     const list = await getPriorityList();
-    expect(list.needsPerson.map((r) => r.name).sort()).toEqual(["Bituin", "Hapon"]);
-    expect(list.nextToFund.map((r) => r.name)).toEqual(["Mingming", "Dilaw"]);
+    expect(list.needsPerson.map((r) => r.name)).toEqual(["Milo"]);
+    expect(list.nextToFund.map((r) => r.name)).toEqual(["Kislap"]);
   });
 
   it("writes no treasurer decision about any of it", async () => {
@@ -309,7 +280,7 @@ describe("the seeded report story", () => {
     demoOn();
     const queue = await getCaretakerQueue();
     expect(queue.reports).toHaveLength(1);
-    expect(queue.reports[0]).toMatchObject({ catName: "Hapon", claim: "injured", source: "neighbour" });
+    expect(queue.reports[0]).toMatchObject({ catName: "Milo", claim: "injured", source: "neighbour" });
     expect(queue.reports[0].note).toMatch(/Limping/);
     const [s] = await db.select().from(sightings).where(eq(sightings.id, queue.reports[0].sightingId!));
     expect(isSampleSightingKey(s.originalKey)).toBe(true);
@@ -321,11 +292,9 @@ describe("the seeded report story", () => {
     expect(isSampleSightingKey("originals/00000000-0000-4000-8000-000000000001.jpg/../x")).toBe(false);
   });
 
-  it("gives each reported cat a timeline of what happened, with the dismissal in plain words", async () => {
+  it("gives the reported cat a timeline of what happened", async () => {
     const c = await byName();
     const titles = async (n: string) => (await catTimeline(c[n].id)).map((e) => e.title);
-    expect(await titles("Hapon")).toContain("Neighbour reported hurt");
-    expect(await titles("Bituin")).toContain("Caretaker confirmed he's hurt");
-    expect(await titles("Dilaw")).toContain("A caretaker checked this report and closed it.");
+    expect(await titles("Milo")).toContain("Neighbour reported hurt");
   });
 });
