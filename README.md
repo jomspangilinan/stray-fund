@@ -105,9 +105,11 @@ PayPal sandbox needs `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and a sandbox bu
 
 ## Deploy
 
-[docs/deploy.md](docs/deploy.md) covers the Render Blueprint (`render.yaml`), S3, an IAM role through Render's OIDC sign-in with no AWS keys, the PayPal webhook, and the "Before real money" checklist.
+[docs/deploy.md](docs/deploy.md) covers the Render Blueprint (`render.yaml`), S3, an IAM role through Render's OIDC sign-in with no AWS keys, the PayPal webhook, and the "Before real money" checklist. The live site was deployed by following it. Its Postgres refuses outside connections, and an AWS budget of $5 a month emails at 80% and 100%.
 
-Two switches matter for a public demo. `JUDGE_GATE=true` with `JUDGE_PASSCODE` limits the staff roles, donating, reports and votes to judges, who open `/judge?code=…` once; everyone else can browse and spot as a Neighbour, with a daily limit and no AI. `DEMO_HIDE_PRIVATE=true` hides original photos, receipt text, the treasurer's reasons and the vets' emails on the demo desks. Exact places stay hidden in demo mode either way, because they're real GPS points.
+On the live site these have run for real: spot photos stored in S3 from a phone camera over HTTPS, a donation captured through the screen, the treasurer on Bedrock funding a cat and asking a caretaker to check a report, and the ₱450 Payouts deposit.
+
+Two switches matter for a public demo. `JUDGE_GATE=true` with `JUDGE_PASSCODE` limits the staff roles, donating, reports and votes to judges, who open `/judge?code=…` once; everyone else can browse and spot as a Neighbour, with a daily limit and no AI. The live site runs with the gate on. `DEMO_HIDE_PRIVATE=true` hides original photos, receipt text, the treasurer's reasons and the vets' emails on the demo desks. Exact places stay hidden in demo mode either way, because they're real GPS points.
 
 ## Known limits
 
