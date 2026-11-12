@@ -125,7 +125,7 @@ describe("first names", () => {
   it("asks for a name from the cat's look or character, with no example names to copy", async () => {
     installAi(() => "Muning");
     const u = await makeUser();
-    await processSpot({ jpeg: await jpeg(100), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ ai: true, jpeg: await jpeg(100), lat: 10.2, lng: 120.6, userId: u.id });
     const system = String(assessCalls()[0].system);
     const line = system.split("\n").find((l) => l.startsWith("- suggested_name:")) ?? "";
     expect(line).toMatch(/look|personality/i);
@@ -137,7 +137,7 @@ describe("first names", () => {
     await makeCat({ name: "Taken One" });
     await makeCat({ name: "Taken Two" });
     const u = await makeUser();
-    await processSpot({ jpeg: await jpeg(110), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ ai: true, jpeg: await jpeg(110), lat: 10.2, lng: 120.6, userId: u.id });
     const sent = JSON.stringify(assessCalls()[0].messages);
     expect(sent).toContain("Taken One");
     expect(sent).toContain("Taken Two");
@@ -146,8 +146,8 @@ describe("first names", () => {
   it("gives a taken AI name a free name from the built-in list, not a number", async () => {
     installAi(() => "Muning");
     const u = await makeUser();
-    await processSpot({ jpeg: await jpeg(100), lat: 10.2, lng: 120.6, userId: u.id });
-    await processSpot({ jpeg: await jpeg(130), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ ai: true, jpeg: await jpeg(100), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ ai: true, jpeg: await jpeg(130), lat: 10.2, lng: 120.6, userId: u.id });
     const names = (await db.select().from(cats)).map((c) => c.name);
     expect(names).toHaveLength(2);
     expect(names).toContain("Muning");
@@ -160,7 +160,7 @@ describe("first names", () => {
     installAi(() => "muning");
     await makeCat({ name: "MUNING" });
     const u = await makeUser();
-    await processSpot({ jpeg: await jpeg(100), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ ai: true, jpeg: await jpeg(100), lat: 10.2, lng: 120.6, userId: u.id });
     const names = (await db.select().from(cats)).map((c) => c.name);
     expect(names.filter((n) => n.toLowerCase() === "muning")).toHaveLength(1);
   });
@@ -169,7 +169,7 @@ describe("first names", () => {
     await db.insert(cats).values(CAT_NAMES.map((name) => ({ name, areaName: "Brgy 1" })));
     installAi(() => CAT_NAMES[0]);
     const u = await makeUser();
-    await processSpot({ jpeg: await jpeg(100), lat: 10.2, lng: 120.6, userId: u.id });
+    await processSpot({ ai: true, jpeg: await jpeg(100), lat: 10.2, lng: 120.6, userId: u.id });
     const all = (await db.select().from(cats)).map((c) => c.name);
     const added = all.filter((n) => !CAT_NAMES.includes(n));
     expect(added).toHaveLength(1);

@@ -128,8 +128,8 @@ export async function processSpot(i: {
   userId: string;
   /** Where the camera saw the cat, as fractions of the photo. Already validated by the caller. */
   box?: CatBox | null;
-  /** True runs the AI on the photo (judges). False is the public path: no AI, and the photo is developed later. Defaults to true. */
-  ai?: boolean;
+  /** True runs the AI on the photo (judges). False is the public path: no AI, and the photo is developed later. Required, so a caller can never reach the AI by leaving it out. */
+  ai: boolean;
   /** The phone's 64x64 cut-out of the cat, checked with maskUsable. Public path only. */
   mask?: Buffer | null;
 }): Promise<SpotResult> {
@@ -182,7 +182,7 @@ async function processPlain(
     const { rows } = await tx.execute(sql`
       select
         count(*) filter (where caught_by_user_id = ${i.userId})::int as mine,
-        count(*) filter (where needs_develop)::int as site
+        count(*) filter (where needs_develop or developed_at is not null)::int as site
       from sightings where ${MANILA_DAY_OF(sql`created_at`)} = ${MANILA_DAY}
     `);
     const n = rows[0] as { mine: number; site: number };
@@ -197,7 +197,8 @@ async function processPlain(
         caughtByUserId: i.userId,
         takenAt: new Date(),
         state: "new_cat",
-        needsDevelop: true,
+        // The worker claims only needs_develop rows. This stays false until the phone tier has had its turn (see below).
+        needsDevelop: false,
         exactLat: hasPoint ? i.lat : null,
         exactLng: hasPoint ? i.lng : null,
         catBox: i.box ?? null,
@@ -209,6 +210,8 @@ async function processPlain(
   });
 
   const developed = await developNow(i, originalKey, sighting.id, catId);
+  // Only now may the worker claim it, so it can never publish the same photo the phone tier is publishing.
+  if (!developed) await db.update(sightings).set({ needsDevelop: true }).where(eq(sightings.id, sighting.id));
   return result("new_cat", sighting.id, catId, PLAIN_MESSAGE, { aiChecked: false, developed });
 }
 
@@ -224,14 +227,16 @@ async function developNow(
   try {
     const { key } = await publishCatOnly(originalKey, { box, mask });
     const avatar = await avatarFromPhoto(i.jpeg, box);
-    await db.transaction(async (tx) => {
-      await tx
+    return await db.transaction(async (tx) => {
+      const won = await tx
         .update(sightings)
         .set({ publicKey: key, publicReady: true, developedAt: new Date() })
-        .where(and(eq(sightings.id, sightingId), sql`${sightings.developedAt} is null`));
+        .where(and(eq(sightings.id, sightingId), sql`${sightings.developedAt} is null`))
+        .returning({ id: sightings.id });
+      if (won.length === 0) return false;
       await tx.update(cats).set({ avatar }).where(eq(cats.id, catId));
+      return true;
     });
-    return true;
   } catch (e) {
     console.error(`[spot] phone cut-out not published: ${e instanceof Error ? e.name : typeof e}`);
     return false;
