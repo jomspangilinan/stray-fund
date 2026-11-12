@@ -1,10 +1,16 @@
 # Stray Fund
 
-DRAFT for the owner to check. Working name; the name lives in one constant, `APP_NAME` in `src/lib/config.ts`.
-
 A shared fund for one neighbourhood's stray cats. Neighbours spot cats, report the ones that look hurt, and donate. People check each report. An AI treasurer weighs what they found and picks which cat gets neutered next. Rules check every payment before it goes out, and a person signs off before any money reaches the vet. Every peso shows on a public ledger.
 
-Built for the PayPal AI Hackathon. It runs on PayPal sandbox money only.
+Built for the PayPal AI Hackathon. It runs on PayPal sandbox money only. Try it at https://stray-fund.onrender.com; the [testing guide](testing-guide.pdf) walks through it with screenshots.
+
+<p align="center">
+  <img src="screenshots/yard.jpg" width="190" alt="The yard: every cat in the barangay, the fund, and Donate">
+  <img src="screenshots/swipe-card.jpg" width="190" alt="A caretaker's card: a neighbour's sick report, what Claude read, and Confirm or Dismiss">
+  <img src="screenshots/treasurer.jpg" width="190" alt="The Treasurer page: each decision with its reason and PayPal reference">
+  <img src="screenshots/ledger-row.jpg" width="190" alt="A ledger row opened: a ₱450 vet deposit with its PayPal reference">
+</p>
+<p align="center"><sub>The yard, a caretaker's report card, the AI treasurer's decisions, and a ledger row with its PayPal reference. Screens from the live sandbox site.</sub></p>
 
 ## The problem
 
@@ -23,9 +29,24 @@ Strays multiply when they are fed but not neutered. Neighbours want to help, but
 9. **Pay the balance.** Only after that, the rest is paid. The cat's card is updated.
 10. **Show it.** The Ledger lists every donation and payout with its PayPal reference. Proof shows the totals adding up. Treasurer shows what the AI decided and why. Priority lists the cats that are waiting or on hold, in two groups ("Needs a person first", "Next to fund"), with the reason. A cat leaves the list once it is funded. A cat's page tells its story in one timeline: who reported what, who checked it, what the Treasurer decided, each PayPal payment, and the steps still ahead.
 
+<p align="center">
+  <img src="screenshots/spot-new-cat.jpg" width="150" alt="New cat spotted: the new card for the cat in the photo">
+  <img src="screenshots/report-note.jpg" width="150" alt="Reporting the cat as sick, with a note only caretakers see">
+  <img src="screenshots/donate-thanks.jpg" width="150" alt="After a ₱1,600 sandbox donation: the PayPal fee and what reached the fund">
+  <img src="screenshots/approve-payment.jpg" width="150" alt="A ₱450 vet deposit waiting for a caretaker to approve">
+  <img src="screenshots/proof.jpg" width="150" alt="Proof: where every peso went, adding up exactly">
+</p>
+<p align="center"><sub>Spot, report, donate, approve, prove. The first two show the cat under his first name, Smoke; he's Toothless now.</sub></p>
+
 A cat's card also has a Save image button that makes a 9:16 picture of the cat.
 
 **The desks.** Caretakers and vets each get their own app on a green bar instead of the neighbour tabs. The caretaker's desk is To check (the swipe cards), Cats and Rules. Cats is one profile per cat with a single Save for name, sex, ear-tip, stage and new reports, plus the cat's timeline, and it can take a wrong call back: reopen a report a caretaker confirmed or dismissed, or step a cat back from adopted or ready for a home. A vet's clearance and money PayPal has sent can't be undone. The vet's desk is To do (cats to clear, evidence to send, funded cats to book) and Bookings, with each cat's photo. Neighbour view in the header goes to the public app, and Back to desk returns.
+
+<p align="center">
+  <img src="screenshots/cat-profile.jpg" width="190" alt="A cat's profile on the caretaker desk: name, sex, ear-tip and stage, with one Save">
+  <img src="screenshots/vet-to-do.jpg" width="190" alt="The vet's To do: a cat to clear for surgery and a booking waiting for evidence">
+  <img src="screenshots/priority.jpg" width="190" alt="Priority: cats needing a person first, then the order the Treasurer will fund them">
+</p>
 
 ## Why PayPal
 
