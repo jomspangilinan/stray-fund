@@ -138,17 +138,20 @@ describe("I1: DEMO_MODE on, as the demo caretaker", () => {
     expect(pub.headers.get("location")).toContain(key);
   });
 
-  it("the desk marks a photo shown as 'Hidden in the demo', so it offers no Rotate, and unmarks it once a public copy shows", async () => {
-    const { held, original } = await world();
+  it("the desk marks a held or review photo shown as 'Hidden in the demo', so it offers no Rotate, and unmarks it once a public copy shows", async () => {
+    const { held, waiting, original } = await world();
     await asPersona("caretaker");
     const heldItem = async () => (await getCaretakerQueue()).heldPhotos.find((p) => p.sightingId === held.id)!;
     expect(await heldItem()).toMatchObject({ photoHidden: true });
+    // A photo waiting for review never has a public copy, so in the demo it is always the placeholder.
+    expect((await getCaretakerQueue()).sightings.find((s) => s.id === waiting.id)).toMatchObject({ photoHidden: true });
     const { key } = await publishCatOnly(original.key, { box: null, mask: null });
     await db.update(sightings).set({ publicKey: key, publicReady: true }).where(eq(sightings.id, held.id));
     expect((await getCaretakerQueue()).heldPhotos.find((p) => p.sightingId === held.id)).toBeUndefined();
     vi.stubEnv("DEMO_MODE", "");
     await db.update(sightings).set({ publicKey: null, publicReady: false }).where(eq(sightings.id, held.id));
     expect(await heldItem()).toMatchObject({ photoHidden: false });
+    expect((await getCaretakerQueue()).sightings.find((s) => s.id === waiting.id)).toMatchObject({ photoHidden: false });
   });
 });
 

@@ -73,6 +73,8 @@ export type SightingItem = {
   /** What the AI wrote. Untrusted text. */
   assessment: ReturnType<typeof AssessmentSchema.parse> | null;
   candidates: { id: string; name: string }[];
+  /** The desk shows "Hidden in the demo" instead of the photo, so there is nothing to rotate. */
+  photoHidden: boolean;
 };
 
 export type ReceiptItem = {
@@ -304,6 +306,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
       area: COLONY.area_name,
       assessment: parsed.success ? (hidePrivateInDemo() ? demoAssessment(parsed.data) : parsed.data) : null,
       candidates: ids.flatMap((id) => (nameOf.has(id) ? [{ id, name: nameOf.get(id)! }] : [])),
+      photoHidden: sightingPhotoHidden(s),
     };
   });
 
