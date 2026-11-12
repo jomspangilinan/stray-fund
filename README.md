@@ -1,14 +1,36 @@
 # Stray Fund
 
-A shared fund for one neighbourhood's stray cats. Neighbours spot cats and give through PayPal. An AI treasurer picks which cat gets spayed or neutered next and says why in public. A person approves every payment before PayPal Payouts sends it to the vet, and every peso shows on a ledger anyone can check.
+[![Live demo](https://img.shields.io/badge/live%20demo-stray--fund.onrender.com-0b6b4f)](https://stray-fund.onrender.com)
+[![PayPal sandbox](https://img.shields.io/badge/PayPal-sandbox%20only-003087)](https://developer.paypal.com/tools/sandbox/)
+[![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue)](LICENSE)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
+[![Claude](https://img.shields.io/badge/AI-Claude%20on%20Bedrock-d4a27f)](https://aws.amazon.com/bedrock/claude/)
 
-Built for the PayPal AI Hackathon, on PayPal sandbox money only. Try it at https://stray-fund.onrender.com, or follow the [testing guide](testing-guide.pdf).
+Neighbours fund spay and neuter for the stray cats on their street. An AI treasurer picks which cat is helped next and says why, a person approves every payment, and PayPal pays the vet, with every peso on a public ledger.
 
 <p align="center"><img src="screenshots/card-01-hero.jpg" width="820" alt="Stray Fund: neighbours fund spay and neuter for stray cats. An AI treasurer picks the next cat and PayPal pays the vet, with every peso on a public ledger."></p>
 
-## Why it exists
+## Highlights
+
+- Every donation and every vet payment sits on a public ledger with its PayPal reference, and the totals add up to the peso.
+- An AI treasurer picks the next cat and explains the choice in public. It has no tool that takes an amount or a PayPal address.
+- A person approves every payout before PayPal Payouts sends it, with 5 seconds to undo.
+- Caretakers and vets get their own desks: report checks and payments come as swipe cards, each with what the AI read.
+- It runs live on the PayPal sandbox, with Claude on Amazon Bedrock as the treasurer.
+
+## Overview
 
 Strays multiply when people feed them but nobody neuters them. Neighbours would chip in, but they can't see where the money goes, and help tends to reach the cutest cat instead of the pregnant or hurt one. Stray Fund keeps the whole trail in public: who reported a cat, who checked it, why the treasurer chose it, and the PayPal reference for every payment.
+
+Stray Fund is built for one barangay's neighbours, the volunteer caretakers who check on the cats, and the partner vet who does the surgery. It was made by [@jomspangilinan](https://github.com/jomspangilinan) as a solo entry to the PayPal AI Hackathon in November 2026. The code is open source under AGPL-3.0, so you can run your own copy for your street, as long as you share your changes.
+
+## Try it
+
+- Open https://stray-fund.onrender.com. Judges get a private link in the Devpost notes that unlocks the Caretaker and Vet roles, donating and reports.
+- Follow the [testing guide](testing-guide.pdf): eight steps with screenshots, from spotting a cat to following the money.
+- Pay with a PayPal sandbox buyer account. It's test money only.
+
+
 
 ## How it works
 
@@ -85,31 +107,6 @@ S3: private originals, public scrubbed copies
 
 Next.js and TypeScript, Postgres with Drizzle, and a separate worker process, hosted on Render. The model is never in the path of a page load.
 
-## Run it locally
-
-You need Node 22 and Postgres 17.
-
-1. Make two databases, `strayfund_dev` and `strayfund_test`.
-2. `cp .env.example .env.local` and fill it in. `.env.example` explains every variable, and `.env*` is ignored by git.
-3. `npm install`, then `npm run db:migrate`.
-4. `SEED_CONFIRM=yes npm run seed` loads seven real strays with their own photos and no money. It empties the dev database first and refuses unless `DEMO_MODE=true` and PayPal isn't live.
-5. `npm run dev`, and `npm run worker` in a second terminal.
-6. Open http://localhost:3000. The strip at the top switches between Neighbour, Caretaker and Vet.
-
-PayPal sandbox needs `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and a sandbox buyer account. The seed holds Milo back with one sample hurt report, so the quickest tour is: confirm Milo's report as Caretaker, clear him as Vet, donate ₱1,600 (enough to cover the ₱1,500 care package after PayPal's fee), then open Priority and Treasurer.
-
-## Tests
-
-`npm test` runs 1,947 tests against a real Postgres in `TEST_DATABASE_URL`. `npm run lint` and `npx tsc --noEmit` check the rest. `npm run e2e` walks the whole story in a browser against fakes, from a hurt report to a funded cat, and checks that no note or coordinates reach a public page; it needs a scratch database in `E2E_DATABASE_URL`. `npx tsx scripts/check-public-leaks.ts` loads the public pages and the staff desks as each role, with a note holding a phone number, a street and a name.
-
-## Deploy
-
-[docs/deploy.md](docs/deploy.md) covers the Render Blueprint (`render.yaml`), S3, an IAM role through Render's OIDC sign-in with no AWS keys, the PayPal webhook, and the "Before real money" checklist. The live site was deployed by following it. Its Postgres refuses outside connections, and an AWS budget of $5 a month emails at 80% and 100%.
-
-On the live site these have run for real: spot photos stored in S3 from a phone camera over HTTPS, a donation captured through the screen, the treasurer on Bedrock funding a cat and asking a caretaker to check a report, and the ₱450 Payouts deposit.
-
-Two switches matter for a public demo. `JUDGE_GATE=true` with `JUDGE_PASSCODE` limits the staff roles, donating, reports and votes to judges, who open `/judge?code=…` once; everyone else can browse and spot as a Neighbour, with a daily limit and no AI. The live site runs with the gate on. `DEMO_HIDE_PRIVATE=true` hides original photos, receipt text, the treasurer's reasons and the vets' emails on the demo desks. Exact places stay hidden in demo mode either way, because they're real GPS points.
-
 ## Known limits
 
 Read this before trusting it with anything real.
@@ -122,6 +119,47 @@ Read this before trusting it with anything real.
 - The coat rule treats calico and tortoiseshell cats as female, so a wrong call moves a cat up the queue.
 - Refunds and chargebacks are handled in code but not proven on real PayPal, and live webhook deliveries haven't been checked end to end.
 - Not built yet: adoption fees, foster allowance, monthly sponsors, a map. Merging duplicate cats works only for a duplicate made by a plain photo.
+
+## Roadmap
+
+Next, in rough order:
+
+- Verified accounts for neighbours, caretakers and vets before any real money moves.
+- Live PayPal webhook deliveries checked end to end, and the treasurer's hostile-note tests re-run on Bedrock.
+- A feeding station that logs each meal by itself. The app already takes meal logs and shows "Meals given" on Proof; the station isn't built.
+- Other barangays running their own fund, each with its own yard.
+- Adoption fees flowing back into the fund, and monthly sponsors.
+
+## Development
+
+### Run it locally
+
+You need Node 22 and Postgres 17.
+
+1. Make two databases, `strayfund_dev` and `strayfund_test`.
+2. `cp .env.example .env.local` and fill it in. `.env.example` explains every variable, and `.env*` is ignored by git.
+3. `npm install`, then `npm run db:migrate`.
+4. `SEED_CONFIRM=yes npm run seed` loads seven real strays with their own photos and no money. It empties the dev database first and refuses unless `DEMO_MODE=true` and PayPal isn't live.
+5. `npm run dev`, and `npm run worker` in a second terminal.
+6. Open http://localhost:3000. The strip at the top switches between Neighbour, Caretaker and Vet.
+
+PayPal sandbox needs `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and a sandbox buyer account. The seed holds Milo back with one sample hurt report, so the quickest tour is: confirm Milo's report as Caretaker, clear him as Vet, donate ₱1,600 (enough to cover the ₱1,500 care package after PayPal's fee), then open Priority and Treasurer.
+
+### Tests
+
+`npm test` runs 1,947 tests against a real Postgres in `TEST_DATABASE_URL`. `npm run lint` and `npx tsc --noEmit` check the rest. `npm run e2e` walks the whole story in a browser against fakes, from a hurt report to a funded cat, and checks that no note or coordinates reach a public page; it needs a scratch database in `E2E_DATABASE_URL`. `npx tsx scripts/check-public-leaks.ts` loads the public pages and the staff desks as each role, with a note holding a phone number, a street and a name.
+
+### Deploy
+
+[docs/deploy.md](docs/deploy.md) covers the Render Blueprint (`render.yaml`), S3, an IAM role through Render's OIDC sign-in with no AWS keys, the PayPal webhook, and the "Before real money" checklist. The live site was deployed by following it. Its Postgres refuses outside connections, and an AWS budget of $5 a month emails at 80% and 100%.
+
+On the live site these have run for real: spot photos stored in S3 from a phone camera over HTTPS, a donation captured through the screen, the treasurer on Bedrock funding a cat and asking a caretaker to check a report, and the ₱450 Payouts deposit.
+
+Two switches matter for a public demo. `JUDGE_GATE=true` with `JUDGE_PASSCODE` limits the staff roles, donating, reports and votes to judges, who open `/judge?code=…` once; everyone else can browse and spot as a Neighbour, with a daily limit and no AI. The live site runs with the gate on. `DEMO_HIDE_PRIVATE=true` hides original photos, receipt text, the treasurer's reasons and the vets' emails on the demo desks. Exact places stay hidden in demo mode either way, because they're real GPS points.
+
+## Feedback
+
+Found a bug or have an idea? Open an [issue](https://github.com/jomspangilinan/stray-fund/issues). If you run a fund like this for your own street, I'd like to hear how it goes.
 
 ## Licence
 
