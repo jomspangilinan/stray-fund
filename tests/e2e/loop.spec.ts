@@ -73,15 +73,22 @@ async function wakeupsSettled() {
     .toBe(0);
 }
 
-/** The caretaker's desk: opens the item for this heading and approves it through the Send step. */
-async function approveOnDesk(page: Page, heading: string, question: string) {
+/** The top card on the caretaker's swipe desk. */
+const topCard = (page: Page, label: RegExp) => page.getByRole("main").getByRole("group", { name: label });
+
+/**
+ * The caretaker's swipe desk: the payment card for this cat, approved with its green button. The card sends after
+ * its five-second Undo window, through the same route the full form uses.
+ */
+async function approveOnDesk(page: Page, fact: string, amount: string) {
   await pickRole(page, "Caretaker");
   await page.goto("/caretaker");
-  const item = page.getByRole("listitem").filter({ hasText: heading });
-  await item.getByRole("button", { name: "Approve and send" }).click();
-  await expect(item.getByText(question)).toBeVisible();
-  await item.getByRole("button", { name: "Send", exact: true }).click();
-  await expect(page.getByText(/^Approved\. The payment is sent/)).toBeVisible();
+  const card = topCard(page, /^Payment, /);
+  await expect(card).toContainText(fact);
+  await card.getByRole("button", { name: `Approve and send ${amount} →` }).click();
+  await expect(page.getByText(`Approve and send ${amount}: sending in 5 seconds`)).toBeVisible();
+  // Once it sends, the desk may be empty and show "All done" in place of the card's reply, so wait on the payout itself.
+  await expect.poll(async () => (await db.rows("select 1 from payouts where status = 'awaiting_approval'")).length, { timeout: 20_000 }).toBe(0);
 }
 
 async function paypalConfirms(page: Page, payoutId: string, fee: string, eventId: string) {
@@ -195,15 +202,22 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
   await test.step("the caretaker's desk shows the report first, and a caretaker confirms it", async () => {
     await pickRole(page, "Caretaker");
     await page.goto("/caretaker");
-    const first = page.getByRole("main").getByRole("listitem").first();
-    await expect(first).toContainText("Neighbour says");
-    await expect(first).toContainText("About Mocha");
-    await expect(first.getByRole("img", { name: "The photo this report is about" })).toBeVisible();
-    // The open demo hides a visitor's own note from the next visitor, even a caretaker.
-    for (const piece of NOTE_PIECES) await expect(page.locator("body")).not.toContainText(piece);
+    // The report is the top card of the swipe desk, with the neighbour's note as written (owner's decision, Nov 12).
+    const first = topCard(page, /^Report, Hurt: Mocha/);
+    await expect(first).toContainText("A neighbour reported this");
+    await expect(first).toContainText(NOTE);
+    // The photo is a sighting, so the card offers Rotate.
+    await expect(first.getByRole("button", { name: "Rotate left" })).toBeVisible();
+    // "Change something" opens the full form inside the card, with the photo, and goes back.
+    await first.getByRole("button", { name: "Change something" }).click();
+    await expect(page.getByRole("img", { name: "The photo this report is about" })).toBeVisible();
+    await page.getByRole("button", { name: "Back to the card" }).click();
     const before = fundAsks().length;
-    await first.getByRole("button", { name: "Confirm", exact: true }).click();
-    await expect.poll(async () => (await db.one<{ status: string }>("select status from reports where cat_id = $1", [catId])).status).toBe("confirmed");
+    await topCard(page, /^Report, Hurt: Mocha/).getByRole("button", { name: "Confirm →" }).click();
+    await expect(page.getByText("Confirm: sending in 5 seconds")).toBeVisible();
+    await expect
+      .poll(async () => (await db.one<{ status: string }>("select status from reports where cat_id = $1", [catId])).status, { timeout: 20_000 })
+      .toBe("confirmed");
     expect(await db.one("select flags from cats where id = $1", [catId])).toEqual({ flags: ["injured"] });
     // Confirmed is not cleared: the treasurer wakes, asks again, and is refused again.
     await expect.poll(() => fundAsks().length, { timeout: 60_000 }).toBeGreaterThan(before);
@@ -301,8 +315,8 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
   });
 
   let depositId = "";
-  await test.step("the caretaker approves the deposit at the Send step, and PayPal is called once", async () => {
-    await approveOnDesk(page, "Deposit for Mocha", `Send ₱450 to demo_vet? This can't be undone.`);
+  await test.step("the caretaker approves the deposit on the swipe desk, and PayPal is called once", async () => {
+    await approveOnDesk(page, "Deposit for Mocha", "₱450");
     const deposit = await db.one<{ id: string; status: string; attempts: number; paypal_payout_batch_id: string }>(
       "select id, status, attempts, paypal_payout_batch_id from payouts where booking_id = $1 and kind = 'deposit'",
       [bookingId],
@@ -363,10 +377,17 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
   await test.step("the caretaker sees the ear-tip in the vet's photo; the cat is neutered, the surplus returns, and the balance waits for approval", async () => {
     await pickRole(page, "Caretaker");
     await page.goto("/caretaker");
-    const item = page.getByRole("listitem").filter({ hasText: "The receipt passed every check" });
-    await expect(item.getByRole("img", { name: "The vet's photo of the cat after surgery" })).toBeVisible();
-    await item.getByRole("button", { name: "I saw the ear-tip in the photo" }).click();
-    await expect(page.getByText(/^Confirmed\. The cat is marked neutered/)).toBeVisible();
+    const card = topCard(page, /^Ear tip after surgery, Ear tip: Mocha/);
+    await expect(card).toContainText("passed every check");
+    // The vet's photo is not a sighting, so there is no Rotate on this card.
+    await expect(card.getByRole("button", { name: "Rotate left" })).toHaveCount(0);
+    await card.getByRole("button", { name: "Change something" }).click();
+    const form = page.getByRole("listitem").filter({ hasText: "The receipt passed every check" });
+    await expect(form.getByRole("img", { name: "The vet's photo of the cat after surgery" })).toBeVisible();
+    await page.getByRole("button", { name: "Back to the card" }).click();
+    await topCard(page, /^Ear tip after surgery, Ear tip: Mocha/).getByRole("button", { name: "I see the ear tip →" }).click();
+    await expect(page.getByText("I see the ear tip: sending in 5 seconds")).toBeVisible();
+    await expect.poll(async () => (await catRow(catId)).status, { timeout: 20_000 }).toBe("neutered");
 
     expect(await catRow(catId)).toMatchObject({ status: "neutered", ear_tipped: true, neutered_unconfirmed: false });
     expect(await db.rows("select type from treatments where cat_id = $1 order by type", [catId])).toEqual([{ type: "deworming" }, { type: "neuter" }, { type: "vaccine" }]);
@@ -381,7 +402,7 @@ test("a stray cat is spotted, funded, neutered and paid for, and every peso adds
 
   let balanceId = "";
   await test.step("the caretaker approves the balance and PayPal confirms it", async () => {
-    await approveOnDesk(page, "Balance for Mocha", `Send ₱750 to demo_vet? This can't be undone.`);
+    await approveOnDesk(page, "Balance for Mocha", "₱750");
     const balance = await db.one<{ id: string }>("select id from payouts where booking_id = $1 and kind = 'balance'", [bookingId]);
     balanceId = balance.id;
     await paypalConfirms(page, balanceId, "15.00", "E2E-EVENT-BALANCE");
