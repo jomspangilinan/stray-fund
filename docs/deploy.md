@@ -174,7 +174,7 @@ Replace the placeholders in the policy: `YOUR-PRIVATE-BUCKET`, `YOUR-PUBLIC-BUCK
 
 The three `Bedrock...` statements are the three-part policy AWS documents for a `global.` inference profile (https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html): the profile in your region, the regional model reached through that profile, and the region-less global model ARN (`arn:aws:bedrock:::foundation-model/...`, where AWS sets `aws:RequestedRegion` to `unspecified`). All three are needed; removing any one denies the call. They name one model and one profile, with no wildcards. The app calls `InvokeModel` without streaming, so nothing else is allowed. If you change `AI_MODEL`, change the model name in all three statements. If your organisation uses a Service Control Policy that blocks unused regions, it must allow `unspecified` for Bedrock (same page).
 
-The code only calls `PutObject` and `GetObject` on S3, plus `DeleteObject` on the public `photos/*` keys (a caretaker who withdraws a photo, or a publish that lost a race, deletes the public copy), so the policy grants nothing else (no `ListBucket`, no delete of originals). Until `s3:DeleteObject` is on the role, a withdrawn photo's public copy stays readable at its old URL: the hold still commits and the failed delete is logged as `[storage] could not delete a public copy`. One side effect to expect: S3 answers a missing key with 403 instead of 404 when the caller cannot list the bucket, so a missing original shows as an access error. Live check 7 below will show it.
+The code only calls `PutObject` and `GetObject` on S3, plus `DeleteObject` on the public `photos/*` keys (a caretaker who withdraws a photo, or a publish that lost a race, deletes the public copy), so the policy grants nothing else (no `ListBucket`, no delete of originals). The live role already has `s3:DeleteObject` on the public bucket's `photos/*` (the owner approved it; applied Nov 12). On a role without it, a withdrawn photo's public copy stays readable at its old URL: the hold still commits and the failed delete is logged as `[storage] could not delete a public copy`. One side effect to expect: S3 answers a missing key with 403 instead of 404 when the caller cannot list the bucket, so a missing original shows as an access error. Live check 7 below will show it.
 
 **Bedrock sends the photo to other regions.** A `global.` profile may process a request in any supported commercial region. If photos could show people, decide whether that is acceptable for your users; a geographic profile keeps processing in one geography, and its availability for this model has not been checked. **Required before real money:** decide this, and test one real model call with this exact policy (ask first: it costs money and needs your OK).
 
@@ -240,6 +240,10 @@ After saving the webhook, copy its id from the dashboard into `PAYPAL_WEBHOOK_ID
 | `AWS_ROLE_ARN` | web, worker | The `stray-fund-app` role, step 2. Render adds `AWS_WEB_IDENTITY_TOKEN_FILE` itself |
 | `AI_MODEL` | web, worker | Fixed Bedrock model id (the code default) |
 | `AI_DAILY_CALL_CAP` | web, worker | Fixed to `100`; change in the dashboard |
+| `JUDGE_PASSCODE` | web | Typed in the dashboard by the owner (`sync: false`); kept in the private notes, never in the repo. The judge link is `/judge?code=...`, and changing it logs every judge out |
+| `JUDGE_GATE` | web | `true` turns the gate on; anything else means no gate (`sync: false`) |
+| `CAT_FINDER` | worker | `off` switches the cat-finding model off (the soft middle circle is used) |
+| `ONNXRUNTIME_NODE_INSTALL` | web, worker | Fixed to `skip` in the Blueprint |
 | `S3_PRIVATE_BUCKET` | web, worker | Bucket name, step 1 |
 | `S3_PUBLIC_BUCKET` | web, worker | Bucket name, step 1 |
 | `S3_PUBLIC_BASE_URL` | web, worker | Public bucket URL, step 1 |

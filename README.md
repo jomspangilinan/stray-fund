@@ -12,7 +12,7 @@ Strays multiply when they are fed but not neutered. Neighbours want to help, but
 
 ## How it works
 
-1. **Spot.** A neighbour takes a live camera photo of a cat. Old photos can't be uploaded. The AI checks that it is a real cat, matches it to a known cat or makes a new card, and blurs people, signs and plates before anything is public.
+1. **Spot.** A neighbour takes a live camera photo of a cat. Old photos can't be uploaded. On the judges' AI path the AI checks that it is a real cat, matches it to a known cat or makes a new card, and blurs people, signs and plates before anything is public. For everyone else no AI is called: the cat shows in the yard at once and the photo is published with only the cat sharp (see Test it).
 2. **Report.** After the photo, a neighbour can say a cat looks hurt, pregnant, sick or like a kitten, and add a note only caretakers see. There is no way to report without a photo taken then. A report is a claim: it holds the cat back from funding at once, and it moves nothing else until a person checks it.
 3. **Ear-tip.** The AI does not judge ear-tips; in tests it got them wrong. Neighbours answer Yes, No or Not sure. Two different people saying No queue the cat. A caretaker settles any disagreement.
 4. **Donate.** Neighbours give through PayPal Checkout into one shared fund. Fees are counted, so the fund only holds what arrived.
@@ -90,7 +90,7 @@ PayPal sandbox needs `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and a sandbox bu
 
 **Demo data.** The seed writes a story a judge finds at once: a neighbour's open hurt report (Hapon), a report a caretaker confirmed that now waits on the vet (Bituin), a dismissed one (Dilaw), and a plain waiting list. Its notes are invented, flagged `sample`, and each comes with a drawn stand-in photo. It writes no Treasurer decision: confirm Hapon's report as the caretaker, clear him as the vet, and the real Treasurer weighs it.
 
-**Tests.** `npm test` runs the suite against `TEST_DATABASE_URL`. `npm run lint` and `npx tsc --noEmit` check the rest. `npm run e2e` runs one browser test of the whole story against fakes (about a minute): a hurt report with the camera photo, the desk showing it first, a caretaker confirming, the fund refusing the cat, a vet clearing it, funding, the timeline, and no note text or coordinates on any public page. It uses a scratch database whose name ends in `_e2e`, passed as `E2E_DATABASE_URL` (see the end of `.env.example`). `npx tsx scripts/check-public-leaks.ts` fetches the public pages, `/priority`, `/api/priority`, a cat page with a timeline and the staff desks as a visitor and as each demo role, with a note holding a phone number, a street and a name; see its header for how to run it.
+**Tests.** `npm test` runs the suite (1,899 tests) against `TEST_DATABASE_URL`. `npm run lint` and `npx tsc --noEmit` check the rest. `npm run e2e` runs one browser test of the whole story against fakes (about a minute): a hurt report with the camera photo, the desk showing it first, a caretaker confirming, the fund refusing the cat, a vet clearing it, funding, the timeline, and no note text or coordinates on any public page. It uses a scratch database whose name ends in `_e2e`, passed as `E2E_DATABASE_URL` (see the end of `.env.example`). `npx tsx scripts/check-public-leaks.ts` fetches the public pages, `/priority`, `/api/priority`, a cat page with a timeline and the staff desks as a visitor and as each demo role, with a note holding a phone number, a street and a name; see its header for how to run it.
 
 **The subscription route.** For local work only, set `AI_PROVIDER=claude-cli`. Photo checks and the treasurer then run through `claude -p` on your own Claude login, with no Bedrock calls. The CLI is given no tools and runs in safe mode. Production refuses this setting. Results on this route do not prove Bedrock's model behaves the same.
 
@@ -100,7 +100,13 @@ See [docs/deploy.md](docs/deploy.md): S3 buckets, an IAM role through Render's O
 
 ## Test it
 
-There is no live site for judging. Run it locally (above) or watch the video. Pick Neighbour, Caretaker or Vet in the role strip. The Postman collection is in docs/postman/.
+Live at https://stray-fund.onrender.com (PayPal sandbox, test money). Judges open the private link `/judge?code=…` once; the code is in the private notes on Devpost. It sets a cookie that lasts until 2026-12-16 and unlocks the full app: the Caretaker and Vet roles, donating, reports and the cat votes. Without the cookie a visitor can browse every public page, sign in as a Neighbour and spot a cat; the staff roles, donating, reports and votes answer "Open to judges during the hackathon."
+
+The gate is one switch. `JUDGE_GATE` set to exactly `true` turns it on (with `JUDGE_PASSCODE`); anything else means no gate, so local runs, tests and e2e see the full app.
+
+**Spotting without AI.** A neighbour's photo never calls the AI. The cat shows up in the yard at once with a "Yours" tag, and the photo is published with only the cat sharp and the rest blurred: the phone's own cut-out (YOLO11n-seg on onnxruntime-web) when it can, otherwise the worker develops it (YOLO on onnxruntime-node) within about 60 to 120 seconds, with a soft circle on the box and then the middle circle as fallbacks. Limits are 5 photos per account per day and 50 new public cats per day site-wide. `CAT_FINDER=off` on the worker switches the model off. A caretaker can rotate a photo that came out sideways, or remove it.
+
+Locally, run it as above and pick Neighbour, Caretaker or Vet in the role strip. The Postman collection is in docs/postman/.
 
 ## What this is not yet
 
