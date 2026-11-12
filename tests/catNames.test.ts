@@ -651,6 +651,7 @@ describe("privacy of names", () => {
         "report_confirmed",
         "report_dismissed",
         "report_filed",
+        "report_reopened",
         "sex_answered",
       ].sort(),
     );

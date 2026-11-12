@@ -30,7 +30,7 @@ export function Approvals({ items }: { items: PayoutItem[] }) {
   return (
     <Section id="approvals" count={items.length}>
       {items.map((p) => (
-        <DeskItem key={p.id} label={label(p)}>
+        <DeskItem key={p.id} label={label(p)} anchor={`desk-approval-${p.id}`}>
           <PayoutFacts p={p} />
           {approvalNotice(p.catReport) && <p className="note note-bad mt-2 small font-bold">{approvalNotice(p.catReport)}</p>}
           <ActionForm

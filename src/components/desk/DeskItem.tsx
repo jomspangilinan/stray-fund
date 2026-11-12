@@ -12,7 +12,7 @@ const SHOWN_MS = 1600;
  * One thing waiting on the desk. When an action inside it works, the card turns into the answer, stays long
  * enough to read, then the list refreshes and the item leaves. If it is still listed after that, it comes back.
  */
-export function DeskItem({ label, children }: { label?: string; children: React.ReactNode }) {
+export function DeskItem({ label, anchor, children }: { label?: string; /** The id the swipe stack scrolls to for this item's full form. */ anchor?: string; children: React.ReactNode }) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   // A warning or a failure stays until the person dismisses it, so it cannot be missed.
@@ -37,7 +37,7 @@ export function DeskItem({ label, children }: { label?: string; children: React.
 
   if (held) {
     return (
-      <li className="card">
+      <li id={anchor} className="card scroll-mt-4">
         <ToneNote tone={held.tone} message={held.message} />
         {label && <p className="small soft mt-2">{label}</p>}
         <button
@@ -55,14 +55,14 @@ export function DeskItem({ label, children }: { label?: string; children: React.
   }
   if (message !== null) {
     return (
-      <li className="card">
+      <li id={anchor} className="card scroll-mt-4">
         <ToneNote tone="ok" message={message} />
         {label && <p className="small soft mt-2">{label}</p>}
       </li>
     );
   }
   return (
-    <li className="card">
+    <li id={anchor} className="card scroll-mt-4">
       <DeskItemContext.Provider value={{ done: setMessage, hold: (m, tone) => setHeld({ message: m, tone }) }}>{children}</DeskItemContext.Provider>
     </li>
   );

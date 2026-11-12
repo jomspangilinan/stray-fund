@@ -76,8 +76,8 @@ describe("tabs and consoles", () => {
     expect(isActiveTab(TABS[1], "/")).toBe(false);
   });
 
-  it("hands a console link only to caretakers and vets, each their own", () => {
-    expect(consoleFor("caretaker")?.href).toBe("/caretaker");
+  it("hands an account-menu console link only to vets; a caretaker's way to the desk sits in the header", () => {
+    expect(consoleFor("caretaker")).toBeNull();
     expect(consoleFor("vet")?.href).toBe("/vet");
     expect(consoleFor("donor")).toBeNull();
     expect(consoleFor("foster")).toBeNull();

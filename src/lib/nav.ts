@@ -16,9 +16,16 @@ export const HELPED_PAGES: readonly PageLink[] = [
   { href: "/missions", label: "Missions" },
 ];
 
-export type Tab = { key: "yard" | "cats" | "spot" | "helped" | "fund"; href: string; label: string; pages: readonly string[] };
+export type Tab = {
+  key: "yard" | "cats" | "spot" | "helped" | "fund" | "check" | "deskCats" | "rules";
+  href: string;
+  label: string;
+  pages: readonly string[];
+  /** Lit on its own page only, not on the pages under it. */
+  exact?: boolean;
+};
 
-/** The same five tabs for everyone. Roles change what the account menu offers, not the tab bar. */
+/** The neighbour tabs, for everyone except a caretaker on the desk. */
 export const TABS: readonly Tab[] = [
   { key: "yard", href: "/", label: "Yard", pages: ["/"] },
   { key: "cats", href: "/cats", label: "Cats", pages: ["/cats"] },
@@ -27,24 +34,49 @@ export const TABS: readonly Tab[] = [
   { key: "fund", href: "/ledger", label: "Fund", pages: FUND_PAGES.map((p) => p.href) },
 ];
 
+/** A caretaker's tabs while on the desk. To check sits at /caretaker, so it lights only there. */
+export const DESK_TABS: readonly Tab[] = [
+  { key: "check", href: "/caretaker", label: "To check", pages: ["/caretaker"], exact: true },
+  { key: "deskCats", href: "/caretaker/cats", label: "Cats", pages: ["/caretaker/cats"] },
+  { key: "rules", href: "/caretaker/rules", label: "Rules", pages: ["/caretaker/rules"] },
+];
+
+function under(pathname: string, root: string): boolean {
+  return pathname === root || pathname.startsWith(`${root}/`);
+}
+
+/** /caretaker and the pages under it; /caretakers is not. */
+export function isOnDesk(pathname: string): boolean {
+  return under(pathname, "/caretaker");
+}
+
+/** The URL picks the mode: every desk page shows the desk tabs, whoever is looking. DeskGate tells a non-caretaker the page is for caretakers. */
+export function tabsFor(pathname: string): readonly Tab[] {
+  return isOnDesk(pathname) ? DESK_TABS : TABS;
+}
+
+/** The header link, in the same spot on every page: out to the neighbour view from the desk (for anyone, so nobody is stuck there), and back to the desk from anywhere else (for a caretaker only). */
+export function deskSwitchFor(role: Role | null | undefined, pathname: string): PageLink | null {
+  if (isOnDesk(pathname)) return { href: "/", label: "Neighbour view" };
+  return role === "caretaker" ? { href: "/caretaker", label: "Back to desk" } : null;
+}
+
 export type ConsoleLink = { href: string; label: string };
 
-/** The one console a role may open from the account menu. Everyone else gets none. The pages and APIs check the role again. */
+/** The console a role opens from the account menu: the vet's only. A caretaker's desk link is in the header (deskSwitchFor). The pages and APIs check the role again. */
 export function consoleFor(role: Role | null | undefined): ConsoleLink | null {
-  if (role === "caretaker") return { href: "/caretaker", label: "Caretaker desk" };
   if (role === "vet") return { href: "/vet", label: "Vet desk" };
   return null;
 }
 
-/** Whether a tab is the current page. Yard matches only the home page itself; a grouped tab matches each of its pages. */
+/** Whether a tab is the current page. Yard and an exact tab match only their own page; a grouped tab matches each of its pages and what sits under them. */
 export function isActiveTab(tab: Tab, pathname: string): boolean {
-  return tab.pages.some((page) => (page === "/" ? pathname === "/" : pathname === page || pathname.startsWith(`${page}/`)));
+  return tab.pages.some((page) => (page === "/" || tab.exact ? pathname === page : under(pathname, page)));
 }
 
 /** Where the demo role strip takes you. A desk role lands on its desk; any other role keeps the page unless it is a desk page, then the yard. */
 export function landingAfterSwitch(role: Role, pathname: string): string {
   if (role === "caretaker") return "/caretaker";
   if (role === "vet") return "/vet";
-  const onDesk = ["/caretaker", "/vet"].some((d) => pathname === d || pathname.startsWith(`${d}/`));
-  return onDesk ? "/" : pathname;
+  return isOnDesk(pathname) || under(pathname, "/vet") ? "/" : pathname;
 }

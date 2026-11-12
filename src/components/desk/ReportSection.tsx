@@ -21,7 +21,7 @@ function dismissQuestion(r: ReportItem): string {
 function Card({ r }: { r: ReportItem }) {
   const title = CLAIM_TITLE[r.claim] ?? r.claim;
   return (
-    <DeskItem label={`${title}, ${r.catName ?? "cat not sorted yet"}`}>
+    <DeskItem label={`${title}, ${r.catName ?? "cat not sorted yet"}`} anchor={`desk-report-${r.id}`}>
       <p className="small soft">{SAYS(r.source)}</p>
       <h3 className="text-xl font-extrabold">{title}</h3>
       <p className="small">{r.catName ? `About ${r.catName}` : "A cat we don't know yet"}</p>

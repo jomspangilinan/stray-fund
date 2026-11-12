@@ -1,9 +1,9 @@
 import { IllegalTransition } from "../catTransitions";
 import { describeError } from "../errors";
-import { catAdoptable, catAdopted, catRemove, catSetDetails, catRename, catSetEarTip, catUndoNeutered, nameApprove, nameDismiss, photoHold, photoPublish, photoRotate, sightingConfirmNew, sightingMerge, sightingReject, wakeupDismiss, wakeupRetry } from "./cats";
+import { catAdoptable, catAdopted, catNotAdoptable, catNotAdopted, catRemove, catSetDetails, catRename, catSetEarTip, catUndoNeutered, nameApprove, nameDismiss, photoHold, photoPublish, photoRotate, sightingConfirmNew, sightingMerge, sightingReject, wakeupDismiss, wakeupRetry } from "./cats";
 import { evidenceAccept, evidenceConfirmEarTip, evidenceReject, reviewResolve } from "./evidence";
 import { payoutAllowRetry, payoutApprove, payoutNote, payoutReject, payoutResolve } from "./payouts";
-import { reportConfirm, reportDismiss } from "./reports";
+import { reportConfirm, reportDismiss, reportReopen } from "./reports";
 import { guardrailsUpdate, payeeAdd, payeeRemove, vetUpdate } from "./rules";
 import { Refusal, type Body, type Handler, type Tone } from "./shared";
 
@@ -30,6 +30,8 @@ const HANDLERS = {
   cat_undo_neutered: catUndoNeutered,
   cat_adoptable: catAdoptable,
   cat_adopted: catAdopted,
+  cat_not_adopted: catNotAdopted,
+  cat_not_adoptable: catNotAdoptable,
   cat_remove: catRemove,
   photo_publish: photoPublish,
   photo_hold: photoHold,
@@ -42,6 +44,7 @@ const HANDLERS = {
   wakeup_dismiss: wakeupDismiss,
   report_confirm: reportConfirm,
   report_dismiss: reportDismiss,
+  report_reopen: reportReopen,
 } satisfies Record<string, Handler>;
 
 export const ACTION_NAMES = Object.keys(HANDLERS);
