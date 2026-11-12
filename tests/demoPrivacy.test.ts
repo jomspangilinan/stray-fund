@@ -16,7 +16,7 @@ import { COLONY } from "../src/lib/config";
 import { getCaretakerQueue, getRulesView } from "../src/server/caretaker/queue";
 import { getCatForViewer } from "../src/server/public";
 import { SESSION_COOKIE, signSession, switchPersona, type PersonaKey } from "../src/server/session";
-import { storeOriginal, publishScrubbed } from "../src/server/photos";
+import { storeOriginal, publishCatOnly } from "../src/server/photos";
 import { getVetBooking, listVetDashboard } from "../src/server/vetFlow";
 import { maskEmail } from "../src/server/demoPrivacy";
 import { addPayout, makeWorld } from "./helpers/payoutFixtures";
@@ -131,7 +131,7 @@ describe("I1: DEMO_MODE on, as the demo caretaker", () => {
     expect(hidden.headers.get("content-type")).toBe("image/svg+xml");
     expect(await hidden.text()).toContain("Hidden in the demo");
 
-    const { key } = await publishScrubbed(original.key, []);
+    const { key } = await publishCatOnly(original.key, { box: null, mask: null });
     await db.update(sightings).set({ publicKey: key, publicReady: true }).where(eq(sightings.id, held.id));
     const pub = await get(held.id);
     expect(pub.status).toBe(302);

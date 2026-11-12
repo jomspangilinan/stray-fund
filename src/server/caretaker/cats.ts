@@ -3,13 +3,14 @@ import { insertNewCat, publishPhoto } from "../spot";
 import { resolveReviewBySubject } from "../agent/review";
 import { disagreementSubject, lateYesSubject } from "../earTipFlags";
 import { IllegalTransition, MoneyAlreadyMoved, markAlreadyNeutered, transitionCat } from "../catTransitions";
+import { parseCatBox } from "@/lib/keepsake";
 import { AssessmentSchema } from "../ai/schemas";
 import { withColonyLock, type Tx } from "../db/client";
 import { allocations, cats, earTipFlags, nameSuggestions, payouts, reports, sightings, treatments, wakeups } from "../db/schema";
 import { uniqueName } from "../catNames";
 import { NAME_APPROVED, NAME_DISMISSED, NAME_SET } from "../privateActions";
 import { parseCatName } from "@/lib/catNames";
-import { publishScrubbed, type Box } from "../photos";
+import { publishCatOnly, type Box } from "../photos";
 import { removePublicCopy, StoredObjectMissing } from "../storage";
 import { attachReports, confirmOpenClaim, dismissCatlessReports, fileStaffReport, HOLD_CLAIMS } from "../reports";
 import { enqueueWakeup } from "../wakeups";
@@ -372,7 +373,7 @@ export const photoPublish: Handler = async (caretakerId, body) => {
 
   let key: string;
   try {
-    key = (await publishScrubbed(s.originalKey, regions)).key;
+    key = (await publishCatOnly(s.originalKey, { box: parseCatBox(s.catBox), mask: null }, regions)).key;
   } catch (e) {
     if (e instanceof StoredObjectMissing) throw new Refusal(409, "The original photo is missing, so it cannot be published.");
     throw e;

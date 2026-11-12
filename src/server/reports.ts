@@ -181,14 +181,13 @@ async function blockedReason(
 }
 
 /**
- * The AI's photo guesses of hurt, pregnant or sick, filed as reports from "photo" with a neighbour's power. A claim
+ * The AI's photo guesses of kitten, hurt, pregnant or sick, filed as reports from "photo" with a neighbour's power. A claim
  * that fails the shared check, or that was dismissed or vet-cleared on this cat in the last 30 days, is not filed, so
  * a new photo of a hurt cat does not add a card or re-hold a cat a person just checked. With no cat yet the report
  * waits for attachReports.
  */
 export async function filePhotoReports(tx: Tx, sightingId: string, catId: string | null, claims: readonly Claim[]): Promise<void> {
-  const wanted = claims.filter((c) => (HOLD_CLAIMS as readonly string[]).includes(c));
-  for (const claim of wanted) {
+  for (const claim of claims) {
     if (catId && (await blockedReason(tx, { catId, claim, reporterId: null }))) continue;
     await fileReport(tx, { sightingId, catId, claim, note: null, source: "photo", reporterId: null });
   }

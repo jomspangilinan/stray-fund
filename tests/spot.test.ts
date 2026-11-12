@@ -5,6 +5,7 @@ import { closePool, db } from "../src/server/db/client";
 import { heldCatIds } from "../src/server/reports";
 import { cats, earTipFlags, reports, reviewRequests, sightings, users, wakeups } from "../src/server/db/schema";
 import { truncateAll } from "./helpers/db";
+import { checkerImage, greyRegion, variance } from "./helpers/images";
 import { createTestPool } from "./helpers/db";
 import { CAT_NAMES } from "../src/lib/catNames";
 import { COLONY } from "../src/lib/config";
@@ -285,14 +286,14 @@ describe("processSpot: new cats", () => {
     expect(bySex).toEqual({ A: "female", C: "unknown" });
   });
 
-  it("writes only a kitten flag to the cat, and files a photo report for each claim of hurt, pregnant or sick", async () => {
+  it("writes no flag to the cat, and files a photo report for each claim of kitten, hurt or pregnant", async () => {
     script.assess = () => assessWith({ flags: { kitten: true, pregnant: true, injured: true, sick: false } });
     const u = await makeUser();
     await processSpot({ ai: true, jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
     const [cat] = await catRows();
-    expect(cat.flags).toEqual(["kitten"]);
+    expect(cat.flags).toEqual([]);
     const rows = await db.select().from(reports);
-    expect(rows.map((r) => r.claim).sort()).toEqual(["injured", "pregnant"]);
+    expect(rows.map((r) => r.claim).sort()).toEqual(["injured", "kitten", "pregnant"]);
     for (const r of rows) {
       expect(r).toMatchObject({ source: "photo", status: "open", catId: cat.id, reporterId: null, note: null, photoAgrees: null });
       expect(r.sightingId).not.toBeNull();
@@ -490,14 +491,16 @@ describe("processSpot: matching", () => {
     expect(await wakeupKinds()).toEqual([]);
   });
 
-  it("keeps confirmed flags, adds a kitten flag, and files a report for a new claim instead of a flag", async () => {
+  it("keeps confirmed flags, and files a report for a new claim, kitten included, instead of a flag", async () => {
     const { cat } = await seedCat({ status: "queued", earTipped: false, flags: ["injured"] });
     script.assess = () => assessWith({ flags: { kitten: true, pregnant: true, injured: false, sick: false } });
     script.match = () => ({ match_cat_id: cat.id, confidence: 0.9, reason: "same" });
     const u = await makeUser();
     await processSpot({ ai: true, jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
-    expect((await catRows())[0].flags.sort()).toEqual(["injured", "kitten"]);
-    expect(await db.select().from(reports)).toMatchObject([{ claim: "pregnant", catId: cat.id, status: "open", source: "photo" }]);
+    expect((await catRows())[0].flags).toEqual(["injured"]);
+    const filed = await db.select().from(reports);
+    expect(filed.map((r) => r.claim).sort()).toEqual(["kitten", "pregnant"]);
+    for (const r of filed) expect(r).toMatchObject({ catId: cat.id, status: "open", source: "photo" });
   });
 
   it("does not pile up reports: a claim already confirmed or already open on the cat is not filed again", async () => {
@@ -562,6 +565,33 @@ describe("location", () => {
 });
 
 describe("public photo", () => {
+  it("a matched photo that says kitten leaves the cat's flags alone and files a photo kitten report for it", async () => {
+    const { cat } = await seedCat({});
+    script.assess = () => assessWith({ flags: { kitten: true, pregnant: false, injured: false, sick: false } });
+    script.match = () => ({ match_cat_id: cat.id, confidence: 0.99, reason: "same" });
+    const u = await makeUser();
+    await processSpot({ ai: true, jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id });
+    expect((await catRows())[0].flags).not.toContain("kitten");
+    expect(await db.select().from(reports)).toMatchObject([{ claim: "kitten", catId: cat.id, source: "photo", status: "open" }]);
+  });
+
+  it("publishes cat-only on the AI path: sharp around the stored box, blurred far from it, sensitive regions blurred", async () => {
+    script.assess = () => assessWith({ sensitive_regions: [{ x: 0.1, y: 0.4, w: 0.1, h: 0.2 }] });
+    const u = await makeUser();
+    const photo = await sharp(await checkerImage(400, 300, { left: 0, top: 0, width: 400, height: 300 })).jpeg({ quality: 95 }).toBuffer();
+    await processSpot({ ai: true, jpeg: photo, lat: 10.2, lng: 120.6, userId: u.id, box: { x: 0, y: 0.2, w: 0.3, h: 0.6 } });
+    const [s] = await sightingRows();
+    expect(s.publicReady).toBe(true);
+    const out = (getStorage() as unknown as { readPublic(k: string): Buffer }).readPublic(s.publicKey!);
+    const varAt = async (img: Buffer, left: number, top: number, width = 20, height = 20) =>
+      variance(await greyRegion(img, { left, top, width, height }));
+    const sharpVar = await varAt(photo, 20, 100);
+    // Box centre is (60, 150), circle radius 120 * 1.3 = 156. The region (40..80, 120..180) is blurred inside it.
+    expect(await varAt(out, 85, 100)).toBeGreaterThan(sharpVar * 0.7);
+    expect(await varAt(out, 40, 130, 10, 10)).toBeLessThan(sharpVar * 0.1);
+    expect(await varAt(out, 360, 20)).toBeLessThan(sharpVar * 0.1);
+  });
+
   it("blurs the assessment's sensitive regions and makes the photo public", async () => {
     script.assess = () => assessWith({ sensitive_regions: [{ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }] });
     const u = await makeUser();

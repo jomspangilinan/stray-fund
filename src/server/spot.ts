@@ -1,4 +1,4 @@
-import type { CatBox } from "@/lib/keepsake";
+import { parseCatBox, type CatBox } from "@/lib/keepsake";
 import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
 import { catAvatar, NEUTRAL_AVATAR, parseAvatar, type Avatar } from "@/lib/avatar";
 import { COLONY } from "@/lib/config";
@@ -12,7 +12,7 @@ import { autoPublishable } from "./photoGate";
 import { nameIsSafe, safeBio } from "./placeText";
 import { fuzzLocation } from "./location";
 import { attachReports, filePhotoReports } from "./reports";
-import { maskUsable, publishCatOnly, publishScrubbed, storeOriginal, type Box } from "./photos";
+import { maskUsable, publishCatOnly, storeOriginal, type Box } from "./photos";
 import { avatarFromPhoto } from "./photoAvatar";
 import { getStorage, removePublicCopy } from "./storage";
 
@@ -390,11 +390,10 @@ async function markReview(sightingId: string, assessment: Assessment | null, can
   return resultOf(now);
 }
 
-// The photo's guess of hurt, pregnant or sick is only a claim, filed as a report. cats.flags holds confirmed facts,
-// and a kitten is the one guess a photo can state as fact.
-const REPORT_FLAGS = ["pregnant", "injured", "sick"] as const;
+// The photo's guess of kitten, hurt, pregnant or sick is only a claim, filed as a report a caretaker confirms.
+// cats.flags holds confirmed facts, so nothing a photo says is written there.
+const REPORT_FLAGS = ["kitten", "pregnant", "injured", "sick"] as const;
 const claimsOf = (a: Assessment) => REPORT_FLAGS.filter((f) => a.flags[f]);
-const flagsOf = (a: Assessment): string[] => (a.flags.kitten ? ["kitten"] : []);
 
 function cleanName(raw: string): string {
   const name = raw
@@ -433,8 +432,6 @@ export async function applyAssessment(sightingId: string, a: Assessment, m: Matc
 
     if (matchedCat && m.confidence >= limits.matchConfidenceMin) {
       const cat = matchedCat;
-      const flags = [...new Set([...cat.flags, ...flagsOf(a)])];
-      if (flags.length !== cat.flags.length) await tx.update(cats).set({ flags }).where(eq(cats.id, cat.id));
       await tx
         .update(sightings)
         .set({ catId: cat.id, state: "matched", matchConfidence: m.confidence, assessment: a })
@@ -494,7 +491,6 @@ export async function insertNewCat(tx: Tx, s: SightingRow, a: Assessment | null)
     .values({
       name,
       sex,
-      flags: a ? flagsOf(a) : [],
       coat: a ? { colors: a.colors, markings: a.markings } : null,
       coatPattern: a?.coat_pattern ?? null,
       avatar: a ? catAvatar({ colors: a.colors, markings: a.markings }, a.coat_pattern) : null,
@@ -514,7 +510,9 @@ export async function insertNewCat(tx: Tx, s: SightingRow, a: Assessment | null)
 export async function publishPhoto(sightingId: string, originalKey: string, regions: unknown): Promise<void> {
   if (!Array.isArray(regions)) return;
   try {
-    const { key } = await publishScrubbed(originalKey, regions as Box[]);
+    const [row] = await db.select({ box: sightings.catBox }).from(sightings).where(eq(sightings.id, sightingId));
+    // Masks are not stored, so a republish keeps the soft circle around the stored box.
+    const { key } = await publishCatOnly(originalKey, { box: parseCatBox(row?.box), mask: null }, regions as Box[]);
     const set = await db
       .update(sightings)
       .set({ publicKey: key, publicReady: true })

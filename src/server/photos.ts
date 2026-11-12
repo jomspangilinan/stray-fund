@@ -1,4 +1,4 @@
-import sharp, { type OverlayOptions } from "sharp";
+import sharp from "sharp";
 import { fromCatBox, type CatBox } from "../lib/keepsake";
 import { MASK_SIDE } from "../lib/catMask";
 import { getStorage, newPrivateKey, newPublicKey } from "./storage";
@@ -108,29 +108,6 @@ function toRect(box: unknown, width: number, height: number): Rect | null {
   const rh = Math.min(height, Math.ceil(y1 * height)) - top;
   if (rw < 1 || rh < 1) return null;
   return { left, top, width: rw, height: rh };
-}
-
-/** Blurs the regions of a stored original and publishes the result as a public JPEG. */
-export async function publishScrubbed(originalKey: string, regions: Box[]): Promise<{ key: string }> {
-  const storage = getStorage();
-  const original = await storage.getPrivate(originalKey);
-  const { width, height } = await sharp(original).metadata();
-  if (!width || !height) throw new InvalidPhoto("not_an_image");
-
-  const overlays: OverlayOptions[] = [];
-  for (const region of Array.isArray(regions) ? regions : []) {
-    const r = toRect(region, width, height);
-    if (!r) continue;
-    // Strong enough that text stays unreadable: scales with the box, never below the floor.
-    const sigma = Math.min(1000, Math.max(MIN_SIGMA, Math.max(r.width, r.height) / 4));
-    const patch = await sharp(original).extract(r).blur(sigma).toBuffer();
-    overlays.push({ input: patch, left: r.left, top: r.top });
-  }
-
-  const out = await sharp(original).composite(overlays).jpeg({ quality: 85 }).toBuffer();
-  const key = newPublicKey();
-  await storage.putPublic(key, out, "image/jpeg");
-  return { key };
 }
 
 export const KEEP_MARGIN = 0.15;

@@ -22,6 +22,7 @@ import { fileReview } from "../src/server/agent/review";
 import { clearCatForSurgery, fileReport, heldCatIds } from "../src/server/reports";
 import { requestPayout } from "../src/server/moneyGate";
 import { storeOriginal } from "../src/server/photos";
+import { checkerImage, greyRegion, variance } from "./helpers/images";
 import { getCatCard, listAgentActions, manilaDate } from "../src/server/public";
 import { SESSION_COOKIE, signSession, type Role } from "../src/server/session";
 import { getStorage } from "../src/server/storage";
@@ -820,6 +821,22 @@ describe("photos", () => {
     expect(() => (getStorage() as unknown as { readPublic: (k: string) => Buffer }).readPublic(row.publicKey!)).not.toThrow();
     expect((await getCatCard(cat.id))!.cat.photoUrl).not.toBeNull();
     expect((await act("photo_publish", { sightingId: s.id, noSensitive: true })).status).toBe(409);
+  });
+
+  it("publishes cat-only: sharp around the stored box, blurred far from it", async () => {
+    const [cat] = await db.insert(cats).values({ name: "Box cat", areaName: "x", status: "neutered", earTipped: true }).returning();
+    const photo = await sharp(await checkerImage(400, 300, { left: 0, top: 0, width: 400, height: 300 })).jpeg({ quality: 95 }).toBuffer();
+    const { key } = await storeOriginal(photo);
+    const [s] = await db
+      .insert(sightings)
+      .values({ catId: cat.id, originalKey: key, state: "new_cat", assessment: { ...ASSESS }, catBox: { x: 0, y: 0.2, w: 0.3, h: 0.6 } })
+      .returning();
+    expect((await act("photo_publish", { sightingId: s.id, noSensitive: true })).status).toBe(200);
+    const out = (getStorage() as unknown as { readPublic: (k: string) => Buffer }).readPublic((await sightingRow(s.id)).publicKey!);
+    const varAt = async (img: Buffer, left: number, top: number) => variance(await greyRegion(img, { left, top, width: 20, height: 20 }));
+    const sharpVar = await varAt(photo, 20, 100);
+    expect(await varAt(out, 60, 140)).toBeGreaterThan(sharpVar * 0.7);
+    expect(await varAt(out, 360, 20)).toBeLessThan(sharpVar * 0.1);
   });
 
   it("stored regions are used without the tick", async () => {
