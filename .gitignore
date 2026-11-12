@@ -19,3 +19,9 @@ tests/fixtures/vision/
 
 # onnxruntime-web runtime, copied by scripts/copy-ort.mjs after npm install
 public/ort/
+
+# Working notes stay on the owner's machine, not on GitHub. The README links the three kept below.
+/docs/*
+!/docs/deploy.md
+!/docs/licences.md
+!/docs/postman/
