@@ -9,7 +9,8 @@
  *
  * It fetches as a signed-out visitor and as each demo role (neighbour, caretaker, vet). For the report story it adds a
  * note holding a phone number, a street and a person's name, and Treasurer reasons that repeat that note. Run the
- * server with DEMO_MODE=true, which is how the open demo hides a visitor's note from staff too.
+ * server with DEMO_MODE=true. The caretaker desk there shows a report's note as written (the owner's call) and hides
+ * only the AI's reasons; no public page or payload may carry the note.
  */
 import { randomUUID } from "node:crypto";
 import { SignJWT } from "jose";
@@ -325,16 +326,16 @@ async function main() {
     for (const need of ["Neighbour reported hurt", "A caretaker checked this report and closed it.", "Treasurer asked a caretaker to check", "The Treasurer asked a caretaker to look at a cat."]) {
       if (!timeline.includes(need)) { bad++; console.log(`FAIL: the cat page timeline did not carry "${need}"`); }
     }
-    // A staff desk in the open demo hides a visitor's own note, and the area name stands in for coordinates.
+    // The demo caretaker desk shows a report's note as written and hides the AI's reasons whole.
     for (const [who, c] of [["caretaker", careToken], ["vet", vetToken]] as const) {
       const desk = await (await fetch(`${BASE}/caretaker`, { headers: { cookie: `sf_session=${c}` } })).text();
       checked++;
       if (who === "caretaker") {
-        for (const need of [`LeakOpen ${tag}`, `LeakFunded ${tag}`, "Hidden in the demo"]) {
+        for (const need of [`LeakOpen ${tag}`, `LeakFunded ${tag}`, NOTE, "Hidden in the demo"]) {
           if (!desk.includes(need)) { bad++; console.log(`FAIL: the caretaker desk did not carry "${need}", so the scan proved nothing`); }
         }
         // The AI's words on a payout and a review are hidden whole, not filtered: a lowercase name or a spelled-out number gets past a filter.
-        for (const gone of [PHONE_REASON, LOWER_REASON, `leakopenreview-${tag}`, "0917 555 0142", "zero nine one seven"]) {
+        for (const gone of [PHONE_REASON, LOWER_REASON, `leakopenreview-${tag}`, "zero nine one seven"]) {
           if (desk.includes(gone)) { bad++; console.log(`LEAK caretaker desk carries "${gone.slice(0, 40)}"`); }
         }
       }
