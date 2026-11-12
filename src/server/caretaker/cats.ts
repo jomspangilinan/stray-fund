@@ -381,7 +381,8 @@ export const photoPublish: Handler = async (caretakerId, body) => {
     return await withColonyLock(async (tx) => {
     const moved = await tx
       .update(sightings)
-      .set({ publicKey: key, publicReady: true })
+      // A plain photo still waiting for the worker is settled here, so the worker never overwrites this copy.
+      .set({ publicKey: key, publicReady: true, ...(s.needsDevelop ? { developedAt: sql`coalesce(${sightings.developedAt}, now())` } : {}) })
       .where(and(eq(sightings.id, sightingId), eq(sightings.publicReady, false)))
       .returning({ id: sightings.id });
     if (moved.length === 0) throw new Refusal(409, "This photo is already public.");

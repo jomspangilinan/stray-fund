@@ -889,6 +889,37 @@ describe("photos", () => {
     expect(JSON.stringify(logged.mock.calls)).not.toContain(key);
   });
 
+  it("publishing a plain photo that is waiting for the worker keeps the worker from overwriting it", async () => {
+    const { cat } = await heldSighting({ ...ASSESS });
+    const { key } = await storeOriginal(await image());
+    const [s] = await db.insert(sightings).values({ catId: cat.id, originalKey: key, state: "new_cat", assessment: { ...ASSESS } as object, needsDevelop: true, createdAt: new Date(Date.now() - 3_600_000) }).returning();
+    expect((await act("photo_publish", { sightingId: s.id, noSensitive: true })).status).toBe(200);
+    const mine = (await sightingRow(s.id)).publicKey!;
+    expect((await sightingRow(s.id)).developedAt).not.toBeNull();
+    setCatFinderForTests(async () => ({ box: null, mask: null }));
+    try {
+      expect(await developNext()).toBe("idle");
+    } finally {
+      setCatFinderForTests(null);
+    }
+    expect((await sightingRow(s.id)).publicKey).toBe(mine);
+    expect(() => (getStorage() as unknown as { readPublic: (k: string) => Buffer }).readPublic(mine)).not.toThrow();
+  });
+
+  it("a publish that loses the race to another publish deletes the copy it made", async () => {
+    const { s } = await heldSighting({ ...ASSESS });
+    const real = getStorage().putPublic.bind(getStorage());
+    const made: string[] = [];
+    vi.spyOn(getStorage(), "putPublic").mockImplementationOnce(async (key, buf, type) => {
+      made.push(key);
+      await real(key, buf, type);
+      await db.update(sightings).set({ publicReady: true, publicKey: "photos/00000000-0000-4000-8000-000000000000.jpg" }).where(eq(sightings.id, s.id));
+    });
+    expect((await act("photo_publish", { sightingId: s.id, noSensitive: true })).status).toBe(409);
+    expect(made).toHaveLength(1);
+    expect(() => (getStorage() as unknown as { readPublic: (k: string) => Buffer }).readPublic(made[0])).toThrow();
+  });
+
   it("holding a plain photo that is still waiting for the worker stops the worker publishing it", async () => {
     const { cat } = await heldSighting({ ...ASSESS });
     const { key } = await storeOriginal(await image());
