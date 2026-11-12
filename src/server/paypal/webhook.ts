@@ -23,6 +23,36 @@ const HEADERS = {
   transmission_time: "paypal-transmission-time",
 } as const;
 
+/** PayPal answered 429. That says nothing about the signature, so the route answers 500 and PayPal retries. */
+export class WebhookVerifyThrottled extends Error {
+  constructor() {
+    super("PayPal throttled the webhook verification");
+    this.name = "WebhookVerifyThrottled";
+  }
+}
+
+/**
+ * Cheap shape checks on the signature headers, so an anonymous POST with dummy
+ * headers never costs a PayPal call. Not a verification: PayPal still decides.
+ */
+export function headersPlausible(headers: Headers): boolean {
+  const certUrl = headers.get(HEADERS.cert_url);
+  if (!certUrl) return false;
+  let url: URL;
+  try {
+    url = new URL(certUrl);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" || !url.hostname.endsWith(".paypal.com")) return false;
+  return (
+    /^SHA256withRSA$/.test(headers.get(HEADERS.auth_algo) ?? "") &&
+    /^[A-Za-z0-9-]{1,64}$/.test(headers.get(HEADERS.transmission_id) ?? "") &&
+    !Number.isNaN(Date.parse(headers.get(HEADERS.transmission_time) ?? "")) &&
+    !!headers.get(HEADERS.transmission_sig)
+  );
+}
+
 /**
  * Asks PayPal to verify the signature. The raw body is spliced into the request
  * as text, never parsed and reserialized, since any change would break the check.
@@ -41,6 +71,7 @@ export async function verifyWebhook(headers: Headers, rawBody: string): Promise<
     if (!v) return false;
     meta[key] = v;
   }
+  if (!headersPlausible(headers)) return false;
   const c = credentials();
   const signal = AbortSignal.timeout(30_000);
   const token = await accessToken(c, signal);
@@ -51,6 +82,7 @@ export async function verifyWebhook(headers: Headers, rawBody: string): Promise<
     body,
     signal,
   });
+  if (res.status === 429) throw new WebhookVerifyThrottled();
   // A 4xx means PayPal did not accept the verification request, so we cannot
   // vouch for the event. 5xx is PayPal's fault and must be retried.
   if (res.status >= 400 && res.status < 500) return false;

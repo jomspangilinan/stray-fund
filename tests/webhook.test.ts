@@ -136,6 +136,50 @@ describe("signature", () => {
   });
 });
 
+describe("pre-checks before calling PayPal", () => {
+  const body = JSON.stringify({ id: "EV-1", event_type: "X" });
+  const fetchCalls = () => (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+
+  it.each([
+    ["a foreign host", { "paypal-cert-url": "https://evil.example/v1/notifications/certs/CERT-1" }],
+    ["evilpaypal.com", { "paypal-cert-url": "https://evilpaypal.com/cert" }],
+    ["paypal.com.evil.example", { "paypal-cert-url": "https://paypal.com.evil.example/cert" }],
+    ["a plain http cert url", { "paypal-cert-url": "http://api.paypal.com/cert" }],
+    ["an unlisted algorithm", { "paypal-auth-algo": "SHA1withRSA" }],
+    ["a transmission id with bad characters", { "paypal-transmission-id": "tx 1; drop" }],
+    ["a transmission id over 64 characters", { "paypal-transmission-id": "a".repeat(65) }],
+    ["an unparseable transmission time", { "paypal-transmission-time": "yesterday" }],
+  ])("answers 400 with no call to PayPal for %s", async (_name, override) => {
+    const res = await send(body, { ...SIG_HEADERS, ...override });
+    expect(res.status).toBe(400);
+    expect(fetchCalls()).toBe(0);
+    expect(verifyCalls).toHaveLength(0);
+  });
+
+  it("answers 400 with no call to PayPal for five dummy headers", async () => {
+    const dummy = Object.fromEntries(Object.keys(SIG_HEADERS).map((k) => [k, "x"]));
+    expect((await send(body, dummy)).status).toBe(400);
+    expect(fetchCalls()).toBe(0);
+  });
+
+  it("still verifies plausible headers on a real PayPal cert url", async () => {
+    const res = await send(body, {
+      ...SIG_HEADERS,
+      "paypal-cert-url": "https://api.paypal.com/v1/notifications/certs/CERT-360caa42-fca2a594-1d93a270",
+    });
+    expect(res.status).toBe(200);
+    expect(verifyCalls).toHaveLength(1);
+  });
+
+  it("answers 500 so PayPal retries when the verify call is throttled with 429", async () => {
+    verifyHttp = 429;
+    const res = await send(body);
+    expect(res.status).toBe(500);
+    expect(verifyCalls).toHaveLength(1);
+    expect(await eventRows()).toHaveLength(0);
+  });
+});
+
 describe("body cap", () => {
   it("refuses a body over 64 KB with 413 before any call to PayPal", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
