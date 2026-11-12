@@ -668,6 +668,15 @@ describe("report_changed wakes the treasurer", () => {
     expect((await db.select().from(cats).where(eq(cats.id, tom.id)))[0].status).toBe("funded");
   });
 
+  it("an unauthorised override with an empty pool answers OVERRIDE_NEEDS_CHECKED_REPORT, not INSUFFICIENT_FUNDS", async () => {
+    const { tom } = await trio();
+    const { call } = setup();
+    const refused = await call("fund_next_cat", { cat_id: tom.id, reason: "Mimi and Kit can wait, Tom goes first." });
+    expect(refused.isError).toBe(true);
+    expect(refused.body.code).toBe("OVERRIDE_NEEDS_CHECKED_REPORT");
+    expect(await db.select().from(allocations)).toHaveLength(0);
+  });
+
   it("uncoveredPairs lists each cat ahead of the pick with no checked cat in the pair", () => {
     const order = [rc("A", "A"), rc("B", "B"), rc("C", "C")];
     expect(uncoveredPairs(order, "A", new Set())).toEqual([]);

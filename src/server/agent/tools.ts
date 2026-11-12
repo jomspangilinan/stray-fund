@@ -130,37 +130,32 @@ async function fundCat(catId: string, why: string, now: Date): Promise<Outcome> 
         }
       }
 
-      const { packagePrice } = await loadLimits(tx);
-      // Tried before the ranking rule. A top pick the pool cannot cover is no override.
-      await allocateToCat(tx, catId, packagePrice);
-
-      const ranked = await fundingOrder(tx, now);
-      const position = ranked.findIndex((r) => r.cat.id === catId);
-      const me = ranked[position];
-      const top = ranked[0];
-      const passedOver = ranked.slice(0, position).map((r) => r.cat.name);
+      const position = inOrder.findIndex((r) => r.cat.id === catId);
+      const me = inOrder[position];
+      const top = inOrder[0];
+      const passedOver = inOrder.slice(0, position).map((r) => r.cat.name);
+      // Both override checks run before allocation, so an unauthorised override is never told about the pool.
       const missing = passedOver.filter((name) => !namesCat(why, name));
       if (missing.length > 0) {
-        throw new Refused(
-          fail(
-            "OVERRIDE_NOT_EXPLAINED",
-            "Cats ahead in the funding order are waiting. To pass over them the reason must name each one, or fund the top cat.",
-            { mustName: missing, topPick: { catId: top.cat.id, name: top.cat.name, tier: top.tier } },
-          ),
+        return fail(
+          "OVERRIDE_NOT_EXPLAINED",
+          "Cats ahead in the funding order are waiting. To pass over them the reason must name each one, or fund the top cat.",
+          { mustName: missing, topPick: { catId: top.cat.id, name: top.cat.name, tier: top.tier } },
+        );
+      }
+      // Passing over a cat needs a report a person checked on one cat of each pair, as set_cat_place requires. A donor's
+      // note can never steer money, so naming the cats is not enough.
+      if (passedOver.length > 0 && uncoveredPairs(inOrder, catId, checked).length > 0) {
+        return fail(
+          "OVERRIDE_NEEDS_CHECKED_REPORT",
+          "Cats ahead in the funding order are waiting, and no report a person checked covers passing them over. Only a report a caretaker confirmed or a vet cleared can do that. Fund the top cat, or call ask_for_check.",
+          { topPick: { catId: top.cat.id, name: top.cat.name, tier: top.tier } },
         );
       }
 
-      // Passing over a cat needs a report a person checked on one cat of each pair, as set_cat_place requires. A donor's
-      // note can never steer money, so naming the cats is not enough.
-      if (passedOver.length > 0 && uncoveredPairs(ranked, catId, await checkedCats(tx)).length > 0) {
-        throw new Refused(
-          fail(
-            "OVERRIDE_NEEDS_CHECKED_REPORT",
-            "Cats ahead in the funding order are waiting, and no report a person checked covers passing them over. Only a report a caretaker confirmed or a vet cleared can do that. Fund the top cat, or call ask_for_check.",
-            { topPick: { catId: top.cat.id, name: top.cat.name, tier: top.tier } },
-          ),
-        );
-      }
+      const { packagePrice } = await loadLimits(tx);
+      await allocateToCat(tx, catId, packagePrice);
+
       await transitionCat(tx, catId, "funded");
       await tx.insert(agentActions).values({
         action: FUND_ACTION,
