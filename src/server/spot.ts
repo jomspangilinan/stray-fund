@@ -138,7 +138,7 @@ export async function processSpot(i: {
   ai: boolean;
   /**
    * The phone's 64x64 cut-out of the cat, checked with maskUsable. The public path publishes with it at once; the AI
-   * path uses it for the publish after a match. It is never stored, so a pending row finished later gets the circle.
+   * path uses it for the publish once the check found a cat. It is never stored, so a pending row finished later gets the circle.
    */
   mask?: Buffer | null;
 }): Promise<SpotResult> {
