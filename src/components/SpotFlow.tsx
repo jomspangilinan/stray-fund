@@ -17,6 +17,8 @@ type Done = {
   catId: string | null;
   sightingId: string | null;
   message: string;
+  /** False on the public path, where no AI looked at the photo. */
+  aiChecked?: boolean;
   reveal: Reveal | null;
   locationMissing: boolean;
 };
@@ -145,12 +147,15 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
         catId: body.catId ?? null,
         sightingId: body.sightingId ?? null,
         message: body.message,
+        aiChecked: body.aiChecked !== false,
         reveal: body.reveal ?? null,
         locationMissing: where.lat === null,
       };
-      // Tick every step first, so the list finishes only because the server answered.
-      setPhase({ kind: "sending", startedAt, responded: true, state: done.state });
-      await new Promise((r) => setTimeout(r, TICKED_MS));
+      // Tick every step first, so the list finishes only because the server answered. No AI ran on the public path, so there is nothing to tick.
+      if (done.aiChecked) {
+        setPhase({ kind: "sending", startedAt, responded: true, state: done.state });
+        await new Promise((r) => setTimeout(r, TICKED_MS));
+      }
       setPhase({ kind: "done", done });
     } catch {
       setPhase({ kind: "error", message: "Could not reach the server. Check your connection and try again." });
@@ -237,8 +242,14 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
           busyPanel={
             sending ? (
               <div role="status" aria-live="polite">
-                <p className="mb-3 font-bold">Checking your photo</p>
-                <ScanChecklist elapsedMs={elapsed} responded={phase.responded} state={phase.state} />
+                {judge ? (
+                  <>
+                    <p className="mb-3 font-bold">Checking your photo</p>
+                    <ScanChecklist elapsedMs={elapsed} responded={phase.responded} state={phase.state} />
+                  </>
+                ) : (
+                  <p className="font-bold">Sending your photo</p>
+                )}
               </div>
             ) : undefined
           }

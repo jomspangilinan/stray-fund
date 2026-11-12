@@ -22,11 +22,18 @@ vi.mock("next/headers", () => ({
 
 import {
   applyAssessment,
+  DailyPhotoLimit,
   finishSighting,
+  getSpotStatus,
   processSpot,
+  PUBLIC_NEW_CATS_PER_DAY,
+  PUBLIC_PHOTOS_PER_DAY,
   RateLimited,
   retryPendingSightings,
 } from "../src/server/spot";
+import { getYard } from "../src/server/public";
+import { NEUTRAL_AVATAR } from "../src/lib/avatar";
+import { GET as statusGet } from "../src/app/api/spot/[id]/route";
 import { POST as spotPost } from "../src/app/api/spot/route";
 import { POST as reportPost } from "../src/app/api/spot/report/route";
 import { POST as earTipPost } from "../src/app/api/cats/[id]/ear-tip/route";
@@ -825,6 +832,44 @@ describe("POST /api/spot", () => {
   const post = (f: FormData, headers: Record<string, string> = {}) =>
     spotPost(new Request("http://localhost/api/spot", { method: "POST", body: f, headers }));
 
+  describe("for the public (judge gate on, no cookie)", () => {
+    beforeEach(() => {
+      vi.stubEnv("JUDGE_GATE", "true");
+      vi.stubEnv("JUDGE_PASSCODE", "test-judge-code-0000");
+    });
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("calls no AI, keeps AI wording out of the reply and publishes now on a usable cut-out", async () => {
+      await signIn();
+      const px = Buffer.alloc(64 * 64);
+      for (let y = 16; y < 48; y++) for (let x = 16; x < 48; x++) px[y * 64 + x] = 255;
+      const mask = await sharp(px, { raw: { width: 64, height: 64, channels: 1 } }).png().toBuffer();
+      const f = await body({ box: JSON.stringify({ x: 0.2, y: 0.2, w: 0.6, h: 0.6 }) });
+      f.set("mask", new Blob([new Uint8Array(mask)], { type: "image/png" }), "mask.png");
+      const res = await post(f);
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as Record<string, unknown>;
+      expect(json).toMatchObject({ state: "new_cat", aiChecked: false, developed: true });
+      expect(String(json.message)).not.toContain("AI");
+      expect(seen.assess + seen.match).toBe(0);
+    });
+
+    it("answers 429 with the sentence once the day's limit is reached", async () => {
+      const u = await signIn();
+      const { key } = await storeOriginal(await jpeg());
+      await db.insert(sightings).values(
+        Array.from({ length: PUBLIC_PHOTOS_PER_DAY }, () => ({
+          originalKey: key,
+          caughtByUserId: u.id,
+          state: "new_cat",
+        })),
+      );
+      const res = await post(await body());
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({ error: "That's 5 photos today. Try again tomorrow." });
+    });
+  });
+
   it("requires a session", async () => {
     const res = await post(await body());
     expect(res.status).toBe(401);
@@ -836,7 +881,7 @@ describe("POST /api/spot", () => {
     const res = await post(await body({ lat: "10.123456", lng: "120.654321" }));
     expect(res.status).toBe(200);
     const json = (await res.json()) as Record<string, unknown>;
-    expect(Object.keys(json).sort()).toEqual(["catId", "message", "reveal", "sightingId", "state"]);
+    expect(Object.keys(json).sort()).toEqual(["aiChecked", "catId", "developed", "message", "reveal", "sightingId", "state"]);
     const text = JSON.stringify(json);
     expect(text).not.toContain("10.123456");
     expect(text).not.toContain("120.654321");
@@ -1145,5 +1190,131 @@ describe("POST /api/spot/report", () => {
     await db.update(sightings).set({ state: "rejected" }).where(eq(sightings.id, s.id));
     expect((await send({ sightingId: s.id, claim: "injured" })).status).toBe(404);
     expect(await reportRows()).toHaveLength(0);
+  });
+});
+
+describe("processSpot: the public path (no AI)", () => {
+  const BOX = { x: 0.2, y: 0.2, w: 0.6, h: 0.6 };
+
+  async function maskOf(on: { x: number; y: number; w: number; h: number } | null): Promise<Buffer> {
+    const px = Buffer.alloc(64 * 64);
+    for (let y = 0; y < 64; y++) {
+      for (let x = 0; x < 64; x++) {
+        const fx = (x + 0.5) / 64;
+        const fy = (y + 0.5) / 64;
+        if (on && fx >= on.x && fx <= on.x + on.w && fy >= on.y && fy <= on.y + on.h) px[y * 64 + x] = 255;
+      }
+    }
+    return sharp(px, { raw: { width: 64, height: 64, channels: 1 } }).png().toBuffer();
+  }
+  const plain = async (userId: string, more: Record<string, unknown> = {}) =>
+    processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId, ai: false, ...more });
+
+  it("puts the cat in the yard at once with no AI call, no assessment and no AI wording", async () => {
+    const u = await makeUser();
+    const out = await plain(u.id);
+    expect(out).toMatchObject({ state: "new_cat", aiChecked: false, developed: false });
+    expect(out.message).not.toContain("AI");
+    expect(seen.assess + seen.match).toBe(0);
+    const yard = await getYard(u.id);
+    const mine = yard.cats.find((c) => c.id === out.catId);
+    expect(mine).toMatchObject({ yours: true, avatar: NEUTRAL_AVATAR });
+    const [s] = await sightingRows();
+    expect(s).toMatchObject({ publicReady: false, developedAt: null, assessment: null, needsDevelop: true, developAttempts: 0 });
+    const [cat] = await catRows();
+    expect(cat.avatar).toBeNull();
+    expect((await retryPendingSightings()).examined).toBe(0);
+    expect(seen.assess + seen.match).toBe(0);
+  });
+
+  it("needs no box", async () => {
+    const u = await makeUser();
+    expect((await plain(u.id, { box: null })).state).toBe("new_cat");
+  });
+
+  it("phone tier: a usable mask publishes now and takes the cat's colours from the photo", async () => {
+    const u = await makeUser();
+    const out = await plain(u.id, { box: BOX, mask: await maskOf({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }) });
+    expect(out.developed).toBe(true);
+    const [s] = await sightingRows();
+    expect(s.publicReady).toBe(true);
+    expect(s.publicKey).not.toBeNull();
+    expect(s.developedAt).not.toBeNull();
+    const [cat] = await catRows();
+    expect(cat.avatar).not.toBeNull();
+    expect(cat.avatar).not.toEqual(NEUTRAL_AVATAR);
+    expect(seen.assess + seen.match).toBe(0);
+  });
+
+  it("phone tier: an unusable mask leaves the photo queued", async () => {
+    const u = await makeUser();
+    const out = await plain(u.id, { box: BOX, mask: await maskOf(null) });
+    expect(out.developed).toBe(false);
+    const [s] = await sightingRows();
+    expect(s).toMatchObject({ publicReady: false, developedAt: null, needsDevelop: true });
+  });
+
+  it("getSpotStatus tells the owner, and only the owner", async () => {
+    const u = await makeUser();
+    const other = await makeUser();
+    const out = await plain(u.id);
+    expect(await getSpotStatus(u.id, out.sightingId)).toEqual({ developed: false, photoUrl: null, avatar: NEUTRAL_AVATAR });
+    expect(await getSpotStatus(other.id, out.sightingId)).toBeNull();
+  });
+
+  it("GET /api/spot/[id] answers the owner and 404s anyone else", async () => {
+    const u = await makeUser();
+    const other = await makeUser();
+    const out = await plain(u.id);
+    const ask = async (who: typeof u) => {
+      jar.set(SESSION_COOKIE, await signSession({ userId: who.id, role: "donor", username: who.username }));
+      return statusGet(new Request("http://x/api"), { params: Promise.resolve({ id: out.sightingId }) });
+    };
+    const mine = await ask(u);
+    expect(mine.status).toBe(200);
+    expect(await mine.json()).toMatchObject({ developed: false, photoUrl: null });
+    expect((await ask(other)).status).toBe(404);
+  });
+
+  it("refuses a 6th photo from one account on a Manila day, with the account sentence", async () => {
+    const u = await makeUser();
+    for (let n = 0; n < PUBLIC_PHOTOS_PER_DAY; n++) {
+      await plain(u.id);
+      // Spread them out so the per-minute limit stays out of the way.
+      await db.execute((await import("drizzle-orm")).sql`update sightings set created_at = created_at - interval '2 minutes' where caught_by_user_id = ${u.id}`);
+    }
+    const err = await plain(u.id).catch((e) => e);
+    expect(err).toBeInstanceOf(DailyPhotoLimit);
+    expect(err.message).toBe("That's 5 photos today. Try again tomorrow.");
+    expect(await retryPendingSightings()).toMatchObject({ examined: 0 });
+    expect(seen.assess + seen.match).toBe(0);
+  });
+
+  it("refuses a fresh account once the site has taken its 50 plain cats today", async () => {
+    const filler = await makeUser();
+    const { key } = await storeOriginal(await jpeg());
+    await db.insert(sightings).values(
+      Array.from({ length: PUBLIC_NEW_CATS_PER_DAY }, () => ({ originalKey: key, caughtByUserId: filler.id, state: "new_cat", needsDevelop: true })),
+    );
+    const u = await makeUser();
+    const err = await plain(u.id).catch((e) => e);
+    expect(err).toBeInstanceOf(DailyPhotoLimit);
+    expect(err.message).toBe("The yard is full for today. Try again tomorrow.");
+  });
+
+  it("leaves needs_develop false on AI-path and seeded sightings", async () => {
+    const u = await makeUser();
+    await seedCat({});
+    await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id, ai: true });
+    const rows = await sightingRows();
+    expect(rows.length).toBe(2);
+    expect(rows.every((r) => r.needsDevelop === false)).toBe(true);
+  });
+
+  it("the AI path still reports aiChecked", async () => {
+    const u = await makeUser();
+    const out = await processSpot({ jpeg: await jpeg(), lat: 10.2, lng: 120.6, userId: u.id, ai: true });
+    expect(out).toMatchObject({ state: "new_cat", aiChecked: true });
+    expect(seen.assess).toBe(1);
   });
 });

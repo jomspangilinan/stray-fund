@@ -4,8 +4,9 @@ import { describeError } from "@/server/errors";
 import { BodyTooLarge, parseForm, readLimited } from "@/server/http";
 import { AuthError, requireRole } from "@/server/session";
 import { loadReveal } from "@/server/spotReveal";
-import { assertUnderRateLimit, processSpot, RateLimited } from "@/server/spot";
-import { InvalidPhoto, MAX_BYTES } from "@/server/photos";
+import { assertUnderRateLimit, DailyPhotoLimit, processSpot, RateLimited } from "@/server/spot";
+import { InvalidPhoto, MASK_MAX_BYTES, MAX_BYTES } from "@/server/photos";
+import { isJudge } from "@/server/judge";
 
 // Room for the multipart envelope around a photo that is itself at most MAX_BYTES.
 const MAX_BODY = MAX_BYTES + 64 * 1024;
@@ -20,7 +21,7 @@ function coordinate(raw: FormDataEntryValue | null, min: number, max: number): n
 }
 
 /**
- * Multipart form: photo (image/jpeg), optional lat and lng (both or neither), optional box (JSON fractions of the photo, where the camera saw the cat). Questions about the cat come after the photo.
+ * Multipart form: photo (image/jpeg), optional lat and lng (both or neither), optional box (JSON fractions of the photo, where the camera saw the cat), optional mask (the phone's 64x64 PNG cut-out). Questions about the cat come after the photo.
  * The answer is a whitelist: state, catId, sightingId, message, and a reveal built by buildReveal. No coordinates, storage keys or assessment text.
  */
 export async function POST(req: Request) {
@@ -53,24 +54,34 @@ export async function POST(req: Request) {
       if (!box) return fail("The photo did not send properly. Take it again.", 400);
     }
 
+    // The phone's cut-out. Too big or missing, the photo simply waits for the worker. maskUsable checks the rest.
+    const rawMask = form.get("mask");
+    const mask =
+      rawMask instanceof Blob && rawMask.size > 0 && rawMask.size <= MASK_MAX_BYTES ? Buffer.from(await rawMask.arrayBuffer()) : null;
+
     const out = await processSpot({
       jpeg: Buffer.from(await photo.arrayBuffer()),
       lat,
       lng,
       userId: session.userId,
       box,
+      // Judges get the AI path. Everyone else gets no AI call at all.
+      ai: await isJudge(),
+      mask,
     });
     return NextResponse.json({
       state: out.state,
       catId: out.catId ?? null,
       sightingId: out.sightingId,
       message: out.message,
+      aiChecked: out.aiChecked,
+      developed: out.developed,
       reveal: await loadReveal(out.sightingId, out.state),
     });
   } catch (e) {
     if (e instanceof AuthError) return fail(e.message, e.status);
     if (e instanceof BodyTooLarge) return fail("That photo is too large. Take it again.", 413);
-    if (e instanceof RateLimited) return fail(e.message, 429);
+    if (e instanceof RateLimited || e instanceof DailyPhotoLimit) return fail(e.message, 429);
     if (e instanceof InvalidPhoto) {
       return e.reason === "too_large"
         ? fail("That photo is too large. Take it again.", 413)

@@ -113,6 +113,10 @@ export const sightings = pgTable(
     catBox: jsonb("cat_box"),
     assessment: jsonb("assessment"),
     state: text("state").notNull().default("pending"),
+    // Public no-AI photos only: the cat is in the yard at once and the photo waits to be developed (cut out and published).
+    needsDevelop: boolean("needs_develop").notNull().default(false),
+    developedAt: timestamp("developed_at", { withTimezone: true }),
+    developAttempts: integer("develop_attempts").notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [

@@ -1,6 +1,6 @@
 import type { CatBox } from "@/lib/keepsake";
 import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
-import { catAvatar } from "@/lib/avatar";
+import { catAvatar, NEUTRAL_AVATAR, parseAvatar, type Avatar } from "@/lib/avatar";
 import { COLONY } from "@/lib/config";
 import { assessPhoto, type Assessment } from "./ai/assess";
 import { AssessmentSchema } from "./ai/schemas";
@@ -12,16 +12,28 @@ import { autoPublishable } from "./photoGate";
 import { nameIsSafe, safeBio } from "./placeText";
 import { fuzzLocation } from "./location";
 import { attachReports, filePhotoReports } from "./reports";
-import { publishScrubbed, storeOriginal, type Box } from "./photos";
+import { maskUsable, publishCatOnly, publishScrubbed, storeOriginal, type Box } from "./photos";
+import { avatarFromPhoto } from "./photoAvatar";
 import { getStorage } from "./storage";
 
 export type Sex = "female" | "male" | "unknown";
 export type SpotState = "new_cat" | "matched" | "needs_review" | "rejected" | "queued_for_ai";
-export type SpotResult = { state: SpotState; catId?: string; sightingId: string; message: string };
+export type SpotResult = {
+  state: SpotState;
+  catId?: string;
+  sightingId: string;
+  message: string;
+  /** The AI looked at this photo. False on the public path and while an AI run is still waiting. */
+  aiChecked: boolean;
+  /** The public cut-out is published. Only the public path reports this; the AI path leaves it false. */
+  developed: boolean;
+};
 
 export const RATE_LIMIT_PER_MINUTE = 10;
 export const RETRY_AFTER_SECONDS = 60;
 export const RETRY_BATCH = 10;
+export const PUBLIC_PHOTOS_PER_DAY = 5;
+export const PUBLIC_NEW_CATS_PER_DAY = 50;
 /** Below this a match is noise. From here up to the guardrail minimum it goes to a caretaker. */
 export const MID_BAND_MIN = 0.5;
 const MAX_CANDIDATES = 6;
@@ -34,6 +46,19 @@ export class RateLimited extends Error {
     this.name = "RateLimited";
   }
 }
+
+export class DailyPhotoLimit extends Error {
+  constructor(scope: "account" | "site") {
+    super(
+      scope === "account"
+        ? `That's ${PUBLIC_PHOTOS_PER_DAY} photos today. Try again tomorrow.`
+        : "The yard is full for today. Try again tomorrow.",
+    );
+    this.name = "DailyPhotoLimit";
+  }
+}
+
+const PLAIN_MESSAGE = "Thanks for spotting! Your cat is in the yard.";
 
 const REJECT_FALLBACK = "We couldn't use that photo. Try another one.";
 
@@ -59,15 +84,26 @@ function rejectedMessage(a: { reject_reason?: string } | null | undefined): stri
   return REJECT_MESSAGES[a?.reject_reason ?? "none"] ?? REJECT_FALLBACK;
 }
 
-function result(state: SpotState, sightingId: string, catId?: string | null, message = MESSAGES[state]): SpotResult {
-  return catId ? { state, catId, sightingId, message } : { state, sightingId, message };
+function result(
+  state: SpotState,
+  sightingId: string,
+  catId?: string | null,
+  message = MESSAGES[state],
+  extra: { aiChecked?: boolean; developed?: boolean } = {},
+): SpotResult {
+  const flags = { aiChecked: extra.aiChecked ?? state !== "queued_for_ai", developed: extra.developed ?? false };
+  return catId ? { state, catId, sightingId, message, ...flags } : { state, sightingId, message, ...flags };
 }
 
 type SightingRow = typeof sightings.$inferSelect;
 
 function resultOf(s: SightingRow): SpotResult {
   const state: SpotState = s.state === "pending" ? "queued_for_ai" : (s.state as SpotState);
-  return result(state, s.id, s.catId, state === "rejected" ? rejectedMessage(s.assessment as { reject_reason?: string } | null) : undefined);
+  const message = s.needsDevelop ? PLAIN_MESSAGE : state === "rejected" ? rejectedMessage(s.assessment as { reject_reason?: string } | null) : undefined;
+  return result(state, s.id, s.catId, message, {
+    aiChecked: !s.needsDevelop && state !== "queued_for_ai",
+    developed: s.needsDevelop ? s.developedAt !== null : false,
+  });
 }
 
 export type MatchOutcome = { catId: string | null; confidence: number; candidateIds: string[] };
@@ -92,9 +128,14 @@ export async function processSpot(i: {
   userId: string;
   /** Where the camera saw the cat, as fractions of the photo. Already validated by the caller. */
   box?: CatBox | null;
+  /** True runs the AI on the photo (judges). False is the public path: no AI, and the photo is developed later. Defaults to true. */
+  ai?: boolean;
+  /** The phone's 64x64 cut-out of the cat, checked with maskUsable. Public path only. */
+  mask?: Buffer | null;
 }): Promise<SpotResult> {
   await assertUnderRateLimit(i.userId);
   const { key } = await storeOriginal(i.jpeg);
+  if (i.ai === false) return processPlain(i, key);
   const hasPoint = i.lat !== null && i.lng !== null;
 
   // Commit the pending row first so nothing is lost if the AI step fails.
@@ -118,6 +159,107 @@ export async function processSpot(i: {
   });
 
   return finishSighting(sighting.id);
+}
+
+/** Today's date in Manila, the day the public limits count in. */
+const MANILA_DAY = sql`(now() at time zone 'Asia/Manila')::date`;
+const MANILA_DAY_OF = (col: unknown) => sql`((${col}) at time zone 'Asia/Manila')::date`;
+
+/**
+ * The public path. No AI runs. The cat joins the yard at once with the neutral look-alike, and the photo is
+ * published now when the phone sent a usable cut-out, otherwise it waits for the worker to develop it.
+ */
+async function processPlain(
+  i: { jpeg: Buffer; lat: number | null; lng: number | null; userId: string; box?: CatBox | null; mask?: Buffer | null },
+  originalKey: string,
+): Promise<SpotResult> {
+  const hasPoint = i.lat !== null && i.lng !== null;
+  const { sighting, catId } = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"spot:" + i.userId}))`);
+    // One lock for the whole site, so two accounts cannot both take the last place of the day.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('spot:site-daily'))`);
+    if (!(await underRateLimit(tx, i.userId))) throw new RateLimited();
+    const { rows } = await tx.execute(sql`
+      select
+        count(*) filter (where caught_by_user_id = ${i.userId})::int as mine,
+        count(*) filter (where needs_develop)::int as site
+      from sightings where ${MANILA_DAY_OF(sql`created_at`)} = ${MANILA_DAY}
+    `);
+    const n = rows[0] as { mine: number; site: number };
+    if (n.mine >= PUBLIC_PHOTOS_PER_DAY) throw new DailyPhotoLimit("account");
+    if (n.site >= PUBLIC_NEW_CATS_PER_DAY) throw new DailyPhotoLimit("site");
+
+    await lockColony(tx);
+    const [row] = await tx
+      .insert(sightings)
+      .values({
+        originalKey,
+        caughtByUserId: i.userId,
+        takenAt: new Date(),
+        state: "new_cat",
+        needsDevelop: true,
+        exactLat: hasPoint ? i.lat : null,
+        exactLng: hasPoint ? i.lng : null,
+        catBox: i.box ?? null,
+      })
+      .returning();
+    const cat = await insertNewCat(tx, row, null);
+    await tx.update(sightings).set({ catId: cat.id }).where(eq(sightings.id, row.id));
+    return { sighting: row, catId: cat.id };
+  });
+
+  const developed = await developNow(i, originalKey, sighting.id, catId);
+  return result("new_cat", sighting.id, catId, PLAIN_MESSAGE, { aiChecked: false, developed });
+}
+
+/** The phone tier: a usable cut-out publishes at once. Anything else, or any failure, leaves the photo for the worker. */
+async function developNow(
+  i: { jpeg: Buffer; box?: CatBox | null; mask?: Buffer | null },
+  originalKey: string,
+  sightingId: string,
+  catId: string,
+): Promise<boolean> {
+  const { box, mask } = i;
+  if (!box || !mask || !(await maskUsable(mask, box))) return false;
+  try {
+    const { key } = await publishCatOnly(originalKey, { box, mask });
+    const avatar = await avatarFromPhoto(i.jpeg, box);
+    await db.transaction(async (tx) => {
+      await tx
+        .update(sightings)
+        .set({ publicKey: key, publicReady: true, developedAt: new Date() })
+        .where(and(eq(sightings.id, sightingId), sql`${sightings.developedAt} is null`));
+      await tx.update(cats).set({ avatar }).where(eq(cats.id, catId));
+    });
+    return true;
+  } catch (e) {
+    console.error(`[spot] phone cut-out not published: ${e instanceof Error ? e.name : typeof e}`);
+    return false;
+  }
+}
+
+/** What the person who took a photo may poll: whether it is developed, the public copy, and their cat's look-alike. Null for anyone else's. */
+export async function getSpotStatus(
+  userId: string,
+  sightingId: string,
+): Promise<{ developed: boolean; photoUrl: string | null; avatar: Avatar } | null> {
+  const [s] = await db
+    .select({
+      needsDevelop: sightings.needsDevelop,
+      developedAt: sightings.developedAt,
+      publicKey: sightings.publicKey,
+      publicReady: sightings.publicReady,
+      avatar: cats.avatar,
+    })
+    .from(sightings)
+    .leftJoin(cats, eq(cats.id, sightings.catId))
+    .where(and(eq(sightings.id, sightingId), eq(sightings.caughtByUserId, userId)));
+  if (!s) return null;
+  return {
+    developed: s.needsDevelop ? s.developedAt !== null : s.publicReady,
+    photoUrl: s.publicReady && s.publicKey ? getStorage().publicUrl(s.publicKey) : null,
+    avatar: parseAvatar(s.avatar) ?? NEUTRAL_AVATAR,
+  };
 }
 
 export async function finishSighting(sightingId: string): Promise<SpotResult> {

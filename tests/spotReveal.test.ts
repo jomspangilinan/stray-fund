@@ -178,7 +178,7 @@ describe("POST /api/spot reveal", () => {
     await signIn();
     const res = await post();
     const json = (await res.json()) as Record<string, unknown>;
-    expect(Object.keys(json).sort()).toEqual(["catId", "message", "reveal", "sightingId", "state"]);
+    expect(Object.keys(json).sort()).toEqual(["aiChecked", "catId", "developed", "message", "reveal", "sightingId", "state"]);
     expect(json.state).toBe("new_cat");
     const reveal = json.reveal as Record<string, unknown>;
     expect(Object.keys(reveal).sort()).toEqual([
