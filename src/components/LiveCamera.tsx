@@ -1,6 +1,7 @@
 "use client";
 
 import type { CatBox } from "@/lib/keepsake";
+import { gravityFromMotion, turnBox, turnFromGravity, type Turn } from "@/lib/rotation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type CaptureLocation = { lat: number | null; lng: number | null };
@@ -33,17 +34,36 @@ export function locate(): Promise<CaptureLocation> {
   });
 }
 
-export function toJpeg(video: HTMLVideoElement): Promise<Blob | null> {
+type MotionEventCtor = { requestPermission?: () => Promise<"granted" | "denied"> };
+
+/** iPhones ask for motion access from a tap; other browsers have no such call. Never rejects. */
+async function requestMotion(): Promise<boolean> {
+  const ctor = (typeof DeviceMotionEvent === "undefined" ? undefined : DeviceMotionEvent) as MotionEventCtor | undefined;
+  if (typeof ctor?.requestPermission !== "function") return true;
+  try {
+    return (await ctor.requestPermission()) === "granted";
+  } catch {
+    return false;
+  }
+}
+
+/** `turn` is degrees clockwise, so a frame shot sideways is saved upright. The canvas swaps its sides for 90 and 270. */
+export function toJpeg(video: HTMLVideoElement, turn: Turn = 0): Promise<Blob | null> {
   const w = video.videoWidth;
   const h = video.videoHeight;
   if (!w || !h) return Promise.resolve(null);
   const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+  const dw = Math.round(w * scale);
+  const dh = Math.round(h * scale);
+  const sideways = turn === 90 || turn === 270;
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(w * scale);
-  canvas.height = Math.round(h * scale);
+  canvas.width = sideways ? dh : dw;
+  canvas.height = sideways ? dw : dh;
   const ctx = canvas.getContext("2d");
   if (!ctx) return Promise.resolve(null);
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((turn * Math.PI) / 180);
+  ctx.drawImage(video, -dw / 2, -dh / 2, dw, dh);
   return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY));
 }
 
@@ -109,6 +129,10 @@ export function LiveCamera({
   const [status, setStatus] = useState<Status>("idle");
   const [facing, setFacing] = useState<Facing>("environment");
   const stageRef = useRef<HTMLDivElement>(null);
+  // The latest gravity reading, in the W3C sign convention. Null until the phone reports one.
+  const gravityRef = useRef<{ x: number; y: number } | null>(null);
+  const [landscapeFrame, setLandscapeFrame] = useState(false);
+  const [hasMotion, setHasMotion] = useState(false);
   const [stageTop, setStageTop] = useState(0);
   const stageCb = useRef(onStageRect);
   useEffect(() => {
@@ -140,6 +164,8 @@ export function LiveCamera({
 
   const start = useCallback(async (want: Facing) => {
     const mine = ++attempt.current;
+    // Asked first, while the tap that opened the camera still counts. A refusal only means photos save as they come.
+    await requestMotion();
     stop(streamRef.current);
     streamRef.current = null;
     readyCb.current?.(null);
@@ -181,12 +207,42 @@ export function LiveCamera({
     [],
   );
 
+  const live = status === "ready" || status === "capturing";
+
+  // Keeps the latest gravity reading while the camera is open.
+  useEffect(() => {
+    if (!live) return;
+    const ios = typeof (DeviceMotionEvent as unknown as MotionEventCtor | undefined)?.requestPermission === "function";
+    const onMotion = (e: DeviceMotionEvent) => {
+      const g = e.accelerationIncludingGravity ? gravityFromMotion(e.accelerationIncludingGravity, ios) : null;
+      if (!g) return;
+      gravityRef.current = g;
+      setHasMotion(true);
+    };
+    window.addEventListener("devicemotion", onMotion);
+    return () => {
+      window.removeEventListener("devicemotion", onMotion);
+      gravityRef.current = null;
+      setHasMotion(false);
+    };
+  }, [live]);
+
+  // Without a sensor, a landscape frame on a portrait screen is the one case we can see and name.
+  const checkFrame = useCallback(() => {
+    const v = videoRef.current;
+    setLandscapeFrame(!!v && v.videoWidth > v.videoHeight && window.innerHeight > window.innerWidth);
+  }, []);
+
   async function shoot() {
     const video = videoRef.current;
     if (!video || status !== "ready") return;
     setStatus("capturing");
-    const box = boxAtShutter?.() ?? null;
-    const blob = await toJpeg(video);
+    const g = gravityRef.current;
+    const turn: Turn = g ? turnFromGravity(g, window.screen.orientation?.angle ?? 0) : 0;
+    // The live box is in the frame's own coordinates, so it is turned with the photo.
+    const seen = boxAtShutter?.() ?? null;
+    const box = seen ? turnBox(seen, turn) : null;
+    const blob = await toJpeg(video, turn);
     if (!blob) {
       setStatus("error");
       return;
@@ -196,7 +252,12 @@ export function LiveCamera({
     setStatus("ready");
   }
 
-  const live = status === "ready" || status === "capturing";
+  const uprightHint =
+    live && !hasMotion && landscapeFrame ? (
+      <p role="status" className="absolute inset-x-0 bottom-2 z-10 text-center text-sm font-bold text-white">
+        Hold your phone upright
+      </p>
+    ) : null;
 
   const canRetry = !live && (status === "idle" || status === "denied" || status === "error" || status === "nocamera");
 
@@ -244,6 +305,8 @@ export function LiveCamera({
           muted
           autoPlay
           aria-label="Live camera"
+          onLoadedMetadata={checkFrame}
+          onResize={checkFrame}
           className={`absolute inset-0 h-full w-full object-cover ${live ? "" : "invisible"}`}
         />
         {overlay}
@@ -280,6 +343,7 @@ export function LiveCamera({
               </div>
             ))}
           {stageNote}
+          {uprightHint}
         </div>
         <div className="cam-bottom">
           {busyPanel ?? (
@@ -302,6 +366,8 @@ export function LiveCamera({
           muted
           autoPlay
           aria-label="Live camera"
+          onLoadedMetadata={checkFrame}
+          onResize={checkFrame}
           className={`h-full w-full object-cover ${live ? "" : "invisible"}`}
         />
         {!live && (
@@ -310,6 +376,7 @@ export function LiveCamera({
             {openButton}
           </div>
         )}
+        {uprightHint}
       </div>
 
       {buttons}
