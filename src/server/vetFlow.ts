@@ -858,7 +858,10 @@ export async function listVetDashboard(vetId: string): Promise<VetDashboard> {
   const checkCats: VetCheckCat[] = [];
   for (const c of confirmed) {
     const seen = checkCats.find((x) => x.id === c.id);
-    if (seen) seen.claims.push(c.claim);
+    // Two reports of the same claim read once: "sick", not "sick, sick".
+    if (seen) {
+      if (!seen.claims.includes(c.claim)) seen.claims.push(c.claim);
+    }
     else checkCats.push({ id: c.id, name: c.name, area: c.areaName, ...exactOf(c), claims: [c.claim] });
   }
   return {

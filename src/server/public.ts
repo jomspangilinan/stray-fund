@@ -4,7 +4,7 @@ import { NEUTRAL_AVATAR, parseAvatar } from "@/lib/avatar";
 import { goalPercent } from "@/lib/goal";
 import { YOURS_WINDOW_HOURS, careMarks, pickYard, yardStage, type YardCat, type YardGroup } from "@/lib/yard";
 import { pickMissions, type Mission, type MissionCat } from "@/lib/missions";
-import { hidePlacesInDemo } from "./demoPrivacy";
+import { hidePlacesInDemo, isSampleSightingKey } from "./demoPrivacy";
 import { db } from "./db/client";
 import { cats, earTipFlags, guardrails, nameSuggestions, reports, sightings, treatments, users } from "./db/schema";
 import { fundingOrder, SET_PLACE_ACTION } from "./agent/priority";
@@ -542,7 +542,13 @@ const publicCatColumns = {
   createdAt: cats.createdAt,
 };
 
-type SightingRow = SightingInput & { catId: string | null };
+type SightingRow = SightingInput & { catId: string | null; originalKey: string };
+
+/** A cat's main photo: its newest real published photo, or a seeded drawing only when it has nothing else. Rows are oldest first. */
+function mainPhoto(rows: SightingRow[]): SightingRow | undefined {
+  const published = [...rows].reverse().filter((s) => s.publicReady && s.publicKey);
+  return published.find((s) => !isSampleSightingKey(s.originalKey)) ?? published[0];
+}
 
 async function loadSightings(catIds: string[]): Promise<SightingRow[]> {
   if (catIds.length === 0) return [];
@@ -550,6 +556,7 @@ async function loadSightings(catIds: string[]): Promise<SightingRow[]> {
     .select({
       id: sightings.id,
       catId: sightings.catId,
+      originalKey: sightings.originalKey,
       takenAt: sightings.takenAt,
       createdAt: sightings.createdAt,
       publicKey: sightings.publicKey,
@@ -584,7 +591,7 @@ function contextFor(
   treats: (TreatmentInput & { catId: string })[],
 ): CatContext {
   const mine = sights.filter((s) => s.catId === catId);
-  const photo = [...mine].reverse().find((s) => s.publicReady && s.publicKey);
+  const photo = mainPhoto(mine);
   const first = mine[0];
   return {
     photoKey: photo?.publicKey ?? null,
@@ -827,7 +834,7 @@ export async function getMissions(now: Date = new Date(), viewerId: string | nul
   const input: MissionCat[] = rows.map((r) => {
     const mine = sights.filter((s) => s.catId === r.id);
     const last = mine.at(-1);
-    const photo = [...mine].reverse().find((s) => s.publicReady && s.publicKey);
+    const photo = mainPhoto(mine);
     return {
       id: r.id,
       name: r.name,
@@ -984,7 +991,7 @@ export async function getPriorityList(now: Date = new Date()): Promise<PriorityL
   const safe = (reason: string, name: string, fallback: string) =>
     reasonIsSafe(reason, name, knownNames, notes) ? reason : fallback;
   const photoOf = (id: string) => {
-    const photo = sights.filter((s) => s.catId === id).reverse().find((s) => s.publicReady && s.publicKey);
+    const photo = mainPhoto(sights.filter((s) => s.catId === id));
     return photoUrl(photo?.publicKey ?? null);
   };
 
