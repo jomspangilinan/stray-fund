@@ -34,6 +34,11 @@ export const RETRY_AFTER_SECONDS = 60;
 export const RETRY_BATCH = 10;
 export const PUBLIC_PHOTOS_PER_DAY = 5;
 export const PUBLIC_NEW_CATS_PER_DAY = 50;
+/**
+ * The worker (Task 2D) claims only `needs_develop and developed_at is null and created_at < now() - PHONE_TIER_GRACE_SECONDS`,
+ * so it never races the phone tier's publish in processSpot, and no row is hidden from it for longer than this.
+ */
+export const PHONE_TIER_GRACE_SECONDS = 60;
 /** Below this a match is noise. From here up to the guardrail minimum it goes to a caretaker. */
 export const MID_BAND_MIN = 0.5;
 const MAX_CANDIDATES = 6;
@@ -182,7 +187,7 @@ async function processPlain(
     const { rows } = await tx.execute(sql`
       select
         count(*) filter (where caught_by_user_id = ${i.userId})::int as mine,
-        count(*) filter (where needs_develop or developed_at is not null)::int as site
+        count(*) filter (where needs_develop)::int as site
       from sightings where ${MANILA_DAY_OF(sql`created_at`)} = ${MANILA_DAY}
     `);
     const n = rows[0] as { mine: number; site: number };
@@ -197,8 +202,8 @@ async function processPlain(
         caughtByUserId: i.userId,
         takenAt: new Date(),
         state: "new_cat",
-        // The worker claims only needs_develop rows. This stays false until the phone tier has had its turn (see below).
-        needsDevelop: false,
+        // Marks a public no-AI photo for its whole life. The worker claims `needs_develop and developed_at is null`.
+        needsDevelop: true,
         exactLat: hasPoint ? i.lat : null,
         exactLng: hasPoint ? i.lng : null,
         catBox: i.box ?? null,
@@ -210,8 +215,6 @@ async function processPlain(
   });
 
   const developed = await developNow(i, originalKey, sighting.id, catId);
-  // Only now may the worker claim it, so it can never publish the same photo the phone tier is publishing.
-  if (!developed) await db.update(sightings).set({ needsDevelop: true }).where(eq(sightings.id, sighting.id));
   return result("new_cat", sighting.id, catId, PLAIN_MESSAGE, { aiChecked: false, developed });
 }
 
@@ -233,7 +236,11 @@ async function developNow(
         .set({ publicKey: key, publicReady: true, developedAt: new Date() })
         .where(and(eq(sightings.id, sightingId), sql`${sightings.developedAt} is null`))
         .returning({ id: sightings.id });
-      if (won.length === 0) return false;
+      // Lost to another publisher: log it and leave the public copy just made. Task 8 adds the delete.
+      if (won.length === 0) {
+        console.error("[spot] phone cut-out lost the develop race; its public copy is left in place");
+        return false;
+      }
       await tx.update(cats).set({ avatar }).where(eq(cats.id, catId));
       return true;
     });

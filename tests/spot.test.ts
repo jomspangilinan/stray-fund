@@ -1240,7 +1240,11 @@ describe("processSpot: the public path (no AI)", () => {
     expect(s.publicReady).toBe(true);
     expect(s.publicKey).not.toBeNull();
     expect(s.developedAt).not.toBeNull();
-    expect(s.needsDevelop).toBe(false);
+    expect(s.needsDevelop).toBe(true);
+    expect(out.aiChecked).toBe(false);
+    // Read back from the row, a developed plain photo still reports no AI and the plain wording.
+    expect(await finishSighting(out.sightingId)).toMatchObject({ aiChecked: false, developed: true, message: out.message });
+    expect(await getSpotStatus(u.id, out.sightingId)).toMatchObject({ developed: true });
     const [cat] = await catRows();
     expect(cat.avatar).not.toBeNull();
     expect(cat.avatar).not.toEqual(NEUTRAL_AVATAR);
@@ -1264,6 +1268,20 @@ describe("processSpot: the public path (no AI)", () => {
     expect(out.developed).toBe(false);
     const [s] = await sightingRows();
     expect(s).toMatchObject({ needsDevelop: true, developedAt: null, publicReady: false });
+  });
+
+  it("never lets concurrent uploads pass the site's 50 a day", async () => {
+    const filler = await makeUser();
+    const { key } = await storeOriginal(await jpeg());
+    await db.insert(sightings).values(
+      Array.from({ length: PUBLIC_NEW_CATS_PER_DAY - 1 }, () => ({ originalKey: key, caughtByUserId: filler.id, state: "new_cat", needsDevelop: true })),
+    );
+    const users3 = [await makeUser(), await makeUser(), await makeUser()];
+    const outs = await Promise.allSettled(users3.map((u) => plain(u.id)));
+    expect(outs.filter((o) => o.status === "fulfilled")).toHaveLength(1);
+    const bad = outs.filter((o) => o.status === "rejected");
+    expect(bad).toHaveLength(2);
+    for (const b of bad) expect((b as PromiseRejectedResult).reason).toBeInstanceOf(DailyPhotoLimit);
   });
 
   it("getSpotStatus tells the owner, and only the owner", async () => {
