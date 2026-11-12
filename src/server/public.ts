@@ -544,6 +544,12 @@ const publicCatColumns = {
 
 type SightingRow = SightingInput & { catId: string | null; originalKey: string };
 
+/** A cat's photo list: seeded drawings drop out once the cat has a real published photo. */
+function shownSightings(rows: SightingRow[]): SightingRow[] {
+  const real = rows.filter((s) => !isSampleSightingKey(s.originalKey));
+  return real.some((s) => s.publicReady && s.publicKey) ? real : rows;
+}
+
 /** A cat's main photo: its newest real published photo, or a seeded drawing only when it has nothing else. Rows are oldest first. */
 function mainPhoto(rows: SightingRow[]): SightingRow | undefined {
   const published = [...rows].reverse().filter((s) => s.publicReady && s.publicKey);
@@ -640,7 +646,7 @@ export async function getCatCard(id: string): Promise<CatCardData | null> {
   const today = manilaDate(new Date());
   return {
     cat: publicCat(row, contextFor(id, sights, treats)),
-    sightings: [...sights].reverse().map(publicSighting),
+    sightings: [...shownSightings(sights)].reverse().map(publicSighting),
     health: treats.map((t) => publicTreatment(t, today)),
   };
 }

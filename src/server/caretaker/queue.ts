@@ -4,7 +4,7 @@ import { db } from "../db/client";
 import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reports, reviewRequests, sightings, users, wakeups } from "../db/schema";
 import { COLONY } from "@/lib/config";
 import { holdNotices, type HoldNotice } from "../reports";
-import { demoSafeText, hidePrivateInDemo, isSampleReceipt, maskEmail, placeForStaff } from "../demoPrivacy";
+import { demoSafeText, hidePrivateInDemo, isSampleReceipt, isSampleSightingKey, maskEmail, placeForStaff } from "../demoPrivacy";
 import { bioIsSafe, nameIsSafe, safeBio } from "../placeText";
 import { needsHumanTick, regionsOf } from "../photoGate";
 import { canRuleNotPaid, lateSuccessChoices, newTryRefusal } from "../moneyGate";
@@ -417,7 +417,8 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     earTipConfirmations,
     reviews: reviews.map((r) => ({ id: r.id, subject: demoSafeText(r.subject, r.reason), reason: demoSafeText(r.reason), date: manilaDate(r.createdAt) })),
     failedWakeups: failed.map((w) => ({ id: w.id, kind: w.kind, attempts: w.attempts, date: manilaDate(w.createdAt) })),
-    heldPhotos: held.map(({ s, catName }) => ({
+    // A seeded sample drawing is not a photo of anyone's cat, so it is never offered for publishing.
+    heldPhotos: held.filter(({ s }) => !isSampleSightingKey(s.originalKey)).map(({ s, catName }) => ({
       sightingId: s.id,
       catId: s.catId,
       catName,

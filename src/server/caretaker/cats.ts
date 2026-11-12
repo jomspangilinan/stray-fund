@@ -18,6 +18,7 @@ import { attachReports, confirmOpenClaim, dismissCatlessReports, fileStaffReport
 import { enqueueWakeup } from "../wakeups";
 import { autoPublishable, needsHumanTick, regionsOf } from "../photoGate";
 import { audit, flag, reqUuid, Refusal, type Handler } from "./shared";
+import { isSampleSightingKey } from "../demoPrivacy";
 import type { CatStatus } from "@/lib/catState";
 
 const SEXES = ["female", "male", "unknown"] as const;
@@ -373,6 +374,7 @@ export const photoPublish: Handler = async (caretakerId, body) => {
   const sightingId = reqUuid(body, "sightingId", "The sighting");
   const [s] = await withColonyLock((tx) => tx.select().from(sightings).where(eq(sightings.id, sightingId)));
   if (!s) throw new Refusal(404, "There is no such sighting.");
+  if (isSampleSightingKey(s.originalKey)) throw new Refusal(409, "This is a sample drawing, not a photo, so it can't be published.");
   if (s.state === "pending" || s.state === "rejected") throw new Refusal(409, "This sighting has no photo that can be published.");
   if (s.publicReady) throw new Refusal(409, "This photo is already public.");
 

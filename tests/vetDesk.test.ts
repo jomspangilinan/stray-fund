@@ -16,6 +16,8 @@ import { VetDesk } from "../src/components/VetDesk";
 import { SESSION_COOKIE, signSession, type Role } from "../src/server/session";
 import { getCatCard } from "../src/server/public";
 import { listVetDashboard } from "../src/server/vetFlow";
+import { runAction } from "../src/server/caretaker";
+import { getCaretakerQueue } from "../src/server/caretaker/queue";
 import { sampleSightingKey } from "../src/server/seed";
 
 beforeEach(async () => {
@@ -62,7 +64,9 @@ describe("which picture stands for a cat", () => {
     const at = (min: number) => new Date(Date.UTC(2026, 10, 12, 8, min));
     await db.insert(sightings).values({ catId: cat.id, originalKey: "originals/real-milo.jpg", publicKey: "photos/real-milo.jpg", publicReady: true, state: "matched", createdAt: at(1) });
     await db.insert(sightings).values({ catId: cat.id, originalKey: sampleSightingKey(3), publicKey: "photos/drawn.jpg", publicReady: true, state: "matched", createdAt: at(2) });
-    expect((await getCatCard(cat.id))!.cat.photoUrl).toContain("real-milo.jpg");
+    const card = (await getCatCard(cat.id))!;
+    expect(card.cat.photoUrl).toContain("real-milo.jpg");
+    expect(card.sightings.map((x) => x.photoUrl)).toEqual([expect.stringContaining("real-milo.jpg")]);
 
     const [drawnOnly] = await db.insert(cats).values({ name: "Bagwis", areaName: "Brgy 1", status: "queued" }).returning();
     await db.insert(sightings).values({ catId: drawnOnly.id, originalKey: sampleSightingKey(4), publicKey: "photos/drawn-2.jpg", publicReady: true, state: "matched" });
@@ -80,5 +84,18 @@ describe("the vet's list of what a caretaker says", () => {
     const [vet] = await db.select().from(users).where(eq(users.role, "vet"));
     const d = await listVetDashboard(vet.id);
     expect(d.checkCats.find((c) => c.id === cat.id)?.claims).toEqual(["sick"]);
+  });
+});
+
+describe("a seeded drawing is never published", () => {
+  it("is not offered as a held-photo card, and publishing one is refused", async () => {
+    const [care] = await db.insert(users).values({ username: `care_${Date.now()}`, role: "caretaker" }).returning();
+    const [cat] = await db.insert(cats).values({ name: "Milo", areaName: "Brgy 1", status: "queued" }).returning();
+    const [drawn] = await db.insert(sightings).values({ catId: cat.id, originalKey: sampleSightingKey(5), publicReady: false, state: "matched" }).returning();
+    const [real] = await db.insert(sightings).values({ catId: cat.id, originalKey: "originals/real.jpg", publicReady: false, state: "matched" }).returning();
+    const held = (await getCaretakerQueue()).heldPhotos.map((h) => h.sightingId);
+    expect(held).toContain(real.id);
+    expect(held).not.toContain(drawn.id);
+    expect(await runAction("photo_publish", care.id, { sightingId: drawn.id })).toMatchObject({ status: 409, ok: false });
   });
 });
