@@ -669,6 +669,126 @@ input[type="checkbox"] {
   }
 }
 
+/* The capture: flash and dip at the shutter, the frame becoming a card, then a quiet pulse while the photo develops.
+   Transform and opacity only, so nothing moves the layout. Timings follow the animation-principles skill:
+   a 240ms flash fading from 90% white, a 180ms dip, a 500ms ease-out drop with a small overshoot, the label 80ms behind the card. */
+.cap-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  background: #ffffff;
+  pointer-events: none;
+  animation: cap-flash 240ms cubic-bezier(0.7, 0, 0.84, 0) both;
+}
+@keyframes cap-flash {
+  0% { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+.cap-dip {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--ink);
+  animation: cap-dip 180ms var(--ease-out) both;
+}
+@keyframes cap-dip {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.cap-layer {
+  position: absolute;
+  inset: 0.75rem 1.5rem 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: var(--ink);
+}
+.cap-card {
+  width: min(100%, 17rem);
+  padding: 0.6rem 0.6rem 0.4rem;
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--ink);
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.55);
+  transform: rotate(-1deg);
+  animation:
+    cap-drop 500ms cubic-bezier(0.34, 1.3, 0.64, 1) 140ms both,
+    cap-pulse 1400ms ease-in-out var(--cap-total) infinite;
+}
+@keyframes cap-drop {
+  0% { opacity: 0; transform: translateY(-36px) rotate(-8deg) scale(1.08); }
+  30% { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) rotate(-1deg) scale(1); }
+}
+@keyframes cap-pulse {
+  0%, 100% { transform: rotate(-1deg) scale(1); }
+  50% { transform: rotate(-1deg) scale(1.015); }
+}
+.cap-photo {
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--pale);
+}
+.cap-label {
+  min-height: 2.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  animation: cap-label 200ms var(--ease-out) 580ms both;
+}
+@keyframes cap-label {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* On the reveal: the photo breathes while the worker develops it, and the grey cat pops once it is coloured. */
+.develop-pulse {
+  animation: develop-pulse 1400ms ease-in-out infinite;
+}
+@keyframes develop-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+.develop-tag {
+  position: absolute;
+  inset: auto 0.25rem 0.25rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--r-in);
+  background: var(--ink);
+  color: #ffffff;
+  text-align: center;
+}
+.develop-pop {
+  display: block;
+  animation: develop-pop 280ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes develop-pop {
+  from { transform: scale(0.9); }
+  to { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cap-flash {
+    display: none;
+  }
+  .cap-dip,
+  .cap-label,
+  .develop-pop {
+    animation: none;
+  }
+  .cap-card {
+    animation: cap-fade 180ms linear both;
+  }
+  .develop-pulse {
+    animation: none;
+  }
+  @keyframes cap-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}
+
 /* The shared goal. Progress achieved, shown as a bar and words. */
 .goal {
   display: block;

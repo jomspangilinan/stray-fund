@@ -31,3 +31,15 @@ export function scanProgress(elapsedMs: number, responded: boolean, state?: Scan
   const at = Math.min(Math.floor(ms / STEP_MS), last);
   return { done: at, active: at };
 }
+
+/** Only the judges' AI path runs checks, so only it lists them. The public path shows no checklist at all. */
+export const showChecklist = (aiPath: boolean): boolean => aiPath;
+
+/** The first part of the capture animation, from the shutter to the card settled with its label. */
+export const CAPTURE_TOTAL_MS = 1500;
+/** How often the phone asks whether its photo is developed. */
+export const DEVELOP_POLL_MS = 1500;
+/** The photo is still welcome after this long, but the screen says it will appear soon. */
+export const DEVELOP_SOON_MS = 45_000;
+/** Server-tier photos publish 60 to 120 s after upload, so the phone keeps asking this long. */
+export const DEVELOP_POLL_LIMIT_MS = 150_000;

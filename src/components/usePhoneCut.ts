@@ -89,7 +89,7 @@ export function maskToPng(mask: Uint8Array): Promise<Blob | null> {
  * and the frame rate allow it. `cut` then runs it on the upright photo. Any doubt, failure or the PHONE_CUT_TIMEOUT_MS
  * limit gives null, so the photo goes up alone and the server develops it. It never blocks the shutter.
  */
-export function usePhoneCut(enabled: boolean): { cut(canvas: HTMLCanvasElement): Promise<PhoneCut | null> } {
+export function usePhoneCut(enabled: boolean): { cut(canvas: HTMLCanvasElement): Promise<PhoneCut | null>; ready(): boolean } {
   const runner = useRef<SegRun | null>(null);
   const busy = useRef(false);
   const started = useRef(false);
@@ -128,5 +128,8 @@ export function usePhoneCut(enabled: boolean): { cut(canvas: HTMLCanvasElement):
     return orNullAfter(work, PHONE_CUT_TIMEOUT_MS);
   }, []);
 
-  return { cut };
+  /** True when `cut` would really run the model now. The screen says it is finding the cat only then. */
+  const ready = useCallback(() => runner.current !== null && !busy.current, []);
+
+  return { cut, ready };
 }

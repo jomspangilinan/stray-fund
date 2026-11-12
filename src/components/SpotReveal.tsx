@@ -9,6 +9,8 @@ import { EarTipAsk } from "./EarTipAsk";
 import { ReportCat } from "./ReportCat";
 import { SaveImage } from "./SaveImage";
 import { SexAsk } from "./SexAsk";
+import { developLines } from "@/lib/developPoll";
+import type { Avatar } from "@/lib/avatar";
 import { revealCopy, type RevealState } from "@/lib/spotCopy";
 import { JUDGE_ONLY_LINE } from "@/lib/judgeLine";
 import type { SpotReveal as Reveal } from "@/server/spotReveal";
@@ -25,6 +27,7 @@ export function SpotReveal({
   capturedUrl,
   locationMissing,
   judge,
+  develop,
   onAgain,
 }: {
   state: RevealState;
@@ -34,6 +37,8 @@ export function SpotReveal({
   capturedUrl: string | null;
   locationMissing: boolean;
   judge: boolean;
+  /** Public path only: how far the photo has got. The cat is already in the yard; the photo and its colours follow. */
+  develop?: { developed: boolean; soon: boolean; photoUrl: string | null; avatar: Avatar | null };
   onAgain: () => void;
 }) {
   // Another name changes the name in place. The rest of the card is what the server sent.
@@ -42,7 +47,11 @@ export function SpotReveal({
   const [female, setFemale] = useState(reveal.female);
   const [popped, setPopped] = useState(false);
   const { heading, sub } = revealCopy(state, name);
-  const photo = reveal.photoUrl ?? capturedUrl;
+  const publicPhoto = develop?.photoUrl ?? reveal.photoUrl;
+  const photo = publicPhoto ?? capturedUrl;
+  const avatar = develop?.avatar ?? reveal.avatar;
+  const lines = develop ? developLines(develop) : null;
+  const developing = Boolean(develop && !develop.developed);
   const tipTag = reveal.yourEarTip === "yes" ? "You said: tipped ear" : reveal.yourEarTip === "no" ? "You said: not tipped" : null;
   const tags = [reveal.coat, tipTag, ...reveal.flags, reveal.probablyFemale ? "Probably female" : null].filter((t): t is string => Boolean(t));
   const hasMore = Boolean(catId) && judge && (reveal.canRename || reveal.askSex || reveal.askEarTip);
@@ -52,7 +61,16 @@ export function SpotReveal({
         {photo && (
           // A device photo is a blob: URL and the public one is already scrubbed, so next/image adds nothing.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={photo} alt="The photo you took" className="absolute inset-0 h-full w-full rounded-l-out object-cover" />
+          <img
+            src={photo}
+            alt="The photo you took"
+            className={`absolute inset-0 h-full w-full rounded-l-out object-cover ${developing ? "develop-pulse" : ""}`}
+          />
+        )}
+        {lines?.card && (
+          <span className="develop-tag small font-bold" role="status">
+            {lines.card}
+          </span>
         )}
       </div>
       <div className="grid min-w-0 flex-1 content-center gap-2 p-3">
@@ -76,17 +94,21 @@ export function SpotReveal({
           <p className="mt-1 text-base font-semibold">{sub}</p>
         </div>
 
-        {reveal.avatar && (
+        {avatar && (
           <div className="arrive arrive-short" style={{ "--court-wall": COURT.wall, "--court-floor": COURT.floor } as React.CSSProperties}>
             <div className="arrive-floor" aria-hidden="true" />
             <div className="arrive-cat" aria-hidden="true">
-              <CatAvatar avatar={reveal.avatar} id={reveal.catId ?? ""} ribbon={female} ribbonPop={popped} />
+              <span key={develop?.developed ? "developed" : "first"} className={develop?.developed && develop.avatar ? "develop-pop" : undefined}>
+                <CatAvatar avatar={avatar} id={reveal.catId ?? ""} ribbon={female} ribbonPop={popped} />
+              </span>
             </div>
             <p className="arrive-note small">A look-alike. The photo is the real one.</p>
           </div>
         )}
 
-        {catId && reveal.photoUrl && state !== "needs_review" ? (
+        {lines && <p className="text-center font-bold">{lines.yard}</p>}
+
+        {catId && publicPhoto && state !== "needs_review" ? (
           <SaveImage catId={catId} variant="button">
             {card}
           </SaveImage>

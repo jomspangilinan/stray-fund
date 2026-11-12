@@ -1,7 +1,16 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { SCAN_STEPS, STEP_MS, scanProgress } from "../src/lib/scanSteps";
+import {
+  CAPTURE_TOTAL_MS,
+  DEVELOP_POLL_LIMIT_MS,
+  DEVELOP_POLL_MS,
+  DEVELOP_SOON_MS,
+  SCAN_STEPS,
+  STEP_MS,
+  scanProgress,
+  showChecklist,
+} from "../src/lib/scanSteps";
 import { ScanChecklist } from "../src/components/ScanChecklist";
 
 describe("scanProgress", () => {
@@ -95,5 +104,29 @@ describe("the checklist", () => {
     const out = html(0, true);
     expect(out.match(/data-done="true"/g)?.length).toBe(SCAN_STEPS.length);
     expect(out).not.toContain('data-active="true"');
+  });
+});
+
+describe("who sees the checklist", () => {
+  it("shows it on the AI path only", () => {
+    expect(showChecklist(true)).toBe(true);
+    expect(showChecklist(false)).toBe(false);
+  });
+
+  it("never shows a plain result's step as done", () => {
+    // The public path has no checklist, and if one were rendered for it nothing would be ticked.
+    expect(showChecklist(false)).toBe(false);
+    const out = renderToStaticMarkup(createElement(ScanChecklist, { elapsedMs: 0, responded: true, state: "queued_for_ai" }));
+    expect(out).not.toContain('data-done="true"');
+  });
+});
+
+describe("the capture timing", () => {
+  it("keeps the agreed numbers", () => {
+    expect(CAPTURE_TOTAL_MS).toBe(1500);
+    expect(DEVELOP_POLL_MS).toBe(1500);
+    expect(DEVELOP_SOON_MS).toBe(45_000);
+    expect(DEVELOP_POLL_LIMIT_MS).toBe(150_000);
+    expect(DEVELOP_SOON_MS).toBeLessThan(DEVELOP_POLL_LIMIT_MS);
   });
 });

@@ -5,12 +5,15 @@ import { useEffect, useRef, useState } from "react";
 import { boxToView, clampBox } from "@/lib/catDetect";
 import { toCatBox, type CatBox } from "@/lib/keepsake";
 import { COLONY } from "@/lib/config";
+import { showChecklist } from "@/lib/scanSteps";
 import type { SpotReveal as Reveal } from "@/server/spotReveal";
+import { CaptureCard, CaptureDip, CaptureFlash } from "./CaptureAnimation";
 import { LiveCamera, type CaptureLocation } from "./LiveCamera";
 import { ScanChecklist } from "./ScanChecklist";
 import { SignInGate } from "./SignInGate";
 import { SpotReveal } from "./SpotReveal";
 import { useCatDetector } from "./useCatDetector";
+import { useDevelopPoll } from "./useDevelopPoll";
 import { blobToCanvas, maskToPng, usePhoneCut } from "./usePhoneCut";
 
 type Done = {
@@ -20,12 +23,14 @@ type Done = {
   message: string;
   /** False on the public path, where no AI looked at the photo. */
   aiChecked?: boolean;
+  /** The public photo is already published (the phone cut the cat out). False means the worker is still developing it. */
+  developed?: boolean;
   reveal: Reveal | null;
   locationMissing: boolean;
 };
 type Phase =
   | { kind: "camera" }
-  | { kind: "sending"; startedAt: number; responded: boolean; state?: Done["state"] }
+  | { kind: "sending"; startedAt: number; responded: boolean; state?: Done["state"]; step: "cutting" | "sending" }
   | { kind: "done"; done: Done }
   | { kind: "error"; message: string };
 
@@ -76,6 +81,12 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
           h: (stage?.h ?? window.innerHeight) - 12 - 52,
         })
       : null;
+
+  // A public photo the worker is still developing is polled until it is, so the cat can fill with colour.
+  const done = phase.kind === "done" ? phase.done : null;
+  const publicNew = Boolean(done && done.aiChecked === false && done.state === "new_cat" && done.reveal);
+  const stillDeveloping = publicNew && done?.developed === false;
+  const poll = useDevelopPoll(done?.sightingId ?? null, stillDeveloping);
 
   const fullscreen = phase.kind !== "done" && Boolean(username);
   const covering = Boolean(username) && (phase.kind !== "done" || phase.done.reveal !== null);
@@ -130,7 +141,8 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
   async function upload(blob: Blob, where: CaptureLocation, box: CatBox | null) {
     keep(blob);
     const startedAt = Date.now();
-    setPhase({ kind: "sending", startedAt, responded: false });
+    // The phone says it is finding the cat only while it really is: when the model is not ready, the photo just goes up.
+    setPhase({ kind: "sending", startedAt, responded: false, step: !judge && phone.ready() ? "cutting" : "sending" });
     const form = new FormData();
     form.set("photo", new File([blob], "cat.jpg", { type: "image/jpeg" }));
     if (where.lat !== null && where.lng !== null) {
@@ -142,6 +154,7 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
     if (!judge) {
       const canvas = await blobToCanvas(blob);
       const cut = canvas ? await phone.cut(canvas) : null;
+      setPhase((p) => (p.kind === "sending" ? { ...p, step: "sending" } : p));
       const png = cut ? await maskToPng(cut.mask) : null;
       if (cut && png) {
         form.set("mask", new File([png], "mask.png", { type: "image/png" }));
@@ -162,12 +175,13 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
         sightingId: body.sightingId ?? null,
         message: body.message,
         aiChecked: body.aiChecked !== false,
+        developed: body.developed === true,
         reveal: body.reveal ?? null,
         locationMissing: where.lat === null,
       };
       // Tick every step first, so the list finishes only because the server answered. No AI ran on the public path, so there is nothing to tick.
       if (done.aiChecked) {
-        setPhase({ kind: "sending", startedAt, responded: true, state: done.state });
+        setPhase({ kind: "sending", startedAt, responded: true, state: done.state, step: "sending" });
         await new Promise((r) => setTimeout(r, TICKED_MS));
       }
       setPhase({ kind: "done", done });
@@ -188,6 +202,11 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
           capturedUrl={capturedUrl}
           locationMissing={done.locationMissing}
           judge={judge}
+          develop={
+            publicNew
+              ? { developed: !stillDeveloping || poll.developed, soon: poll.soon, photoUrl: poll.photoUrl, avatar: poll.avatar }
+              : undefined
+          }
           onAgain={again}
         />
       );
@@ -208,6 +227,9 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
   }
 
   const sending = phase.kind === "sending";
+  const aiPath = showChecklist(judge);
+  // The one line under the card. Only the phone's own cut-out earns "Finding your cat…", and only while it runs.
+  const sendLabel = phase.kind === "sending" && phase.step === "cutting" ? "Finding your cat…" : "Sending your photo";
   return (
     <>
       <p className="small soft mt-5 max-w-[52ch]">
@@ -219,9 +241,11 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
           onVideoReady={setVideo}
           bracketBox={bracketBox}
           onStageRect={setStage}
-          scanning={sending && Boolean(capturedUrl)}
+          scanning={sending && Boolean(capturedUrl) && aiPath}
           stageNote={
-            !(sending && capturedUrl) && detector.state !== "off" ? (
+            sending && capturedUrl && !aiPath ? (
+              <CaptureCard photoUrl={capturedUrl} label={sendLabel} />
+            ) : !(sending && capturedUrl) && detector.state !== "off" ? (
               <p className="cam-status" role="status" aria-live="polite">
                 {detector.state === "found" ? "Cat found" : "Looking for a cat"}
               </p>
@@ -240,10 +264,17 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
           }
           overlay={
             sending && capturedUrl ? (
-              <div className="cam-frozen">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={capturedUrl} alt="The photo you just took" className="h-full w-full object-cover" />
-              </div>
+              <>
+                {aiPath ? (
+                  <div className="cam-frozen">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={capturedUrl} alt="The photo you just took" className="h-full w-full object-cover" />
+                  </div>
+                ) : (
+                  <CaptureDip />
+                )}
+                <CaptureFlash />
+              </>
             ) : null
           }
           controls={
@@ -256,13 +287,13 @@ export function SpotFlow({ username, demo = false, judge }: { username: string |
           busyPanel={
             sending ? (
               <div role="status" aria-live="polite">
-                {judge ? (
+                {aiPath ? (
                   <>
                     <p className="mb-3 font-bold">Checking your photo</p>
                     <ScanChecklist elapsedMs={elapsed} responded={phase.responded} state={phase.state} />
                   </>
                 ) : (
-                  <p className="font-bold">Sending your photo</p>
+                  <p className="font-bold">{sendLabel}</p>
                 )}
               </div>
             ) : undefined
