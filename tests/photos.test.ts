@@ -1,6 +1,16 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { InvalidPhoto, publishScrubbed, storeOriginal } from "../src/server/photos";
+import {
+  InvalidPhoto,
+  KEEP_MARGIN,
+  MASK_MAX_BYTES,
+  catOnly,
+  maskUsable,
+  publishCatOnly,
+  publishScrubbed,
+  storeOriginal,
+  type KeepArea,
+} from "../src/server/photos";
 import { getStorage } from "../src/server/storage";
 import { checkerImage, gpsJpeg, greyRegion, variance } from "./helpers/images";
 
@@ -216,5 +226,153 @@ describe("publishScrubbed", () => {
     const { key } = await setup();
     const pub = await publishScrubbed(key, []);
     expect((await sharp(await readPublic(pub.key)).metadata()).format).toBe("jpeg");
+  });
+});
+
+describe("catOnly", () => {
+  const W = 400;
+  const H = 300;
+  const box = { x: 0.25, y: 0.25, w: 0.5, h: 0.5 };
+  const cx = 200;
+  const cy = 150;
+
+  async function checker(): Promise<Buffer> {
+    return sharp(await checkerImage(W, H, { left: 0, top: 0, width: W, height: H }))
+      .jpeg({ quality: 95 })
+      .toBuffer();
+  }
+  const varAt = async (img: Buffer, left: number, top: number, width = 20, height = 20) =>
+    variance(await greyRegion(img, { left, top, width, height }));
+
+  /** A 64x64 grey PNG, white where the pixel's centre lies in the given fractions of the frame. */
+  async function maskOf(area: { x: number; y: number; w: number; h: number } | "all" | "none"): Promise<Buffer> {
+    const px = Buffer.alloc(64 * 64);
+    for (let y = 0; y < 64; y++) {
+      for (let x = 0; x < 64; x++) {
+        const fx = (x + 0.5) / 64;
+        const fy = (y + 0.5) / 64;
+        const on =
+          area === "all" ||
+          (area !== "none" && fx >= area.x && fx <= area.x + area.w && fy >= area.y && fy <= area.y + area.h);
+        px[y * 64 + x] = on ? 255 : 0;
+      }
+    }
+    return sharp(px, { raw: { width: 64, height: 64, channels: 1 } }).png().toBuffer();
+  }
+  const leftHalf = { x: 0, y: 0.2, w: 0.45, h: 0.6 };
+
+  it("falls back to a soft circle on the box: sharp in the middle, blurred in the corners", async () => {
+    const input = await checker();
+    const before = await varAt(input, cx - 10, cy - 10);
+    const out = await catOnly(input, { box, mask: null });
+    expect(before).toBeGreaterThan(10000);
+    expect(await varAt(out, cx - 10, cy - 10)).toBeGreaterThan(before * 0.7);
+    for (const [l, t] of [[0, 0], [W - 20, 0], [0, H - 20], [W - 20, H - 20]]) {
+      expect(await varAt(out, l, t)).toBeLessThan(before * 0.1);
+    }
+  });
+
+  it("fades without a hard edge from the box centre outward", async () => {
+    const input = await checker();
+    const out = await catOnly(input, { box, mask: null });
+    // The circle has radius 200 * 0.65 = 130 and fades over its last 26 px. Variance follows the square of
+    // the blend, so bands this thin and a floor at 10% of the sharp variance (the blur's own noise) are fair.
+    const sharpVar = await varAt(input, cx - 10, cy - 10);
+    const bands: number[] = [];
+    for (let d = 0; d + 5 <= 135; d += 5) bands.push(await varAt(out, cx + d, cy - 5, 5, 10));
+    expect(bands.some((v) => v > sharpVar * 0.15 && v < sharpVar * 0.85)).toBe(true);
+    for (let i = 0; i + 1 < bands.length; i++) {
+      const hi = Math.max(bands[i], bands[i + 1]);
+      const lo = Math.max(sharpVar * 0.1, Math.min(bands[i], bands[i + 1]));
+      expect(hi / lo).toBeLessThan(3);
+    }
+  });
+
+  it("keeps the usable mask sharp and blurs the rest, without using the circle", async () => {
+    const input = await checker();
+    const keep: KeepArea = { box: { x: 0, y: 0.2, w: 0.45, h: 0.6 }, mask: await maskOf(leftHalf) };
+    expect(await maskUsable(keep.mask!, keep.box)).toBe(true);
+    const out = await catOnly(input, keep);
+    const before = await varAt(input, 40, 120);
+    expect(await varAt(out, 40, 120)).toBeGreaterThan(before * 0.7);
+    expect(await varAt(out, 340, 120)).toBeLessThan(before * 0.1);
+    // Inside the box's circle (centre 90,150, radius 0.65 * 180 = 117) but well outside the mask: blurred.
+    expect(await varAt(out, 190, 140, 10, 10)).toBeLessThan(before * 0.1);
+  });
+
+  describe("an unusable mask falls back to the circle", () => {
+    const cases: [string, () => Promise<Buffer>][] = [
+      ["an all-black mask", () => maskOf("none")],
+      ["a mask over 80% white", () => maskOf("all")],
+      ["a mask mostly outside the box", () => maskOf({ x: 0.8, y: 0.8, w: 0.2, h: 0.2 })],
+      [
+        "a mask that is not 64x64",
+        () => sharp({ create: { width: 32, height: 32, channels: 3, background: "#fff" } }).png().toBuffer(),
+      ],
+      ["a mask over the size limit", async () => Buffer.concat([await maskOf(box), Buffer.alloc(MASK_MAX_BYTES)])],
+      ["non-PNG bytes", async () => Buffer.from("not a png at all")],
+    ];
+    for (const [name, make] of cases) {
+      it(name, async () => {
+        const mask = await make();
+        expect(await maskUsable(mask, box)).toBe(false);
+        const input = await checker();
+        const before = await varAt(input, cx - 10, cy - 10);
+        const out = await catOnly(input, { box, mask });
+        const plain = await catOnly(input, { box, mask: null });
+        expect(await varAt(out, cx - 10, cy - 10)).toBeGreaterThan(before * 0.7);
+        expect(await varAt(out, 0, 0)).toBeLessThan(before * 0.1);
+        expect((await greyRegion(out, { left: 0, top: 0, width: W, height: H })).join()).toBe(
+          (await greyRegion(plain, { left: 0, top: 0, width: W, height: H })).join(),
+        );
+      });
+    }
+
+    it("a mask with no box to check it against", async () => {
+      expect(await maskUsable(await maskOf(box), null)).toBe(false);
+    });
+  });
+
+  it("accepts a mask that lies inside the box widened by the margin", async () => {
+    const wide = { x: box.x - box.w * KEEP_MARGIN * 0.9, y: box.y, w: box.w * (1 + KEEP_MARGIN * 0.9), h: box.h };
+    expect(await maskUsable(await maskOf(wide), box)).toBe(true);
+  });
+
+  it("with no box and no mask keeps the middle sharp and blurs the corners", async () => {
+    const input = await checker();
+    const before = await varAt(input, cx - 10, cy - 10);
+    const out = await catOnly(input, { box: null, mask: null });
+    expect(await varAt(out, cx - 10, cy - 10)).toBeGreaterThan(before * 0.7);
+    // Diameter 60% of the shorter side is 180 px: 90 px from the middle is the edge.
+    expect(await varAt(out, cx + 100, cy - 10)).toBeLessThan(before * 0.1);
+    expect(await varAt(out, 0, 0)).toBeLessThan(before * 0.1);
+    expect(await varAt(out, W - 20, H - 20)).toBeLessThan(before * 0.1);
+  });
+
+  it("blurs a region that lies inside the sharp area", async () => {
+    const input = await checker();
+    const before = await varAt(input, cx - 10, cy - 10);
+    const region = { x: (cx - 20) / W, y: (cy - 20) / H, w: 40 / W, h: 40 / H };
+    const out = await catOnly(input, { box, mask: null }, [region]);
+    expect(await varAt(out, cx - 5, cy - 5, 10, 10)).toBeLessThan(before * 0.1);
+    // Well inside the circle but away from the region stays sharp.
+    expect(await varAt(out, cx + 60, cy - 10)).toBeGreaterThan(before * 0.7);
+  });
+
+  it("ignores unusable regions and boxes", async () => {
+    const input = await checker();
+    const out = await catOnly(input, { box: { x: NaN, y: 0, w: 1, h: 1 }, mask: null }, [null as never, { x: 0, y: 0, w: 0, h: 1 }]);
+    const m = await sharp(out).metadata();
+    expect([m.width, m.height]).toEqual([W, H]);
+  });
+
+  it("publishCatOnly stores a metadata-free JPEG under the public prefix", async () => {
+    const { key } = await storeOriginal(await gpsJpeg());
+    const pub = await publishCatOnly(key, { box, mask: null });
+    expect(pub.key).toMatch(/^photos\/[0-9a-f-]{36}\.jpg$/);
+    const m = await sharp(await readPublic(pub.key)).metadata();
+    expect(m.format).toBe("jpeg");
+    expect(m.exif).toBeUndefined();
+    expect([m.width, m.height]).toEqual([400, 300]);
   });
 });
