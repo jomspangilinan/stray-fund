@@ -7,8 +7,14 @@ import { isDemoMode } from "@/lib/config";
  * placeholder picture instead of the original, a masked PayPal email. With DEMO_MODE off, real staff see it all.
  */
 
-/** True when private places, originals and emails must not leave the server for a staff screen. */
-export const hidePrivateInDemo = (): boolean => isDemoMode();
+/**
+ * True when private places, originals and emails must not leave the server for a staff screen. Off by default: the
+ * owner tests the demo with sandbox data only. Set DEMO_HIDE_PRIVATE=true before the link is shared with strangers.
+ */
+export const hidePrivateInDemo = (): boolean => isDemoMode() && process.env.DEMO_HIDE_PRIVATE === "true";
+
+/** Exact places stay hidden in the demo whatever DEMO_HIDE_PRIVATE says: they are real GPS points, not sandbox data. */
+export const hidePlacesInDemo = (): boolean => isDemoMode();
 
 /** r***@c***.test. Anything that is not an address becomes ***. */
 export function maskEmail(email: string | null): string | null {
@@ -26,7 +32,7 @@ export const HIDDEN_IN_DEMO_SVG =
 
 /** Coordinates for a staff screen: exact when allowed, otherwise nothing, with the flag that says why. */
 export function placeForStaff<T extends { lat: number; lng: number; approximate: boolean }>(exact: T | null): { exact: T | null; exactHidden: boolean } {
-  return hidePrivateInDemo() ? { exact: null, exactHidden: true } : { exact, exactHidden: false };
+  return hidePlacesInDemo() ? { exact: null, exactHidden: true } : { exact, exactHidden: false };
 }
 
 /** Seeded sample receipts carry an all-zero hash prefix that no real file can have. Only these may be served in the demo. */

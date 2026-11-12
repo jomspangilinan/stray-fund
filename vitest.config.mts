@@ -11,7 +11,8 @@ export default defineConfig({
     fileParallelism: false,
     globalSetup: ["tests/helpers/globalSetup.ts"],
     // An empty JUDGE_GATE means no gate, whatever .env.local sets. Gated tests stub JUDGE_GATE="true" and their own code.
-    env: { DATABASE_URL: process.env.TEST_DATABASE_URL ?? "", JUDGE_GATE: "" },
+    // The tests check the demo privacy rules with them switched on, as they will be once the link is shared.
+    env: { DATABASE_URL: process.env.TEST_DATABASE_URL ?? "", JUDGE_GATE: "", DEMO_HIDE_PRIVATE: "true" },
   },
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },

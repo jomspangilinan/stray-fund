@@ -4,7 +4,7 @@ import { NEUTRAL_AVATAR, parseAvatar } from "@/lib/avatar";
 import { goalPercent } from "@/lib/goal";
 import { YOURS_WINDOW_HOURS, careMarks, pickYard, yardStage, type YardCat, type YardGroup } from "@/lib/yard";
 import { pickMissions, type Mission, type MissionCat } from "@/lib/missions";
-import { hidePrivateInDemo } from "./demoPrivacy";
+import { hidePlacesInDemo } from "./demoPrivacy";
 import { db } from "./db/client";
 import { cats, earTipFlags, guardrails, nameSuggestions, reports, sightings, treatments, users } from "./db/schema";
 import { fundingOrder, SET_PLACE_ACTION } from "./agent/priority";
@@ -521,7 +521,7 @@ export async function listAgentActions(limit: number = MAX_AGENT_ACTIONS): Promi
 export function catForViewer(row: CatFull, session: Session | null, ctx: CatContext): CatForViewer {
   const out: CatForViewer = publicCat(row, ctx);
   const trusted = session?.role === "caretaker" || session?.role === "vet";
-  if (trusted && !hidePrivateInDemo() && row.exactLat != null && row.exactLng != null) {
+  if (trusted && !hidePlacesInDemo() && row.exactLat != null && row.exactLng != null) {
     out.exact = { lat: row.exactLat, lng: row.exactLng, approximate: row.locationApproximate };
   }
   return out;
