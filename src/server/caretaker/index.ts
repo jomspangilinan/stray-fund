@@ -1,6 +1,6 @@
 import { IllegalTransition } from "../catTransitions";
 import { describeError } from "../errors";
-import { catAdoptable, catAdopted, catNotAdoptable, catNotAdopted, catRemove, catSetDetails, catRename, catSetEarTip, catUndoNeutered, nameApprove, nameDismiss, photoHold, photoPublish, photoRotate, sightingConfirmNew, sightingMerge, sightingReject, wakeupDismiss, wakeupRetry } from "./cats";
+import { catAdoptable, catAdopted, catMerge, catNotAdoptable, catNotAdopted, catRemove, catSetDetails, catRename, catSetEarTip, catUndoNeutered, nameApprove, nameDismiss, photoHold, photoPublish, photoRotate, sightingConfirmNew, sightingMerge, sightingReject, wakeupDismiss, wakeupRetry } from "./cats";
 import { evidenceAccept, evidenceConfirmEarTip, evidenceReject, reviewResolve } from "./evidence";
 import { payoutAllowRetry, payoutApprove, payoutNote, payoutReject, payoutResolve } from "./payouts";
 import { reportConfirm, reportDismiss, reportReopen } from "./reports";
@@ -33,6 +33,7 @@ const HANDLERS = {
   cat_not_adopted: catNotAdopted,
   cat_not_adoptable: catNotAdoptable,
   cat_remove: catRemove,
+  cat_merge: catMerge,
   photo_publish: photoPublish,
   photo_hold: photoHold,
   photo_rotate: photoRotate,

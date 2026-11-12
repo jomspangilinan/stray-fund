@@ -1102,21 +1102,22 @@ describe("photo_publish and a rotation", () => {
   });
 });
 
+type Mem = { readPublic: (k: string) => Buffer };
+/** A cat made by a public no-AI photo, developed and public. */
+async function plainCat() {
+  const finder = (await db.insert(users).values({ username: `finder${++seq}`, role: "donor" }).returning())[0];
+  const [cat] = await db.insert(cats).values({ name: `Plain${seq}`, areaName: "x", fuzzedLat: 10.2, fuzzedLng: 120.6 }).returning();
+  const { key } = await storeOriginal(await image());
+  const publicKey = newPublicKey();
+  await getStorage().putPublic(publicKey, await image(), "image/jpeg");
+  const [s] = await db
+    .insert(sightings)
+    .values({ catId: cat.id, originalKey: key, caughtByUserId: finder.id, state: "new_cat", needsDevelop: true, developedAt: new Date(), publicReady: true, publicKey })
+    .returning();
+  return { cat, s, key, publicKey, finder };
+}
+
 describe("cat_remove", () => {
-  type Mem = { readPublic: (k: string) => Buffer };
-  /** A cat made by a public no-AI photo, developed and public. */
-  async function plainCat() {
-    const finder = (await db.insert(users).values({ username: `finder${++seq}`, role: "donor" }).returning())[0];
-    const [cat] = await db.insert(cats).values({ name: `Plain${seq}`, areaName: "x", fuzzedLat: 10.2, fuzzedLng: 120.6 }).returning();
-    const { key } = await storeOriginal(await image());
-    const publicKey = newPublicKey();
-    await getStorage().putPublic(publicKey, await image(), "image/jpeg");
-    const [s] = await db
-      .insert(sightings)
-      .values({ catId: cat.id, originalKey: key, caughtByUserId: finder.id, state: "new_cat", needsDevelop: true, developedAt: new Date(), publicReady: true, publicKey })
-      .returning();
-    return { cat, s, key, publicKey, finder };
-  }
 
   it("removes a plain cat: gone from the yard, its public copy deleted, its votes gone, an audit row left", async () => {
     const { cat, s, key, publicKey, finder } = await plainCat();
@@ -1174,6 +1175,88 @@ describe("cat_remove", () => {
     await signIn(await makeVet(), "vet");
     expect((await act("cat_remove", { catId: cat.id })).status).toBe(403);
     expect(await catRow(cat.id)).toBeDefined();
+  });
+});
+
+describe("cat_merge", () => {
+  /** The real cat: one the AI started from its own photo, with a published copy. */
+  async function realCat() {
+    const [cat] = await db.insert(cats).values({ name: `Real${++seq}`, areaName: "x", fuzzedLat: 10.2, fuzzedLng: 120.6 }).returning();
+    const { key } = await storeOriginal(await image());
+    const publicKey = newPublicKey();
+    await getStorage().putPublic(publicKey, await image(), "image/jpeg");
+    await db.insert(sightings).values({ catId: cat.id, originalKey: key, state: "new_cat", publicReady: true, publicKey });
+    return cat;
+  }
+
+  it("moves the duplicate's photos to the real cat: the count goes up, the duplicate leaves the yard, an audit row is left", async () => {
+    const real = await realCat();
+    const dup = await plainCat();
+    await db.insert(earTipFlags).values({ catId: dup.cat.id, userId: dup.finder.id, value: "no" });
+    await db.insert(nameSuggestions).values({ catId: dup.cat.id, requesterId: dup.finder.id, name: "Mali" });
+    expect((await getCatCard(real.id))!.cat.sightingCount).toBe(1);
+
+    expect(await act("cat_merge", { catId: dup.cat.id, intoCatId: real.id })).toMatchObject({ status: 200, ok: true });
+
+    expect(await catRow(dup.cat.id)).toBeUndefined();
+    expect(await sightingRow(dup.s.id)).toMatchObject({ catId: real.id, state: "matched", publicReady: true, publicKey: dup.publicKey });
+    const card = (await getCatCard(real.id))!;
+    expect(card.cat.sightingCount).toBe(2);
+    // The public copy stays where it was and now shows on the real cat's page.
+    expect(card.sightings.map((s) => s.id)).toContain(dup.s.id);
+    expect(() => (getStorage() as unknown as Mem).readPublic(dup.publicKey)).not.toThrow();
+    expect(await db.select().from(earTipFlags)).toHaveLength(0);
+    expect(await db.select().from(nameSuggestions)).toHaveLength(0);
+    const yard = (await getYard(null)).cats.map((c) => c.id);
+    expect(yard).not.toContain(dup.cat.id);
+    expect(yard).toContain(real.id);
+    const [row] = await actionsNamed("cat_merged");
+    expect(row).toMatchObject({
+      status: "done",
+      approvedBy: caretaker.id,
+      inputs: { catId: dup.cat.id, name: dup.cat.name, intoCatId: real.id, intoName: real.name, sightingIds: [dup.s.id] },
+    });
+    expect((await listAgentActions()).find((f) => f.id === row.id)?.action).toBe("Caretaker merged a cat added twice");
+    // The merge leaves no history against the real cat.
+    expect((await act("cat_merge", { catId: dup.cat.id, intoCatId: real.id })).status).toBe(404);
+  });
+
+  it("refuses a duplicate with a report (409) and changes nothing", async () => {
+    const real = await realCat();
+    const dup = await plainCat();
+    await db.insert(reports).values({
+      catId: dup.cat.id,
+      sightingId: dup.s.id,
+      claim: "injured",
+      source: "neighbour",
+      reporterId: dup.finder.id,
+      reportedOn: new Date().toISOString().slice(0, 10),
+    });
+    expect(await act("cat_merge", { catId: dup.cat.id, intoCatId: real.id })).toMatchObject({
+      status: 409,
+      message: "This cat has history, so it can't be moved into another cat.",
+    });
+    expect(await catRow(dup.cat.id)).toBeDefined();
+    expect(await sightingRow(dup.s.id)).toMatchObject({ catId: dup.cat.id, state: "new_cat" });
+    expect(await actionsNamed("cat_merged")).toHaveLength(0);
+  });
+
+  it("refuses merging a cat into itself (409) and an unknown target (404)", async () => {
+    const dup = await plainCat();
+    expect(await act("cat_merge", { catId: dup.cat.id, intoCatId: dup.cat.id })).toMatchObject({ status: 409 });
+    expect(await act("cat_merge", { catId: dup.cat.id, intoCatId: "00000000-0000-4000-8000-000000000999" })).toMatchObject({ status: 404 });
+    expect(await catRow(dup.cat.id)).toBeDefined();
+    expect(await sightingRow(dup.s.id)).toMatchObject({ catId: dup.cat.id });
+    expect(await actionsNamed("cat_merged")).toHaveLength(0);
+  });
+
+  it("is refused at the route for anyone but a caretaker", async () => {
+    const real = await realCat();
+    const dup = await plainCat();
+    const donor = (await db.insert(users).values({ username: `donor${++seq}`, role: "donor" }).returning())[0];
+    await signIn(donor, "donor");
+    expect((await act("cat_merge", { catId: dup.cat.id, intoCatId: real.id })).status).toBe(403);
+    expect(await catRow(dup.cat.id)).toBeDefined();
   });
 });
 

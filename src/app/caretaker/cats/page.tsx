@@ -9,13 +9,14 @@ import { PageHead } from "@/components/PageHead";
 import { RotateButtons } from "@/components/SightingPhoto";
 import { CatBrowser } from "@/components/desk/CatBrowser";
 import { CatRemove } from "@/components/desk/CatList";
+import { CatMerge } from "@/components/desk/CatMerge";
 import { CatProfileForm } from "@/components/desk/CatProfileForm";
 import { DeskGate } from "@/components/desk/DeskGate";
 import { PhotoZoom } from "@/components/desk/PhotoZoom";
 import { getCaretakerQueue, type CaretakerQueue } from "@/server/caretaker/queue";
 import { db } from "@/server/db/client";
 import { cats, reports } from "@/server/db/schema";
-import { getCatCard, isUuid } from "@/server/public";
+import { getCatCard, isUuid, listCats } from "@/server/public";
 import { catTimeline } from "@/server/timeline";
 
 export const metadata: Metadata = { title: "Cats | Stray Fund" };
@@ -33,6 +34,9 @@ async function Profile({ c }: { c: CaretakerQueue["catChoices"][number] }) {
   // The sighting whose public copy is the photo above, so a sideways one can be turned from here.
   const photoSightingId = photo ? (card?.sightings.find((s) => s.photoUrl === photo)?.id ?? null) : null;
   const statusLabel = card?.cat.statusLabel ?? c.status;
+  // Only a cat Remove would take can be merged, so only then are the other cats loaded for the picker.
+  const mergeable = cat.status === "spotted" && c.plainOnly;
+  const others = mergeable ? (await listCats()).filter((o) => o.id !== c.id).map((o) => ({ id: o.id, name: o.name, photoUrl: o.photoUrl })) : [];
 
   return (
     <>
@@ -57,6 +61,7 @@ async function Profile({ c }: { c: CaretakerQueue["catChoices"][number] }) {
       />
 
       <CatRemove c={c} status={cat.status} />
+      {mergeable && <CatMerge key={c.id} cat={{ id: c.id, name: c.name }} others={others} />}
 
       <section className="mt-6 border-t border-pale pt-4">
         <h3 className="font-extrabold">What happened</h3>

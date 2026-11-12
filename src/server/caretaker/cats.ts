@@ -521,50 +521,64 @@ const REMOVABLE_WITH: readonly string[] = [
 ];
 
 /**
- * Removes a cat that a public no-AI photo made by mistake (D4, R21). Allowed only for a spotted cat whose every
- * sighting is a plain public photo and that nothing else refers to: no money, booking, vet record, report, place
- * in the order, celebration or agent action. Its ear-tip answers, name ideas and open ear-tip questions go with
- * it (its sex answer lives on the cat row). Otherwise 409. The public copies are deleted after the commit. The
- * private originals stay: the app has no permission to delete from the private bucket.
+ * Locks a cat that a public no-AI photo made by mistake, and its sightings, or refuses with `refusal` (409). Allowed
+ * only for a spotted cat whose every sighting is a plain public photo and that nothing else refers to: no money,
+ * booking, vet record, report, place in the order, celebration or agent action. Votes, name ideas and ear-tip flags
+ * are the only things allowed to name it. 404 when there is no such cat.
+ */
+async function loadRemovable(tx: Tx, catId: string, refusal: string): Promise<{ cat: typeof cats.$inferSelect; shots: Sighting[] }> {
+  const [cat] = await tx.select().from(cats).where(eq(cats.id, catId)).for("update");
+  if (!cat) throw new Refusal(404, "There is no such cat.");
+  const shots = await tx.select().from(sightings).where(eq(sightings.catId, catId)).for("update");
+  if (cat.status !== "spotted" || shots.length === 0 || shots.some((s) => !s.needsDevelop)) throw new Refusal(409, refusal);
+
+  const shotIds = shots.map((s) => s.id);
+  const one = async (q: Promise<unknown[]>) => (await q).length > 0;
+  const referenced =
+    (await one(tx.select({ id: allocations.id }).from(allocations).where(eq(allocations.catId, catId)).limit(1))) ||
+    (await one(tx.select({ id: bookings.id }).from(bookings).where(eq(bookings.catId, catId)).limit(1))) ||
+    (await one(tx.select({ id: payouts.id }).from(payouts).where(eq(payouts.catId, catId)).limit(1))) ||
+    (await one(tx.select({ id: treatments.id }).from(treatments).where(eq(treatments.catId, catId)).limit(1))) ||
+    (await one(tx.select({ id: reports.id }).from(reports).where(or(eq(reports.catId, catId), inArray(reports.sightingId, shotIds))).limit(1))) ||
+    (await one(
+      tx
+        .select({ id: catPriority.catId })
+        .from(catPriority)
+        .where(or(eq(catPriority.catId, catId), eq(catPriority.beforeCatId, catId), sql`${catId}::uuid = any(${catPriority.passedCatIds})`))
+        .limit(1),
+    )) ||
+    (await one(tx.select({ id: milestoneSeen.catId }).from(milestoneSeen).where(eq(milestoneSeen.catId, catId)).limit(1))) ||
+    (await one(
+      tx
+        .select({ id: agentActions.id })
+        .from(agentActions)
+        .where(and(sql`${agentActions.inputs}->>'catId' = ${catId}`, notInArray(agentActions.action, [...REMOVABLE_WITH])))
+        .limit(1),
+    ));
+  if (referenced) throw new Refusal(409, refusal);
+  return { cat, shots };
+}
+
+/** Drops what may name a removable cat: its ear-tip answers, name ideas and open ear-tip questions (its sex answer lives on the cat row). */
+async function clearRemovable(tx: Tx, catId: string, caretakerId: string, why: string): Promise<void> {
+  await tx.delete(earTipFlags).where(eq(earTipFlags.catId, catId));
+  await tx.delete(nameSuggestions).where(eq(nameSuggestions.catId, catId));
+  // An ear-tip question about a cat that no longer exists has nothing left to decide.
+  await resolveReviewBySubject(tx, disagreementSubject(catId), caretakerId, why);
+  await resolveReviewBySubject(tx, lateYesSubject(catId), caretakerId, why);
+}
+
+/**
+ * Removes a cat that a public no-AI photo made by mistake (D4, R21), under the rules of loadRemovable. Otherwise 409.
+ * The public copies are deleted after the commit. The private originals stay: the app has no permission to delete
+ * from the private bucket.
  */
 export const catRemove: Handler = async (caretakerId, body) => {
   const catId = reqUuid(body, "catId", "The cat");
   const publicKeys = await withColonyLock(async (tx) => {
-    const [cat] = await tx.select().from(cats).where(eq(cats.id, catId)).for("update");
-    if (!cat) throw new Refusal(404, "There is no such cat.");
-    const shots = await tx.select().from(sightings).where(eq(sightings.catId, catId)).for("update");
-    if (cat.status !== "spotted" || shots.length === 0 || shots.some((s) => !s.needsDevelop)) throw new Refusal(409, CAT_HAS_HISTORY);
-
+    const { cat, shots } = await loadRemovable(tx, catId, CAT_HAS_HISTORY);
     const shotIds = shots.map((s) => s.id);
-    const one = async (q: Promise<unknown[]>) => (await q).length > 0;
-    const referenced =
-      (await one(tx.select({ id: allocations.id }).from(allocations).where(eq(allocations.catId, catId)).limit(1))) ||
-      (await one(tx.select({ id: bookings.id }).from(bookings).where(eq(bookings.catId, catId)).limit(1))) ||
-      (await one(tx.select({ id: payouts.id }).from(payouts).where(eq(payouts.catId, catId)).limit(1))) ||
-      (await one(tx.select({ id: treatments.id }).from(treatments).where(eq(treatments.catId, catId)).limit(1))) ||
-      (await one(tx.select({ id: reports.id }).from(reports).where(or(eq(reports.catId, catId), inArray(reports.sightingId, shotIds))).limit(1))) ||
-      (await one(
-        tx
-          .select({ id: catPriority.catId })
-          .from(catPriority)
-          .where(or(eq(catPriority.catId, catId), eq(catPriority.beforeCatId, catId), sql`${catId}::uuid = any(${catPriority.passedCatIds})`))
-          .limit(1),
-      )) ||
-      (await one(tx.select({ id: milestoneSeen.catId }).from(milestoneSeen).where(eq(milestoneSeen.catId, catId)).limit(1))) ||
-      (await one(
-        tx
-          .select({ id: agentActions.id })
-          .from(agentActions)
-          .where(and(sql`${agentActions.inputs}->>'catId' = ${catId}`, notInArray(agentActions.action, [...REMOVABLE_WITH])))
-          .limit(1),
-      ));
-    if (referenced) throw new Refusal(409, CAT_HAS_HISTORY);
-
-    await tx.delete(earTipFlags).where(eq(earTipFlags.catId, catId));
-    await tx.delete(nameSuggestions).where(eq(nameSuggestions.catId, catId));
-    // An ear-tip question about a cat that no longer exists has nothing left to decide.
-    await resolveReviewBySubject(tx, disagreementSubject(catId), caretakerId, "The cat was removed.");
-    await resolveReviewBySubject(tx, lateYesSubject(catId), caretakerId, "The cat was removed.");
+    await clearRemovable(tx, catId, caretakerId, "The cat was removed.");
     await tx.delete(sightings).where(eq(sightings.catId, catId));
     await tx.delete(cats).where(eq(cats.id, catId));
     // Audit rows name cats by id in inputs, with no foreign key, so this one outlives the cat. The name is kept for the record.
@@ -579,6 +593,38 @@ export const catRemove: Handler = async (caretakerId, body) => {
   // The removal has committed. Only now are the public copies deleted, and a failed delete never undoes it.
   for (const key of publicKeys) await removePublicCopy(key);
   return "Removed. The cat and its photos no longer show on any public page.";
+};
+
+export const CAT_MERGE_HAS_HISTORY = "This cat has history, so it can't be moved into another cat.";
+
+/**
+ * "Same cat as…": a public no-AI photo made a second card for a cat we already know. The duplicate must pass the
+ * same rules as cat_remove. Its photos move to the real cat as matched sightings and stay published, so they show on
+ * the real cat's page with no storage change. Its votes, name ideas and ear-tip flags go, and so does the duplicate.
+ */
+export const catMerge: Handler = async (caretakerId, body) => {
+  const catId = reqUuid(body, "catId", "The cat");
+  const intoCatId = reqUuid(body, "intoCatId", "The cat to move it into");
+  if (catId === intoCatId) throw new Refusal(409, "A cat can't be the same cat as itself. Choose another cat.");
+  const into = await withColonyLock(async (tx) => {
+    const { cat, shots } = await loadRemovable(tx, catId, CAT_MERGE_HAS_HISTORY);
+    const [target] = await tx.select({ id: cats.id, name: cats.name }).from(cats).where(eq(cats.id, intoCatId)).for("update");
+    if (!target) throw new Refusal(404, "There is no such cat to move it into.");
+    const shotIds = shots.map((s) => s.id);
+    await tx.update(sightings).set({ catId: target.id, state: "matched" }).where(eq(sightings.catId, catId));
+    await clearRemovable(tx, catId, caretakerId, "The cat was merged into another.");
+    await tx.delete(cats).where(eq(cats.id, catId));
+    // Like cat_removed: catId is the cat that is gone, named by id with no foreign key. The real cat goes under
+    // intoCatId, so this row never counts as history against it.
+    await audit(tx, {
+      action: "cat_merged",
+      caretakerId,
+      reason: "A caretaker found a cat added twice and moved its photos to the one already known.",
+      inputs: { catId, name: cat.name, intoCatId: target.id, intoName: target.name, sightingIds: shotIds },
+    });
+    return target;
+  });
+  return `Moved. ${into.name} now has these photos, and the second card is gone.`;
 };
 
 // ---------- Wakeups the agent gave up on ----------
