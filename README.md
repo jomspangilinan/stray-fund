@@ -6,15 +6,15 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
 [![Claude](https://img.shields.io/badge/AI-Claude%20on%20Bedrock-d4a27f)](https://aws.amazon.com/bedrock/claude/)
 
-Neighbours fund spay and neuter for the stray cats on their street. An AI treasurer picks which cat is helped next and says why, a person approves every payment, and PayPal pays the vet, with every peso on a public ledger.
+Neighbours fund spay and neuter for the stray cats on their street. An AI treasurer decides which cat is helped next, says why, and pays the vet through PayPal, inside rules that code enforces, with every peso on a public ledger.
 
 <p align="center"><img src="screenshots/card-01-hero.jpg" width="820" alt="Stray Fund: neighbours fund spay and neuter for stray cats. An AI treasurer picks the next cat and PayPal pays the vet, with every peso on a public ledger."></p>
 
 ## Highlights
 
 - Every donation and every vet payment sits on a public ledger with its PayPal reference, and the totals add up to the peso.
-- An AI treasurer picks the next cat and explains the choice in public. It has no tool that takes an amount or a PayPal address.
-- A person approves every payout before PayPal Payouts sends it, with 5 seconds to undo.
+- An AI treasurer moves the money: it sets money aside for the next cat, sends the vet's deposit and pays the balance, and explains each choice in public.
+- It moves money only inside rules. Its tools take a cat id and a reason, never an amount or a payee, and a caretaker approves every deposit, with 5 seconds to undo.
 - Caretakers and vets get their own desks: report checks and payments come as swipe cards, each with what the AI read.
 - It runs live on the PayPal sandbox, with Claude on Amazon Bedrock as the treasurer.
 
@@ -39,8 +39,8 @@ Stray Fund is built for one barangay's neighbours, the volunteer caretakers who 
 3. Neighbours donate through PayPal Checkout into one shared fund. PayPal's fee is counted, so the fund only holds what arrived.
 4. A caretaker confirms or dismisses each report. A confirmed report keeps the cat on hold until a vet clears it for surgery.
 5. The AI treasurer reads the waiting cats, the checked reports and the fund, picks the next cat and writes a public reason.
-6. Rules check the payment, a caretaker approves the deposit, and PayPal Payouts sends it to the partner vet.
-7. After surgery the vet sends a receipt and an ear-tip photo. The AI reads the receipt, code compares it with the booking, and a caretaker checks the photo before the balance is paid.
+6. Once a vet books the cat, the treasurer asks to pay the deposit. Rules check it, a caretaker approves it, and PayPal Payouts sends it to the partner vet.
+7. After surgery the vet sends a receipt and an ear-tip photo. The AI reads the receipt, code compares it with the booking, and a caretaker confirms the ear-tip. Then the treasurer pays the balance through Payouts. A balance over ₱2,000 waits for a person's approval too.
 
 People decide ear-tips, because the AI got them wrong on real photos. Neighbours answer Yes, No or Not sure, two different people saying No queue the cat, and a caretaker settles any disagreement.
 
@@ -66,15 +66,15 @@ Caretakers and vets work on their own screens, on a green bar, apart from the ne
   <img src="screenshots/priority.jpg" width="190" alt="Priority: cats needing a person first, then the order the treasurer will fund them">
 </p>
 
-## How the AI is kept away from the money
+## Trusting the AI with money
 
-The AI proposes, rules check, and a person approves.
+The hackathon asks for AI behind the wheel, and here it is: the treasurer sets money aside (`fund_next_cat`), sends the vet's deposit (`pay_vet_deposit`) and pays the balance (`release_vet_balance`), all through PayPal Payouts. It drives inside rules that code enforces.
 
-<p align="center"><img src="screenshots/card-07-money.jpg" width="640" alt="The AI never touches the money: Claude names the cat, code sets the amount and payee, a caretaker approves, and PayPal Payouts pays the vet"></p>
+<p align="center"><img src="screenshots/card-07-money.jpg" width="640" alt="The AI moves the money, inside the rules: the treasurer picks the cat and pays the vet, code sets the amount and the payee, and the money gate checks every payout"></p>
 
-- The treasurer calls a few tools that take cat ids and words ([src/server/agent/tools.ts](src/server/agent/tools.ts)). No tool takes an amount or a PayPal address; code supplies both.
-- Every payout goes through one function, the money gate ([src/server/moneyGate.ts](src/server/moneyGate.ts)). It takes a lock, checks the guardrails ([src/server/guardrails.ts](src/server/guardrails.ts)), writes the action down, and only then calls PayPal. The guardrails cover allow-listed payees, caps per cat and per day, a verified receipt, a confirmed ear-tip and duplicate payouts.
-- A caretaker approves every deposit, and a balance over the approval threshold waits for one too.
+- Its tools take a cat id and a reason, never an amount or a payee ([src/server/agent/tools.ts](src/server/agent/tools.ts)). Code works out the amount and pays only the registered vet.
+- Every payout goes through one function, the money gate ([src/server/moneyGate.ts](src/server/moneyGate.ts)). It takes a lock, checks the guardrails ([src/server/guardrails.ts](src/server/guardrails.ts)), writes the action down, and only then calls PayPal. The guardrails cover allow-listed payees, caps per cat and per day, only money already set aside, a verified receipt, a confirmed ear-tip and duplicate payouts.
+- A caretaker approves every deposit. A balance of up to ₱2,000 goes out on the treasurer's call once the receipt is verified and a caretaker has confirmed the ear-tip; a bigger one waits for a person.
 - A neighbour's report can hold a cat but never reorder the list. To pass over a cat, the treasurer has to cite a report a person checked, and its reason has to name the cats it passed over. Code enforces both, though it can't check that what the reason says is true.
 - Notes, receipts and photos are data. Text inside an image can't authorise anything, and a reason that repeats four words from a note is swapped for a fixed line before it goes public.
 - A daily cap limits AI calls.
