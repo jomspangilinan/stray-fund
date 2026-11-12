@@ -1,5 +1,6 @@
 import sharp, { type OverlayOptions } from "sharp";
 import { fromCatBox, type CatBox } from "../lib/keepsake";
+import { MASK_SIDE } from "../lib/catMask";
 import { getStorage, newPrivateKey, newPublicKey } from "./storage";
 
 /** A region as fractions of the image, 0 to 1, origin top left. */
@@ -105,7 +106,8 @@ export async function publishScrubbed(originalKey: string, regions: Box[]): Prom
 export const KEEP_MARGIN = 0.15;
 export const FEATHER = 0.2;
 export const NO_BOX_KEEP = 0.6;
-export const MASK_SIDE = 64;
+/** Lives with the pure mask code, which the phone shares. */
+export { MASK_SIDE };
 export const MASK_MAX_BYTES = 8 * 1024;
 export const MASK_DILATE = 0.04;
 const MASK_MAX_WHITE = 0.8;

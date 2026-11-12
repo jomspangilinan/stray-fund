@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { syncCatForPayout } from "../catTransitions";
 import { backfillAvatars } from "../avatars";
 import { retryPendingSightings } from "../spot";
+import { developNext } from "../develop";
 import { db, type Tx } from "../db/client";
 import { wakeups } from "../db/schema";
 import { describeError } from "../errors";
@@ -36,6 +37,8 @@ export type WorkerDeps = AgentDeps & {
   reconcileDonations?: () => Promise<unknown>;
   retryUnknown?: () => Promise<unknown>;
   retrySightings?: () => Promise<unknown>;
+  /** Develops one queued public photo per tick. */
+  develop?: () => Promise<unknown>;
   retryEvidence?: () => Promise<unknown>;
   backfillAvatars?: () => Promise<unknown>;
   /** Replaces the poll in a test. */
@@ -272,6 +275,7 @@ export async function runMaintenance(deps: WorkerDeps = {}): Promise<void> {
   await isolated("donation check", deps.reconcileDonations ?? (() => reconcilePendingDonations()));
   await isolated("payout retry", deps.retryUnknown ?? (() => retryUnknownPayouts(gateway)));
   await isolated("sighting retry", deps.retrySightings ?? retryPendingSightings);
+  await isolated("photo develop", deps.develop ?? developNext);
   await isolated("evidence retry", deps.retryEvidence ?? retryPendingEvidence);
   await isolated("avatar backfill", deps.backfillAvatars ?? backfillAvatars);
 }

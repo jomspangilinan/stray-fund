@@ -410,7 +410,7 @@ describe("payout wakeups", () => {
 });
 
 describe("maintenance", () => {
-  it("runs all four jobs, isolating a failure in any of them", async () => {
+  it("runs every job, isolating a failure in any of them", async () => {
     const ran: string[] = [];
     const job = (name: string, fail = false) => async () => {
       ran.push(name);
@@ -421,9 +421,10 @@ describe("maintenance", () => {
       reconcile: job("reconcile", true),
       retryUnknown: job("retryUnknown", true),
       retrySightings: job("sightings", true),
+      develop: job("develop", true),
       retryEvidence: job("evidence"),
     });
-    expect(ran).toEqual(["reconcile", "retryUnknown", "sightings", "evidence"]);
+    expect(ran).toEqual(["reconcile", "retryUnknown", "sightings", "develop", "evidence"]);
   });
 });
 
