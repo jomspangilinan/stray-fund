@@ -187,7 +187,8 @@ export function SpotFlow({ username, judge }: { username: string | null; judge: 
 
   async function upload(blob: Blob, where: CaptureLocation, box: CatBox | null) {
     keep(blob);
-    const startedAt = Date.now();
+    // The checklist's clock. It restarts once the cut-out is done, so the AI steps tick only while the photo is really up.
+    let startedAt = Date.now();
     // The phone says it is finding the cat only while it really is: when the model is not ready, the photo just goes up.
     setPhase({ kind: "sending", startedAt, responded: false, step: phone.ready() ? "cutting" : "sending" });
     const form = new FormData();
@@ -201,7 +202,8 @@ export function SpotFlow({ username, judge }: { username: string | null; judge: 
     let sendBox = box;
     const canvas = await blobToCanvas(blob);
     const cut = canvas ? await phone.cut(canvas) : null;
-    setPhase((p) => (p.kind === "sending" ? { ...p, step: "sending" } : p));
+    startedAt = Date.now();
+    setPhase((p) => (p.kind === "sending" ? { ...p, startedAt, step: "sending" } : p));
     const png = cut ? await maskToPng(cut.mask) : null;
     if (cut && png) {
       form.set("mask", new File([png], "mask.png", { type: "image/png" }));
@@ -334,7 +336,7 @@ export function SpotFlow({ username, judge }: { username: string | null; judge: 
                 {aiPath ? (
                   <>
                     <p className="mb-3 font-bold">Checking your photo</p>
-                    <ScanChecklist elapsedMs={elapsed} responded={phase.responded} state={phase.state} />
+                    <ScanChecklist elapsedMs={phase.step === "cutting" ? 0 : elapsed} responded={phase.responded} state={phase.state} />
                   </>
                 ) : (
                   <p className="font-bold">{sendLabel}</p>
