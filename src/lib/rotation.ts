@@ -25,7 +25,16 @@ export function turnFromGravity(g: { x: number; y: number }, screenAngle: number
   const quarter = Math.round(Math.atan2(g.x, g.y) / (Math.PI / 2));
   const phone = (((quarter % 4) + 4) % 4) * 90;
   const page = ((Math.round(screenAngle / 90) % 4) + 4) % 4 * 90;
-  return ((page - phone + 360) % 360) as Turn;
+  const turn = ((page - phone + 360) % 360) as Turn;
+  // Never 180. If the iOS sign guess in gravityFromMotion were wrong, an upright iPhone would read as 180 and
+  // every normal photo would flip. A real upside-down photo is rare, and a caretaker can rotate it twice.
+  return turn === 180 ? 0 : turn;
+}
+
+/** True on iPhone and iPad Safari, the browsers that ask for motion access and report gravity with the opposite sign. */
+export function isIos(): boolean {
+  if (typeof DeviceMotionEvent === "undefined") return false;
+  return typeof (DeviceMotionEvent as unknown as { requestPermission?: unknown }).requestPermission === "function";
 }
 
 /** Puts a reading into the W3C sign convention. iOS reports the opposite sign. */

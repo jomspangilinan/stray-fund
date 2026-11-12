@@ -1,7 +1,7 @@
 "use client";
 
 import type { CatBox } from "@/lib/keepsake";
-import { gravityFromMotion, turnBox, turnFromGravity, type Turn } from "@/lib/rotation";
+import { gravityFromMotion, isIos, turnBox, turnFromGravity, type Turn } from "@/lib/rotation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type CaptureLocation = { lat: number | null; lng: number | null };
@@ -34,13 +34,12 @@ export function locate(): Promise<CaptureLocation> {
   });
 }
 
-type MotionEventCtor = { requestPermission?: () => Promise<"granted" | "denied"> };
 
 /** iPhones ask for motion access from a tap; other browsers have no such call. Never rejects. */
 async function requestMotion(): Promise<boolean> {
-  const ctor = (typeof DeviceMotionEvent === "undefined" ? undefined : DeviceMotionEvent) as MotionEventCtor | undefined;
-  if (typeof ctor?.requestPermission !== "function") return true;
+  if (!isIos()) return true;
   try {
+    const ctor = DeviceMotionEvent as unknown as { requestPermission: () => Promise<"granted" | "denied"> };
     return (await ctor.requestPermission()) === "granted";
   } catch {
     return false;
@@ -212,7 +211,7 @@ export function LiveCamera({
   // Keeps the latest gravity reading while the camera is open.
   useEffect(() => {
     if (!live) return;
-    const ios = typeof (DeviceMotionEvent as unknown as MotionEventCtor | undefined)?.requestPermission === "function";
+    const ios = isIos();
     const onMotion = (e: DeviceMotionEvent) => {
       const g = e.accelerationIncludingGravity ? gravityFromMotion(e.accelerationIncludingGravity, ios) : null;
       if (!g) return;
@@ -232,6 +231,12 @@ export function LiveCamera({
     const v = videoRef.current;
     setLandscapeFrame(!!v && v.videoWidth > v.videoHeight && window.innerHeight > window.innerWidth);
   }, []);
+
+  // The screen turning changes what the hint should say, so look again then too.
+  useEffect(() => {
+    window.addEventListener("resize", checkFrame);
+    return () => window.removeEventListener("resize", checkFrame);
+  }, [checkFrame]);
 
   async function shoot() {
     const video = videoRef.current;

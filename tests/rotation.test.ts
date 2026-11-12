@@ -10,8 +10,9 @@ describe("turnFromGravity", () => {
     expect(turnFromGravity({ x: -9.8, y: 0 }, 0)).toBe(90);
     expect(turnFromGravity({ x: 9.8, y: 0 }, 0)).toBe(270);
   });
-  it("turns an upside-down phone", () => {
-    expect(turnFromGravity({ x: 0, y: -9.8 }, 0)).toBe(180);
+  it("never turns 180, so a wrong iOS sign cannot flip every normal photo", () => {
+    expect(turnFromGravity({ x: 0, y: -9.8 }, 0)).toBe(0);
+    expect(turnFromGravity({ x: 0, y: 9.8 }, 180)).toBe(0);
   });
   it("needs no turn when the page rotated with the phone", () => {
     expect(turnFromGravity({ x: 9.8, y: 0 }, 90)).toBe(0);
