@@ -182,27 +182,26 @@ describe("judge-only actions", () => {
   it("answers 403 with the one line on donate, capture, report and the cat votes, and lets a judge through", async () => {
     await donor();
     const [cat] = await db.insert(cats).values({ name: "Gate", areaName: "Brgy 1", status: "spotted" }).returning();
-    const calls: [string, () => Promise<Response>][] = [
-      ["donate", () => donationPost(new Request("http://x/api", json({ amount: 10000, attemptId: ID })))],
-      ["capture", () => capturePost(new Request("http://x/api", { method: "POST" }), { params: Promise.resolve({ orderId: "X" }) })],
-      ["report", () => reportPost(new Request("http://x/api", json({ sightingId: ID, claim: "sick" })))],
-      ["sex", () => sexPost(new Request("http://x/api", json({ answer: "female" })), ctx(cat.id))],
-      ["ear-tip", () => earTipPost(new Request("http://x/api", json({ answer: "yes" })), ctx(cat.id))],
-      ["name", () => namePost(new Request("http://x/api", json({ name: "Mimi" })), ctx(cat.id))],
-      ["another-name", () => anotherNamePost(new Request("http://x/api", json({})), ctx(cat.id))],
+    // Each call also says what a judge gets. Amount 1 is below the minimum and order "X" is unknown, so neither reaches PayPal.
+    const calls: [string, number, () => Promise<Response>][] = [
+      ["donate", 400, () => donationPost(new Request("http://x/api", json({ amount: 1, attemptId: ID })))],
+      ["capture", 404, () => capturePost(new Request("http://x/api", { method: "POST" }), { params: Promise.resolve({ orderId: "X" }) })],
+      ["report", 404, () => reportPost(new Request("http://x/api", json({ sightingId: ID, claim: "sick" })))],
+      ["sex", 200, () => sexPost(new Request("http://x/api", json({ answer: "female" })), ctx(cat.id))],
+      ["ear-tip", 200, () => earTipPost(new Request("http://x/api", json({ answer: "yes" })), ctx(cat.id))],
+      ["name", 200, () => namePost(new Request("http://x/api", json({ name: "Mimi" })), ctx(cat.id))],
+      ["another-name", 403, () => anotherNamePost(new Request("http://x/api", json({})), ctx(cat.id))],
     ];
-    for (const [label, call] of calls) {
+    for (const [label, , call] of calls) {
       const res = await call();
       expect(res.status, label).toBe(403);
       expect(await res.json(), label).toEqual({ error: JUDGE_ONLY_LINE });
     }
     asJudge();
-    for (const [label, call] of calls) {
-      const res = await call();
-      expect(await res.json(), label).not.toEqual({ error: JUDGE_ONLY_LINE });
-    }
-    const sex = await sexPost(new Request("http://x/api", json({ answer: "female" })), ctx(cat.id));
-    expect(sex.status).toBe(200);
+    for (const [label, status, call] of calls) expect((await call()).status, label).toBe(status);
+    // Another name is refused here because this person is not the finder, which is a different 403.
+    const another = await anotherNamePost(new Request("http://x/api", json({})), ctx(cat.id));
+    expect((await another.json()).error).not.toBe(JUDGE_ONLY_LINE);
   });
 
   it("still asks a signed-out caller to sign in before it mentions judges", async () => {
