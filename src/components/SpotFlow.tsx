@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { boxToView, clampBox } from "@/lib/catDetect";
 import { toCatBox, type CatBox } from "@/lib/keepsake";
 import { COLONY } from "@/lib/config";
@@ -118,6 +118,17 @@ export function SpotFlow({ username, judge }: { username: string | null; judge: 
     prefetched.current = true;
     router.prefetch("/");
   }, [fullscreen, router]);
+
+  // cacheComponents keeps this page's state (React Activity) after Close navigates away. When it is hidden, a
+  // closed camera is reset, so coming back to Spot opens the camera instead of the "Back to the yard…" panel.
+  useLayoutEffect(
+    () => () => {
+      if (!closed.current) return;
+      closed.current = false;
+      setPhaseNow({ kind: "camera" });
+    },
+    [],
+  );
 
   function close() {
     closed.current = true;
