@@ -8,6 +8,8 @@ import {
   allowedPayees,
   bookings,
   cats,
+  earTipFlags,
+  nameSuggestions,
   guardrails,
   payouts,
   receipts,
@@ -23,9 +25,9 @@ import { clearCatForSurgery, fileReport, heldCatIds } from "../src/server/report
 import { requestPayout } from "../src/server/moneyGate";
 import { storeOriginal } from "../src/server/photos";
 import { checkerImage, greyRegion, variance } from "./helpers/images";
-import { getCatCard, listAgentActions, manilaDate } from "../src/server/public";
+import { getCatCard, getYard, listAgentActions, manilaDate } from "../src/server/public";
 import { SESSION_COOKIE, signSession, type Role } from "../src/server/session";
-import { getStorage } from "../src/server/storage";
+import { getStorage, newPublicKey } from "../src/server/storage";
 import { setCatFinderForTests } from "../src/server/catFinder";
 import { developNext } from "../src/server/develop";
 import { assertCanSubmitEvidence } from "../src/server/vetFlow";
@@ -814,7 +816,7 @@ describe("photos", () => {
     const { cat, s } = await heldSighting({ ...ASSESS });
     expect((await act("photo_publish", { sightingId: s.id })).status).toBe(400);
     expect((await sightingRow(s.id)).publicReady).toBe(false);
-    expect((await act("photo_publish", { sightingId: s.id, noSensitive: true })).status).toBe(200);
+    expect(await act("photo_publish", { sightingId: s.id, noSensitive: true })).toMatchObject({ status: 200, message: "Published with only the cat sharp." });
     const row = await sightingRow(s.id);
     expect(row.publicReady).toBe(true);
     expect(row.publicKey).toMatch(/^photos\//);
@@ -1078,6 +1080,102 @@ describe("photo_rotate", () => {
 });
 
 // ---------- Wakeups ----------
+
+describe("photo_publish and a rotation", () => {
+  it("a rotation while the copy is made wins: the copy is deleted and the photo stays held", async () => {
+    const [cat] = await db.insert(cats).values({ name: "Spin cat", areaName: "x", status: "neutered", earTipped: true }).returning();
+    const { key } = await storeOriginal(await image());
+    const [s] = await db.insert(sightings).values({ catId: cat.id, originalKey: key, state: "new_cat", assessment: { ...ASSESS } }).returning();
+    const real = getStorage().putPublic.bind(getStorage());
+    const made: string[] = [];
+    vi.spyOn(getStorage(), "putPublic").mockImplementationOnce(async (k, buf, type) => {
+      made.push(k);
+      await real(k, buf, type);
+      await db.update(sightings).set({ photoVersion: 1 }).where(eq(sightings.id, s.id));
+    });
+    expect(await act("photo_publish", { sightingId: s.id, noSensitive: true })).toMatchObject({
+      status: 409,
+      message: "The photo was rotated while it was being published. Try again.",
+    });
+    expect(() => (getStorage() as unknown as { readPublic: (k: string) => Buffer }).readPublic(made[0])).toThrow();
+    expect(await sightingRow(s.id)).toMatchObject({ publicReady: false, publicKey: null });
+  });
+});
+
+describe("cat_remove", () => {
+  type Mem = { readPublic: (k: string) => Buffer };
+  /** A cat made by a public no-AI photo, developed and public. */
+  async function plainCat() {
+    const finder = (await db.insert(users).values({ username: `finder${++seq}`, role: "donor" }).returning())[0];
+    const [cat] = await db.insert(cats).values({ name: `Plain${seq}`, areaName: "x", fuzzedLat: 10.2, fuzzedLng: 120.6 }).returning();
+    const { key } = await storeOriginal(await image());
+    const publicKey = newPublicKey();
+    await getStorage().putPublic(publicKey, await image(), "image/jpeg");
+    const [s] = await db
+      .insert(sightings)
+      .values({ catId: cat.id, originalKey: key, caughtByUserId: finder.id, state: "new_cat", needsDevelop: true, developedAt: new Date(), publicReady: true, publicKey })
+      .returning();
+    return { cat, s, key, publicKey, finder };
+  }
+
+  it("removes a plain cat: gone from the yard, its public copy deleted, its votes gone, an audit row left", async () => {
+    const { cat, s, key, publicKey, finder } = await plainCat();
+    // Votes and name ideas do not count as history; they go with the cat.
+    await db.insert(earTipFlags).values({ catId: cat.id, userId: finder.id, value: "no" });
+    await db.insert(nameSuggestions).values({ catId: cat.id, requesterId: finder.id, name: "Mali" });
+    await db.insert(agentActions).values({ action: "sex_answered", inputs: { catId: cat.id, userId: finder.id }, reason: "x", status: "done" });
+    expect((await getYard(null)).cats.map((c) => c.id)).toContain(cat.id);
+
+    expect(await act("cat_remove", { catId: cat.id })).toMatchObject({ status: 200, ok: true });
+
+    expect(await catRow(cat.id)).toBeUndefined();
+    expect(await sightingRow(s.id)).toBeUndefined();
+    expect(await db.select().from(earTipFlags)).toHaveLength(0);
+    expect(await db.select().from(nameSuggestions)).toHaveLength(0);
+    expect((await getYard(null)).cats.map((c) => c.id)).not.toContain(cat.id);
+    expect(() => (getStorage() as unknown as Mem).readPublic(publicKey)).toThrow();
+    // The private original stays: there is no permission to delete it.
+    await expect(getStorage().getPrivate(key)).resolves.toBeInstanceOf(Buffer);
+    const [row] = await actionsNamed("cat_removed");
+    expect(row).toMatchObject({ status: "done", approvedBy: caretaker.id, inputs: { catId: cat.id, name: cat.name, sightingIds: [s.id] } });
+    const shown = (await listAgentActions()).find((f) => f.id === row.id);
+    expect(shown?.action).toBe("Caretaker removed a cat");
+    expect((await act("cat_remove", { catId: cat.id })).status).toBe(404);
+  });
+
+  it("refuses a cat with history: a report, an AI-path photo, or any step past spotted", async () => {
+    const reported = await plainCat();
+    await db.insert(reports).values({
+      catId: reported.cat.id,
+      sightingId: reported.s.id,
+      claim: "injured",
+      source: "neighbour",
+      reporterId: reported.finder.id,
+      reportedOn: new Date().toISOString().slice(0, 10),
+    });
+    const aiShot = await plainCat();
+    const { key } = await storeOriginal(await image());
+    await db.insert(sightings).values({ catId: aiShot.cat.id, originalKey: key, state: "matched" });
+    const queued = await plainCat();
+    await db.update(cats).set({ status: "queued" }).where(eq(cats.id, queued.cat.id));
+    for (const { cat, publicKey } of [reported, aiShot, queued]) {
+      expect(await act("cat_remove", { catId: cat.id })).toMatchObject({ status: 409, message: "This cat has history. Hold its photos instead." });
+      expect(await catRow(cat.id)).toBeDefined();
+      expect(() => (getStorage() as unknown as Mem).readPublic(publicKey)).not.toThrow();
+    }
+    expect(await actionsNamed("cat_removed")).toHaveLength(0);
+  });
+
+  it("is refused at the route for anyone but a caretaker", async () => {
+    const { cat } = await plainCat();
+    const donor = (await db.insert(users).values({ username: `donor${++seq}`, role: "donor" }).returning())[0];
+    await signIn(donor, "donor");
+    expect((await act("cat_remove", { catId: cat.id })).status).toBe(403);
+    await signIn(await makeVet(), "vet");
+    expect((await act("cat_remove", { catId: cat.id })).status).toBe(403);
+    expect(await catRow(cat.id)).toBeDefined();
+  });
+});
 
 describe("failed wakeups", () => {
   it("retry puts it back to pending once, dismiss closes it", async () => {

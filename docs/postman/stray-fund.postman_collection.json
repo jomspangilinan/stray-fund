@@ -616,7 +616,7 @@
     },
     {
       "name": "Caretaker (demo session)",
-      "description": "One route runs every desk action. Valid action names: payout_approve, payout_reject, payout_resolve, payout_note, payout_allow_retry, evidence_accept, evidence_confirm_ear_tip, evidence_reject, review_resolve, sighting_confirm_new, sighting_merge, sighting_reject, cat_set_details, cat_set_ear_tip, cat_rename, name_approve, name_dismiss, cat_undo_neutered, cat_adoptable, cat_adopted, photo_publish, photo_hold, guardrails_update, payee_add, payee_remove, vet_update, wakeup_retry, wakeup_dismiss. Each takes its own JSON body; see src/server/caretaker/*.ts.",
+      "description": "One route runs every desk action. Valid action names: payout_approve, payout_reject, payout_resolve, payout_note, payout_allow_retry, evidence_accept, evidence_confirm_ear_tip, evidence_reject, review_resolve, sighting_confirm_new, sighting_merge, sighting_reject, cat_set_details, cat_set_ear_tip, cat_rename, name_approve, name_dismiss, cat_undo_neutered, cat_adoptable, cat_adopted, cat_remove, photo_publish, photo_hold, photo_rotate, guardrails_update, payee_add, payee_remove, vet_update, wakeup_retry, wakeup_dismiss, report_confirm, report_dismiss. Each takes its own JSON body; see src/server/caretaker/*.ts.",
       "item": [
         {
           "name": "Run a caretaker action",

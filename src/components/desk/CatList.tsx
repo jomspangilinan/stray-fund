@@ -60,6 +60,16 @@ export function CatList({ cats }: { cats: CaretakerQueue["catChoices"] }) {
                 <Hidden name="catId" value={c.id} />
               </ActionForm>
             )}
+            {c.status === "spotted" && c.plainOnly && (
+              <ActionForm
+                action="cat_remove"
+                submitLabel="Remove this cat"
+                quiet
+                confirm={{ question: `Remove ${c.name} and its photos? This can't be undone.`, send: "Remove" }}
+              >
+                <Hidden name="catId" value={c.id} />
+              </ActionForm>
+            )}
           </li>
         ))}
       </ul>

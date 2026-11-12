@@ -77,9 +77,9 @@ export function HeldPhotos({ items }: { items: CaretakerQueue["heldPhotos"] }) {
           <h3 className="text-base font-extrabold">{p.catName ?? "No cat yet"}</h3>
           <p className="small">Taken {niceDate(p.date)}. Not shown publicly.</p>
           <SightingPhoto sightingId={p.sightingId} alt="The original photo" className="max-h-72 w-full rounded-in object-contain" />
-          <ActionForm action="photo_publish" submitLabel="Publish with areas blurred">
+          <ActionForm action="photo_publish" submitLabel="Publish (only the cat stays sharp)">
             <Hidden name="sightingId" value={p.sightingId} />
-            {p.hasRegions && <p className="small">The AI marked areas to blur. They will be blurred.</p>}
+            {p.hasRegions && <p className="small">The AI also marked areas to blur; they stay blurred.</p>}
             {p.needsTick && (
               <label className="flex items-start gap-3">
                 <input type="checkbox" name="noSensitive" value="on" className="mt-1 h-5 w-5" />

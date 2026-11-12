@@ -156,7 +156,7 @@ export type CaretakerQueue = {
   /** Ideas for a cat's real name, oldest first. Who sent each is not kept here. */
   nameSuggestions: { id: string; catId: string; catName: string; name: string; /** The newest sighting of the cat, for its photo. */ photoSightingId: string | null; date: string }[];
   /** For the merge menu. */
-  catChoices: { id: string; name: string; status: string; sex: string; sexUnconfirmed: boolean; flags: string[] }[];
+  catChoices: { id: string; name: string; status: string; sex: string; sexUnconfirmed: boolean; flags: string[]; plainOnly: boolean }[];
 };
 
 const exactOf = (lat: number | null, lng: number | null, approximate = false): ExactSpot =>
@@ -243,7 +243,16 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
   ]);
 
   const allCats = await db
-    .select({ id: cats.id, name: cats.name, status: cats.status, sex: cats.sex, sexUnconfirmed: cats.sexUnconfirmed, flags: cats.flags })
+    .select({
+      id: cats.id,
+      name: cats.name,
+      status: cats.status,
+      sex: cats.sex,
+      sexUnconfirmed: cats.sexUnconfirmed,
+      flags: cats.flags,
+      // A hint for the Remove button: every sighting is a plain public photo. cat_remove checks everything again.
+      plainOnly: sql<boolean>`(exists (select 1 from sightings s where s.cat_id = ${cats.id}) and not exists (select 1 from sightings s where s.cat_id = ${cats.id} and not s.needs_develop))`,
+    })
     .from(cats)
     .orderBy(desc(cats.createdAt))
     .limit(200);

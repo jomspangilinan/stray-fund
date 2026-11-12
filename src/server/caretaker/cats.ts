@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, or, sql } from "drizzle-orm";
 import { insertNewCat, publishPhoto } from "../spot";
 import { resolveReviewBySubject } from "../agent/review";
 import { disagreementSubject, lateYesSubject } from "../earTipFlags";
@@ -6,9 +6,9 @@ import { IllegalTransition, MoneyAlreadyMoved, markAlreadyNeutered, transitionCa
 import { parseCatBox } from "@/lib/keepsake";
 import { AssessmentSchema } from "../ai/schemas";
 import { withColonyLock, type Tx } from "../db/client";
-import { allocations, cats, earTipFlags, nameSuggestions, payouts, reports, sightings, treatments, wakeups } from "../db/schema";
+import { agentActions, allocations, bookings, catPriority, cats, earTipFlags, milestoneSeen, nameSuggestions, payouts, reports, sightings, treatments, wakeups } from "../db/schema";
 import { uniqueName } from "../catNames";
-import { NAME_APPROVED, NAME_DISMISSED, NAME_SET } from "../privateActions";
+import { EAR_TIP_ANSWERED, NAME_ANOTHER, NAME_APPROVED, NAME_DISMISSED, NAME_SET, NAME_SUGGESTED, SEX_ANSWERED } from "../privateActions";
 import { parseCatName } from "@/lib/catNames";
 import { publishCatOnly, type Box } from "../photos";
 import { getStorage, removePublicCopy, StoredObjectMissing } from "../storage";
@@ -386,16 +386,22 @@ export const photoPublish: Handler = async (caretakerId, body) => {
       .update(sightings)
       // A plain photo still waiting for the worker is settled here, so the worker never overwrites this copy.
       .set({ publicKey: key, publicReady: true, ...(s.needsDevelop ? { developedAt: sql`coalesce(${sightings.developedAt}, now())` } : {}) })
-      .where(and(eq(sightings.id, sightingId), eq(sightings.publicReady, false)))
+      // The copy was cut from the original as it was when s was read: a rotation since then makes it the wrong way round.
+      .where(and(eq(sightings.id, sightingId), eq(sightings.publicReady, false), eq(sightings.photoVersion, s.photoVersion)))
       .returning({ id: sightings.id });
-    if (moved.length === 0) throw new Refusal(409, "This photo is already public.");
+    if (moved.length === 0) {
+      const [now] = await tx.select({ publicReady: sightings.publicReady }).from(sightings).where(eq(sightings.id, sightingId));
+      if (!now) throw new Refusal(404, "There is no such sighting.");
+      if (now.publicReady) throw new Refusal(409, "This photo is already public.");
+      throw new Refusal(409, "The photo was rotated while it was being published. Try again.");
+    }
     await audit(tx, {
       action: "photo_published",
       caretakerId,
       reason: "A caretaker published a photo.",
       inputs: { sightingId, catId: s.catId, regions: regions.length, confirmedNoSensitive: regions.length === 0 },
     });
-    return "Published, with the marked areas blurred.";
+    return "Published with only the cat sharp.";
     });
   } catch (e) {
     // The copy just made is not the sighting's public copy (someone else published first, or the audit failed): do not leave it readable.
@@ -483,6 +489,86 @@ export const photoRotate: Handler = async (caretakerId, body) => {
   // The rotation has committed. Only now is the old public copy deleted, and a failed delete never undoes it.
   await removePublicCopy(result.oldKey);
   return "Rotated.";
+};
+
+export const CAT_HAS_HISTORY = "This cat has history. Hold its photos instead.";
+
+/**
+ * Audit rows that may name a removable cat: neighbours' votes and name ideas, the caretaker's decisions on those
+ * names, and the photo actions. Any other action about the cat (funding, ordering, reports, card edits) is history.
+ */
+const REMOVABLE_WITH: readonly string[] = [
+  EAR_TIP_ANSWERED,
+  SEX_ANSWERED,
+  NAME_SUGGESTED,
+  NAME_ANOTHER,
+  NAME_APPROVED,
+  NAME_DISMISSED,
+  NAME_SET,
+  "photo_published",
+  "photo_held",
+  "photo_rotated",
+];
+
+/**
+ * Removes a cat that a public no-AI photo made by mistake (D4, R21). Allowed only for a spotted cat whose every
+ * sighting is a plain public photo and that nothing else refers to: no money, booking, vet record, report, place
+ * in the order, celebration or agent action. Its ear-tip answers, name ideas and open ear-tip questions go with
+ * it (its sex answer lives on the cat row). Otherwise 409. The public copies are deleted after the commit. The
+ * private originals stay: the app has no permission to delete from the private bucket.
+ */
+export const catRemove: Handler = async (caretakerId, body) => {
+  const catId = reqUuid(body, "catId", "The cat");
+  const publicKeys = await withColonyLock(async (tx) => {
+    const [cat] = await tx.select().from(cats).where(eq(cats.id, catId)).for("update");
+    if (!cat) throw new Refusal(404, "There is no such cat.");
+    const shots = await tx.select().from(sightings).where(eq(sightings.catId, catId)).for("update");
+    if (cat.status !== "spotted" || shots.length === 0 || shots.some((s) => !s.needsDevelop)) throw new Refusal(409, CAT_HAS_HISTORY);
+
+    const shotIds = shots.map((s) => s.id);
+    const one = async (q: Promise<unknown[]>) => (await q).length > 0;
+    const referenced =
+      (await one(tx.select({ id: allocations.id }).from(allocations).where(eq(allocations.catId, catId)).limit(1))) ||
+      (await one(tx.select({ id: bookings.id }).from(bookings).where(eq(bookings.catId, catId)).limit(1))) ||
+      (await one(tx.select({ id: payouts.id }).from(payouts).where(eq(payouts.catId, catId)).limit(1))) ||
+      (await one(tx.select({ id: treatments.id }).from(treatments).where(eq(treatments.catId, catId)).limit(1))) ||
+      (await one(tx.select({ id: reports.id }).from(reports).where(or(eq(reports.catId, catId), inArray(reports.sightingId, shotIds))).limit(1))) ||
+      (await one(
+        tx
+          .select({ id: catPriority.catId })
+          .from(catPriority)
+          .where(or(eq(catPriority.catId, catId), eq(catPriority.beforeCatId, catId), sql`${catId}::uuid = any(${catPriority.passedCatIds})`))
+          .limit(1),
+      )) ||
+      (await one(tx.select({ id: milestoneSeen.catId }).from(milestoneSeen).where(eq(milestoneSeen.catId, catId)).limit(1))) ||
+      (await one(
+        tx
+          .select({ id: agentActions.id })
+          .from(agentActions)
+          .where(and(sql`${agentActions.inputs}->>'catId' = ${catId}`, notInArray(agentActions.action, [...REMOVABLE_WITH])))
+          .limit(1),
+      ));
+    if (referenced) throw new Refusal(409, CAT_HAS_HISTORY);
+
+    await tx.delete(earTipFlags).where(eq(earTipFlags.catId, catId));
+    await tx.delete(nameSuggestions).where(eq(nameSuggestions.catId, catId));
+    // An ear-tip question about a cat that no longer exists has nothing left to decide.
+    await resolveReviewBySubject(tx, disagreementSubject(catId), caretakerId, "The cat was removed.");
+    await resolveReviewBySubject(tx, lateYesSubject(catId), caretakerId, "The cat was removed.");
+    await tx.delete(sightings).where(eq(sightings.catId, catId));
+    await tx.delete(cats).where(eq(cats.id, catId));
+    // Audit rows name cats by id in inputs, with no foreign key, so this one outlives the cat. The name is kept for the record.
+    await audit(tx, {
+      action: "cat_removed",
+      caretakerId,
+      reason: "A caretaker removed a cat that was added by mistake.",
+      inputs: { catId, name: cat.name, sightingIds: shotIds },
+    });
+    return shots.map((s) => s.publicKey).filter((k): k is string => !!k);
+  });
+  // The removal has committed. Only now are the public copies deleted, and a failed delete never undoes it.
+  for (const key of publicKeys) await removePublicCopy(key);
+  return "Removed. The cat and its photos no longer show on any public page.";
 };
 
 // ---------- Wakeups the agent gave up on ----------
