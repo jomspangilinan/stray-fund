@@ -17,6 +17,9 @@ services:
         value: production
       - key: NODE_VERSION
         value: "22"
+      # onnxruntime-node's install would otherwise fetch its CUDA libraries on Linux x64. Both services run on CPU.
+      - key: ONNXRUNTIME_NODE_INSTALL
+        value: skip
       - key: DATABASE_URL
         fromDatabase:
           name: stray-fund-db
@@ -79,6 +82,8 @@ services:
         value: production
       - key: NODE_VERSION
         value: "22"
+      - key: ONNXRUNTIME_NODE_INSTALL
+        value: skip
       - key: DATABASE_URL
         fromDatabase:
           name: stray-fund-db

@@ -4,13 +4,13 @@ DRAFT for the owner to check. Read from `node_modules/*/package.json` on 2026-11
 
 ## Verdict
 
-Nothing blocks a public MIT repo. Three things need a look from the owner:
+Nothing blocks a public AGPL-3.0 repo. Three things need a look from the owner:
 
 1. The cat detector model files have no recorded source. See "Assets".
 2. `sharp` pulls in LGPL-3.0 native libraries (libvips). Fine for use as a dependency; the libraries are not copied into this repo.
 3. `src/app/favicon.ico` looks like the create-next-app default and has no recorded source.
 
-The repo already has a `LICENSE` (MIT, 2026, John Jomel Pangilinan). Keep it unless you want a different one.
+The repo's `LICENSE` is AGPL-3.0 (2026, John Jomel Pangilinan) since Task 2D added the YOLO11n-seg model (see "Assets"). It was MIT before. Every dependency licence above is one AGPL-3.0 code may use.
 
 ## Direct dependencies
 
@@ -33,6 +33,7 @@ The repo already has a `LICENSE` (MIT, 2026, John Jomel Pangilinan). Keep it unl
 | drizzle-orm | 0.45.4 | Apache-2.0 |
 | jose | 6.2.15 | MIT |
 | next | 16.4.4 | MIT |
+| onnxruntime-node | 1.31.1 | MIT |
 | pg | 8.23.1 | MIT |
 | react | 19.3.0 | MIT |
 | react-dom | 19.3.0 | MIT |
@@ -62,6 +63,7 @@ PayPal packages are used under their own open source licences; this does not gra
 | Asset | Where | Licence / source | Status |
 | --- | --- | --- | --- |
 | Cat detector model, 6 files (`model.json`, 5 weight shards, about 18 MB) | `public/models/cat-detector-v1/` | The loader is `@tensorflow-models/coco-ssd` with base `lite_mobilenet_v2` (SSDLite MobileNet v2 trained on COCO). The package is Apache-2.0. The weights were copied from the model's public Google-hosted location (the package's default URL is under `storage.googleapis.com/tfjs-models`). | Source not recorded in the repo. Owner to confirm where the files came from and keep a note. Weights of that model are published for reuse, but COCO's images carry their own Flickr terms and its annotations are CC BY 4.0. Credit COCO and TensorFlow.js in the Devpost text. |
+| Cat cut-out model (`yolo11n-seg.onnx`, about 11 MB) | `public/models/cat-seg-v1/` | Ultralytics YOLO11n-seg, AGPL-3.0, trained on COCO. Exported on 2026-11-12 with `ultralytics` 8.4.211 (`yolo export model=yolo11n-seg.pt format=onnx imgsz=640 opset=17`). sha256 `3a978909e623acb481823f121ac7f88e0ff303a65b95fefd41b43438df5ffe64`. | The repo moved from MIT to AGPL-3.0 when this was added (Task 2D). Credit Ultralytics and COCO in the Devpost text. |
 | Gabarito font | `next/font/google` in `src/app/layout.tsx`, files fetched at build and served from this site | SIL Open Font License 1.1 (as listed on Google Fonts; owner to confirm on the font's page). | OK to use and serve. No font file is committed. |
 | App icon | `public/icon.svg` | Drawn for this project (simple shapes in the file). | Fine. |
 | Favicon | `src/app/favicon.ico` | Not drawn by us as far as the history shows; it came with the first commit and matches the Next.js starter. | Owner to confirm. Replace with `public/icon.svg` converted if unsure. |

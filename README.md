@@ -127,4 +127,6 @@ Read this before you trust it with anything real.
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE). Dependency and asset licences are in [docs/licences.md](docs/licences.md).
+AGPL-3.0, see [LICENSE](LICENSE). Dependency and asset licences are in [docs/licences.md](docs/licences.md).
+
+**Model.** The worker finds the cat in a photo with Ultralytics YOLO11n-seg (AGPL-3.0), exported to ONNX at `public/models/cat-seg-v1/yolo11n-seg.onnx`. Its licence is why this repo is AGPL-3.0 rather than MIT.
