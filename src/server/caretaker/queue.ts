@@ -4,7 +4,7 @@ import { db } from "../db/client";
 import { agentActions, allowedPayees, bookings, cats, earTipFlags, guardrails, nameSuggestions, payouts, receipts, reports, reviewRequests, sightings, users, wakeups } from "../db/schema";
 import { COLONY } from "@/lib/config";
 import { holdNotices, type HoldNotice } from "../reports";
-import { demoSafeText, hidePrivateInDemo, maskEmail, placeForStaff } from "../demoPrivacy";
+import { demoSafeText, hidePrivateInDemo, isSampleReceipt, maskEmail, placeForStaff } from "../demoPrivacy";
 import { bioIsSafe, nameIsSafe, safeBio } from "../placeText";
 import { needsHumanTick, regionsOf } from "../photoGate";
 import { canRuleNotPaid, lateSuccessChoices, newTryRefusal } from "../moneyGate";
@@ -85,8 +85,8 @@ export type ReceiptItem = {
   reasons: string[];
   /** Fixed sentences from our own codes. */
   reasonMessages: string[];
-  /** What the AI read from the image. Untrusted text. */
-  parsed: ReceiptReading | null;
+  /** What the AI read from the image. Untrusted text. In the demo, a visitor's receipt keeps only the total and currency. */
+  parsed: (Pick<ReceiptReading, "total_centavos" | "currency"> & Partial<ReceiptReading>) | null;
   depositPaid: number;
   packagePrice: number;
 };
@@ -321,6 +321,12 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
     const items: ReceiptItem[] = [];
     for (const { r, booking, catName, vetName, clinicName } of rows) {
       const parsed = ReceiptSchema.safeParse(r.parsed);
+      // The AI's text can carry a visitor's phone number or a name off their receipt, so the demo shows only the numbers.
+      const reading = parsed.success
+        ? hidePrivateInDemo() && !isSampleReceipt(r.sha256)
+          ? { total_centavos: parsed.data.total_centavos, currency: parsed.data.currency }
+          : parsed.data
+        : null;
       items.push({
         id: r.id,
         bookingId: booking.id,
@@ -330,7 +336,7 @@ export async function getCaretakerQueue(): Promise<CaretakerQueue> {
         date: manilaDate(r.createdAt),
         reasons: r.reasons,
         reasonMessages: reasonMessages(r.reasons),
-        parsed: parsed.success ? parsed.data : null,
+        parsed: reading,
         depositPaid: await depositPaidOn(db, booking.id),
         packagePrice: booking.packagePrice,
       });

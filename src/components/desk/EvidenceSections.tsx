@@ -13,13 +13,17 @@ function Reading({ r }: { r: ReceiptItem }) {
       <p className="font-bold">As read by the AI (may be wrong)</p>
       {p ? (
         <>
-          <p className="break-words">Clinic: {p.clinic ?? "unreadable"}</p>
-          <p>Date: {p.date ? niceDate(p.date) : "unreadable"}</p>
+          {p.clinic !== undefined && <p className="break-words">Clinic: {p.clinic ?? "unreadable"}</p>}
+          {p.date !== undefined && <p>Date: {p.date ? niceDate(p.date) : "unreadable"}</p>}
           <p>Total: {p.total_centavos === null ? "unreadable" : formatPeso(p.total_centavos)}</p>
-          <p className="break-words">Currency: {p.currency ?? "unreadable"}. Receipt number: {p.receipt_number ?? "unreadable"}.</p>
-          <p className="break-words">Cat name: {p.cat_name ?? "none"}</p>
-          <p className="break-words">Items: {p.items.join("; ") || "none"}</p>
-          {p.tamper_signs.length > 0 && <p className="break-words">Signs of editing: {p.tamper_signs.join("; ")}</p>}
+          <p className="break-words">
+            Currency: {p.currency ?? "unreadable"}.
+            {p.receipt_number !== undefined && <> Receipt number: {p.receipt_number ?? "unreadable"}.</>}
+          </p>
+          {p.cat_name !== undefined && <p className="break-words">Cat name: {p.cat_name ?? "none"}</p>}
+          {p.items !== undefined && <p className="break-words">Items: {p.items.join("; ") || "none"}</p>}
+          {p.items === undefined && <p>The rest of the reading is hidden in the demo.</p>}
+          {p.tamper_signs !== undefined && p.tamper_signs.length > 0 && <p className="break-words">Signs of editing: {p.tamper_signs.join("; ")}</p>}
         </>
       ) : (
         <p>Nothing could be read from the receipt.</p>

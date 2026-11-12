@@ -300,6 +300,40 @@ describe("G3 fix: receipt and ear-tip photos in the demo", () => {
   });
 });
 
+describe("the demo desk hides the AI's reading of a visitor's receipt", () => {
+  const READING = {
+    clinic: "Happy Paws", date: "2026-11-01", total_centavos: 150000, currency: "PHP", receipt_number: "R-1",
+    cat_name: "Mercury", items: ["call 0917 000 0000"], tamper_signs: ["edited total"],
+  };
+  async function receiptWith(sha: string, verification: "needs_review" | "awaiting_ear_tip_confirmation") {
+    const { cat } = await world();
+    const [vet] = await db.insert(users).values({ username: `v_${sha.slice(-3)}_${verification.length}`, role: "vet" }).returning();
+    const [booking] = await db.insert(bookings).values({ catId: cat.id, vetId: vet.id, packagePrice: 150000, status: "confirmed", scheduledFor: new Date() }).returning();
+    const fileKey = (await storeOriginal(await gpsJpeg())).key;
+    await db.insert(receipts).values({ bookingId: booking.id, fileKey, sha256: sha, verification, parsed: READING });
+  }
+  const UPLOADED = "ab".repeat(32);
+  const SAMPLE = "0".repeat(63) + "1";
+
+  for (const verification of ["needs_review", "awaiting_ear_tip_confirmation"] as const) {
+    it(`a visitor's ${verification} receipt keeps only the total and currency in the demo`, async () => {
+      await receiptWith(UPLOADED, verification);
+      await asPersona("caretaker");
+      const q = await getCaretakerQueue();
+      const list = verification === "needs_review" ? q.receipts : q.earTipConfirmations;
+      expect(list[0].parsed).toEqual({ total_centavos: 150000, currency: "PHP" });
+      expect(JSON.stringify(q)).not.toContain("0917");
+    });
+    it(`a sample ${verification} receipt still shows the full reading`, async () => {
+      await receiptWith(SAMPLE, verification);
+      await asPersona("caretaker");
+      const q = await getCaretakerQueue();
+      const list = verification === "needs_review" ? q.receipts : q.earTipConfirmations;
+      expect(list[0].parsed).toMatchObject(READING);
+    });
+  }
+});
+
 describe("G3 fix: the demo desk's AI text goes through the filters", () => {
   it("markings, suggested name and colours with a place never reach the demo desk, and a real desk still sees them", async () => {
     const { waiting } = await world();
